@@ -7,23 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Estados de sincronización usados en `sessions`, `midi_fragments` y `session_media`.
-pub const SYNC_PENDING: &str = "PENDING";
-pub const SYNC_SYNCED: &str = "SYNCED";
-pub const SYNC_ERROR: &str = "ERROR";
-
-/// Tipos de entidad en `sync_queue.entity_type`.
-pub const ENTITY_MIDI_FRAGMENT: &str = "MIDI_FRAGMENT";
-pub const ENTITY_MEDIA_IMAGE: &str = "MEDIA_IMAGE";
-pub const ENTITY_DB_SNAPSHOT: &str = "DB_SNAPSHOT";
-/// Pista bruta de sesión (extensión sobre la especificación: también se respalda en Drive).
-pub const ENTITY_RAW_MIDI: &str = "RAW_MIDI";
-
-/// Acciones en `sync_queue.action`.
-pub const ACTION_UPLOAD: &str = "UPLOAD";
-pub const ACTION_UPDATE: &str = "UPDATE";
-pub const ACTION_DELETE: &str = "DELETE";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MidiPortInfo {
     /// Identificador estable para `start_recording` (`"simulator"` para el simulador interno).
@@ -44,7 +27,6 @@ pub struct SessionDto {
     pub markdown_notes: String,
     /// RFC 3339.
     pub updated_at: String,
-    pub sync_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -56,7 +38,6 @@ pub struct SessionSummaryDto {
     pub raw_duration_ms: u64,
     pub fragment_count: u32,
     pub updated_at: String,
-    pub sync_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,9 +59,7 @@ pub struct FragmentDto {
     pub bpm: u32,
     pub duration_ms: u64,
     pub order_index: i64,
-    pub drive_file_id: Option<String>,
     pub created_at: String,
-    pub sync_status: String,
     /// Ordenados por `timestamp_ms` ascendente.
     pub comments: Vec<TimelineCommentDto>,
 }
@@ -89,9 +68,8 @@ pub struct FragmentDto {
 pub struct SessionMediaDto {
     pub id: String,
     pub session_id: String,
+    /// Ruta absoluta (en la base de datos se guarda relativa a la bóveda).
     pub local_path: String,
-    pub drive_file_id: Option<String>,
-    pub sync_status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -134,22 +112,6 @@ pub struct FragmentCreatedResponse {
     pub session: SessionDto,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub struct SyncStatusDto {
-    /// Hay `client_id`/`client_secret` guardados.
-    pub has_credentials: bool,
-    /// Hay `refresh_token` guardado (cuenta conectada).
-    pub connected: bool,
-    /// Último intento de red con éxito (false si el último intento falló por red).
-    pub online: bool,
-    pub is_syncing: bool,
-    pub pending_count: u32,
-    pub error_count: u32,
-    /// RFC 3339.
-    pub last_sync_at: Option<String>,
-    pub last_error: Option<String>,
-}
-
 /// Payload del evento Tauri `playback-progress` (emitido cada 50 ms durante la reproducción).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaybackProgress {
@@ -177,15 +139,46 @@ pub struct SoundfontInfo {
     pub candidates: Vec<SoundfontCandidate>,
 }
 
-/// Fila de `sync_queue`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SyncQueueItem {
-    pub id: i64,
-    pub entity_type: String,
-    pub entity_id: String,
-    pub action: String,
-    pub payload_path: Option<String>,
-    pub created_at: String,
-    pub retry_count: i64,
-    pub last_error: Option<String>,
+pub struct RecentVault {
+    pub path: String,
+    /// Nombre de la carpeta.
+    pub name: String,
+    /// La carpeta existe y sigue siendo una bóveda.
+    pub available: bool,
+}
+
+/// Estado de la bóveda: la abierta (si hay), las recientes y avisos.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VaultInfo {
+    /// Raíz de la bóveda abierta (ruta absoluta), o `None` si no hay ninguna.
+    pub current: Option<String>,
+    /// Nombre de la carpeta de la bóveda abierta.
+    pub name: Option<String>,
+    /// Más recientes primero; incluye la abierta.
+    pub recent: Vec<RecentVault>,
+    /// Carpeta con datos de la versión anterior (sin bóvedas) que se pueden importar.
+    pub legacy_data_path: Option<String>,
+    /// Avisos sobre la bóveda abierta (p. ej. copias en conflicto creadas por Dropbox).
+    pub warnings: Vec<String>,
+}
+
+/// Idioma de la interfaz.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LanguageInfo {
+    /// Elegido por el usuario; `None` = automático (el del sistema).
+    pub preference: Option<String>,
+    /// Idioma en uso.
+    pub effective: String,
+    /// Idioma detectado en el sistema (o el de reserva si no está disponible).
+    pub system: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VaultOpenResult {
+    pub info: VaultInfo,
+    /// `false` si no se abrió porque parece abierta en otro equipo (ver `lock_warning`).
+    pub opened: bool,
+    /// Mensaje para pedir confirmación antes de abrir con `force = true`.
+    pub lock_warning: Option<String>,
 }

@@ -1,9 +1,9 @@
 @if (session(); as s) {
   <header class="flex flex-wrap items-end gap-x-6 gap-y-4">
     <div class="min-w-0 flex-[1_1_420px]">
-      <p class="mb-2 text-[13px] text-muted">{{ formatLongDate(s.session_date) }}</p>
+      <p class="mb-2 text-[13px] text-muted">{{ i18n.longDate(s.session_date) }}</p>
       <div class="flex items-center gap-1">
-        <label for="session-title" class="sr-only">Título de la sesión</label>
+        <label for="session-title" class="sr-only">{{ 'header.titleLabel' | t }}</label>
         <!-- El span invisible da al campo el ancho de su texto, para que el lápiz quede a su lado -->
         <div class="-ml-2 inline-grid min-w-0 grid-cols-[minmax(0,auto)] text-[30px] leading-tight font-semibold tracking-tight">
           <span class="invisible col-start-1 row-start-1 overflow-hidden border px-2 py-0.5 whitespace-pre" aria-hidden="true">{{ titleDraft() || ' ' }}</span>
@@ -19,7 +19,7 @@
           spellcheck="false"
           />
         </div>
-        <button type="button" class="btn btn-ghost btn-icon h-9 w-9 text-faint" (click)="titleInput.focus(); titleInput.select()" aria-label="Renombrar sesión" title="Renombrar sesión">
+        <button type="button" class="btn btn-ghost btn-icon h-9 w-9 text-faint" (click)="titleInput.focus(); titleInput.select()" [attr.aria-label]="'header.rename' | t" [title]="'header.rename' | t">
           <app-icon name="pencil" [size]="17" />
         </button>
       </div>
@@ -29,18 +29,18 @@
       @if (isThisRecording()) {
         <button type="button" class="chip border-rec/40 bg-rec/15 font-medium text-rec-soft hover:bg-rec/25" (click)="rec.stopAndRefresh()" [disabled]="rec.busy()">
           <span class="rec-dot dot h-2 w-2 bg-rec"></span>
-          Grabando <span class="tabular">{{ formatMs(rec.elapsedMs()) }}</span> · Detener
+          {{ 'header.recording' | t }} <span class="tabular">{{ formatMs(rec.elapsedMs()) }}</span> · {{ 'header.stop' | t }}
         </button>
       }
-      <span class="chip">Pista bruta <span class="tabular text-fg">{{ formatMs(s.raw_duration_ms) }}</span></span>
-      <span class="chip">{{ plural(store.fragments().length, 'fragmento', 'fragmentos', 'Sin fragmentos') }}</span>
-      <span class="chip" role="status"><span class="dot" [class]="syncChip().dot"></span>{{ syncChip().label }}</span>
+      <span class="chip">{{ 'header.rawTake' | t }} <span class="tabular text-fg">{{ formatMs(s.raw_duration_ms) }}</span></span>
+      <span class="chip">{{ 'header.fragmentCount' | tp: store.fragments().length }}</span>
+      <span class="chip" role="status"><span class="dot" [class]="saveChip().dot"></span>{{ saveChip().label }}</span>
 
       <div #menuWrap class="relative">
         <button
           type="button"
           class="btn btn-icon bg-[#1b1b21]"
-          aria-label="Más acciones de la sesión"
+          [attr.aria-label]="'header.moreActions' | t"
           aria-haspopup="menu"
           [attr.aria-expanded]="menuOpen()"
           (click)="menuOpen.set(!menuOpen())"
@@ -50,12 +50,12 @@
         @if (menuOpen()) {
           <div
             role="menu"
-            aria-label="Acciones de la sesión"
+            [attr.aria-label]="'header.actions' | t"
             class="absolute top-full right-0 z-30 mt-2 min-w-52 rounded-xl border border-line-strong bg-ink-800 p-1.5 shadow-2xl shadow-black/50"
             (keydown.escape)="menuOpen.set(false)"
           >
             <button #firstItem type="button" role="menuitem" class="flex h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm text-rec-soft hover:bg-rec/10 focus:bg-rec/10 focus:outline-none" (click)="deleteSession()">
-              <app-icon name="trash" [size]="16" /> Borrar sesión…
+              <app-icon name="trash" [size]="16" /> {{ 'header.deleteMenu' | t }}
             </button>
           </div>
         }

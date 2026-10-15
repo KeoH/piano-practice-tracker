@@ -5,38 +5,37 @@
   </span>
   <div class="flex flex-col gap-0.5 leading-tight">
     <p class="text-[15px] font-semibold text-fg">Piano Practice</p>
-    <p class="text-xs text-faint">Diario de práctica</p>
+    <p class="text-xs text-faint">{{ 'sidebar.tagline' | t }}</p>
   </div>
 </div>
 
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="newSession()" [disabled]="!api.available">
-    <app-icon name="plus" [size]="18" /> Nueva sesión
+    <app-icon name="plus" [size]="18" /> {{ 'sidebar.newSession' | t }}
   </button>
   <div class="relative">
     <app-icon name="search" [size]="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
-    <label for="session-filter" class="sr-only">Buscar sesiones por título</label>
+    <label for="session-filter" class="sr-only">{{ 'sidebar.searchLabel' | t }}</label>
     <input
       id="session-filter"
       type="search"
       class="field bg-ink-850 pl-9"
-      placeholder="Buscar sesión"
+      [placeholder]="'sidebar.searchPlaceholder' | t"
       [value]="store.filter()"
       (input)="store.filter.set($any($event.target).value)"
     />
   </div>
 </div>
 
-<nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" aria-label="Sesiones de práctica">
+<nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" [attr.aria-label]="'sidebar.listLabel' | t">
   @if (store.listLoading() && totalCount() === 0) {
-    <p class="px-2.5 py-4 text-[13px] text-faint">Cargando…</p>
+    <p class="px-2.5 py-4 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
   }
   @for (g of groups(); track g.label) {
     <section>
       <h2 class="px-2.5 pb-1.5 text-xs font-semibold text-faint">{{ g.label }}</h2>
       <ul class="flex flex-col gap-0.5">
         @for (s of g.items; track s.id) {
-          @let state = cloud(s);
           @let active = store.selectedId() === s.id;
           <li>
             <button
@@ -49,25 +48,18 @@
               <span class="flex min-w-0 flex-1 flex-col gap-[3px]">
                 <span class="flex min-w-0 items-center gap-[7px] text-sm font-medium" [class]="active ? 'text-fg-strong' : 'text-fg-soft'">
                   @if (rec.recordingSessionId() === s.id) {
-                    <span class="rec-dot dot h-2 w-2 bg-rec" role="img" aria-label="Grabando"></span>
+                    <span class="rec-dot dot h-2 w-2 bg-rec" role="img" [attr.aria-label]="'sidebar.recording' | t"></span>
                   }
-                  <span class="truncate">{{ s.title || 'Sin título' }}</span>
+                  <span class="truncate">{{ s.title || ('common.untitled' | t) }}</span>
                 </span>
                 <span class="flex gap-1.5 text-xs whitespace-nowrap text-faint">
-                  <span>{{ formatShortDate(s.session_date) }}</span>
+                  <span>{{ i18n.shortDate(s.session_date) }}</span>
                   <span aria-hidden="true">·</span>
-                  <span class="tabular text-[11.5px]" title="Duración de la pista bruta">{{ formatMs(s.raw_duration_ms) }}</span>
+                  <span class="tabular text-[11.5px]" [title]="'sidebar.rawDuration' | t">{{ formatMs(s.raw_duration_ms) }}</span>
                   <span aria-hidden="true">·</span>
-                  <span>{{ plural(s.fragment_count, 'fragmento', 'fragmentos', 'sin fragmentos') }}</span>
+                  <span>{{ 'sidebar.fragmentCount' | tp: s.fragment_count }}</span>
                 </span>
               </span>
-              @if (state === 'PENDING') {
-                <app-icon name="cloud-up" [size]="17" class="text-accent" />
-                <span class="sr-only">Pendiente de subir a Drive</span>
-              } @else if (state === 'ERROR') {
-                <app-icon name="alert" [size]="17" class="text-rec" />
-                <span class="sr-only">Error al subir a Drive</span>
-              }
             </button>
           </li>
         }
@@ -76,7 +68,7 @@
   } @empty {
     @if (!store.listLoading()) {
       <p class="px-2.5 py-6 text-center text-[13px] text-faint">
-        {{ store.filter() ? 'Ninguna sesión coincide con la búsqueda.' : 'Aún no hay sesiones.' }}
+        {{ (store.filter() ? 'sidebar.noMatches' : 'sidebar.empty') | t }}
       </p>
     }
   }
@@ -85,7 +77,7 @@
 <!-- Pie: teclado y ajustes -->
 <div class="flex flex-col gap-0.5 border-t border-line p-2.5">
   <div class="flex flex-col gap-1.5 px-2.5 py-2">
-    <label for="midi-port" class="text-xs font-semibold text-fg-soft">Entrada MIDI</label>
+    <label for="midi-port" class="text-xs font-semibold text-fg-soft">{{ 'sidebar.midiInput' | t }}</label>
     <div class="flex gap-1.5">
       <select
         id="midi-port"
@@ -95,9 +87,9 @@
         (change)="rec.selectPort($any($event.target).value)"
       >
         @for (p of rec.ports(); track p.id) {
-          <option [value]="p.id" [selected]="p.id === rec.selectedPortId()">{{ p.name }}</option>
+          <option [value]="p.id" [selected]="p.id === rec.selectedPortId()">{{ rec.portName(p) }}</option>
         } @empty {
-          <option value="">Sin puertos</option>
+          <option value="">{{ 'sidebar.noPorts' | t }}</option>
         }
       </select>
       <button
@@ -105,8 +97,8 @@
         class="btn btn-icon text-muted"
         (click)="rec.refreshPorts()"
         [disabled]="rec.portsLoading() || rec.isRecording()"
-        aria-label="Buscar teclados de nuevo"
-        title="Buscar teclados de nuevo"
+        [attr.aria-label]="'sidebar.rescanPorts' | t"
+        [title]="'sidebar.rescanPorts' | t"
       >
         <app-icon name="refresh" [size]="16" [class.animate-spin]="rec.portsLoading()" />
       </button>
@@ -118,20 +110,15 @@
   <button
     type="button"
     class="flex min-h-12 w-full items-center gap-3 rounded-[10px] px-2.5 py-1.5 text-left transition-colors hover:bg-ink-800"
-    (click)="sync.settingsOpen.set(true)"
+    (click)="vault.settingsOpen.set(true)"
     aria-haspopup="dialog"
   >
     <app-icon name="settings" [size]="18" class="text-muted" />
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span class="text-[13px] font-medium text-fg">Ajustes</span>
-      <span class="flex items-center gap-1.5 text-xs text-faint">
-        <span class="dot" [class]="toneDot(sync.summary().tone)"></span>
-        <span class="truncate">
-          {{ sync.summary().label }}
-          @if (sync.summary().tone === 'ok' && sync.status()?.last_sync_at; as last) {
-            · {{ formatRelative(last) }}
-          }
-        </span>
+      <span class="text-[13px] font-medium text-fg">{{ 'settings.title' | t }}</span>
+      <span class="flex items-center gap-1.5 text-xs text-faint" [title]="vault.root() ?? ''">
+        <app-icon name="folder" [size]="13" />
+        <span class="truncate">{{ vault.name() ?? ('sidebar.noVault' | t) }}</span>
       </span>
     </span>
   </button>

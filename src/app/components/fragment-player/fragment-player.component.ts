@@ -13,10 +13,11 @@ import {
 } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs } from '../../core/format';
+import { I18nService } from '../../core/i18n/i18n.service';
+import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { FragmentDto, MidiActivityDto, TimelineCommentDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { SessionStore } from '../../core/session.store';
-import { SyncStore } from '../../core/sync.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
@@ -33,7 +34,7 @@ const LANDING_WINDOW_MS = 350;
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent],
+  imports: [IconComponent, TimelineCanvasComponent, TranslatePipe],
   templateUrl: './fragment-player.component.html',
 })
 export class FragmentPlayerComponent {
@@ -42,10 +43,10 @@ export class FragmentPlayerComponent {
 
   private readonly api = inject(TauriApiService);
   private readonly store = inject(SessionStore);
-  private readonly sync = inject(SyncStore);
   protected readonly playback = inject(PlaybackStore);
   private readonly toast = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly i18n = inject(I18nService);
 
   protected readonly formatMs = formatMs;
 
@@ -75,7 +76,6 @@ export class FragmentPlayerComponent {
     [...this.fragment().comments].sort((a, b) => a.timestamp_ms - b.timestamp_ms),
   );
   protected readonly popup = computed(() => this.hoverComment() ?? this.autoComment());
-  protected readonly cloudState = computed(() => this.sync.cloudState(this.fragment().sync_status));
   /** Número de orden con dos cifras («01»). */
   protected readonly number = computed(() => String(this.index() + 1).padStart(2, '0'));
 
@@ -153,7 +153,7 @@ export class FragmentPlayerComponent {
       if (this.file() === path) this.activity.set(a);
     } catch (err) {
       this.loadedPath = null;
-      this.toast.error(err, 'No se pudo analizar el fragmento');
+      this.toast.error(err, this.i18n.t('fragments.errors.analyze'));
     } finally {
       this.activityLoading.set(false);
     }
@@ -246,7 +246,7 @@ export class FragmentPlayerComponent {
       this.store.patchFragment(fid, (f) => ({ ...f, comments: [...f.comments, c] }));
       this.newComment.set('');
     } catch (err) {
-      this.toast.error(err, 'No se pudo añadir el comentario');
+      this.toast.error(err, this.i18n.t('fragments.errors.addComment'));
     } finally {
       this.addingComment.set(false);
     }
@@ -259,7 +259,7 @@ export class FragmentPlayerComponent {
       if (this.hoverComment()?.id === c.id) this.hoverComment.set(null);
       if (this.autoComment()?.id === c.id) this.autoComment.set(null);
     } catch (err) {
-      this.toast.error(err, 'No se pudo borrar el comentario');
+      this.toast.error(err, this.i18n.t('fragments.errors.deleteComment'));
     }
   }
 
@@ -275,18 +275,18 @@ export class FragmentPlayerComponent {
     if (title === f.title && explanation === f.explanation) return;
     try {
       await this.api.updateFragmentMeta(f.id, title, explanation);
-      this.store.patchFragment(f.id, (x) => ({ ...x, title, explanation, sync_status: 'PENDING' }));
+      this.store.patchFragment(f.id, (x) => ({ ...x, title, explanation }));
     } catch (err) {
-      this.toast.error(err, 'No se pudo guardar el fragmento');
+      this.toast.error(err, this.i18n.t('fragments.errors.save'));
     }
   }
 
   protected async deleteFragment(): Promise<void> {
     const f = this.fragment();
     const ok = await this.confirm.ask({
-      title: 'Borrar fragmento',
-      message: `Se borrará «${f.title}» y sus ${f.comments.length} comentario(s).\nEsta acción no se puede deshacer.`,
-      confirmLabel: 'Borrar fragmento',
+      title: this.i18n.t('fragments.delete'),
+      message: this.i18n.plural('fragments.deleteMessage', f.comments.length, { title: f.title }),
+      confirmLabel: this.i18n.t('fragments.delete'),
     });
     if (!ok) return;
     try {
@@ -294,9 +294,9 @@ export class FragmentPlayerComponent {
       await this.api.deleteFragment(f.id);
       this.store.removeFragmentLocal(f.id);
       void this.store.refreshList();
-      this.toast.success('Fragmento borrado');
+      this.toast.success(this.i18n.t('fragments.deleted'));
     } catch (err) {
-      this.toast.error(err, 'No se pudo borrar el fragmento');
+      this.toast.error(err, this.i18n.t('fragments.errors.delete'));
     }
   }
 }

@@ -30,7 +30,9 @@ export type IconName =
   | 'cloud-check'
   | 'speaker'
   | 'arrow-right'
-  | 'comment';
+  | 'comment'
+  | 'folder'
+  | 'globe';
 
 /** Iconos SVG inline (trazo 1.75, heredan `currentColor`). */
 @Component({
@@ -51,6 +53,7 @@ export type IconName =
       @switch (name()) {
         @case ('plus') { <path d="M12 5v14M5 12h14" /> }
         @case ('search') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /> }
+        @case ('folder') { <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9Z" /> }
         @case ('cloud') { <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5H7Z" /> }
         @case ('refresh') { <path d="M20 11a8 8 0 0 0-14.7-4.4L4 8M4 4v4h4M4 13a8 8 0 0 0 14.7 4.4L20 16m0 4v-4h-4" /> }
         @case ('settings') {
@@ -84,6 +87,7 @@ export type IconName =
         @case ('cloud-check') { <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9a4.5 4.5 0 0 1 0 9H7Z" /><path d="m9.5 13.5 2 2 3.5-3.5" /> }
         @case ('speaker') { <path d="M4 9v6h4l5 4V5L8 9H4Z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /> }
         @case ('arrow-right') { <path d="M5 12h14M13 6l6 6-6 6" /> }
+        @case ('globe') { <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /> }
         @case ('comment') { <path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 20 12Z" /> }
       }
     </svg>

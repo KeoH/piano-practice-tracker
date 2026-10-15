@@ -1,7 +1,7 @@
 # Technical Specification: Piano Practice Tracker (Tauri v2 + Angular)
 
 ## 1. Visión General del Sistema
-Aplicación de escritorio nativa para **Ubuntu Linux** orientada al registro, recorte y análisis de sesiones diarias de práctica de piano mediante conexión USB-MIDI, con reproducción interna por sintetizador SoundFont (`.sf2`), comentarios anclados a la línea de tiempo, notas en Markdown con imágenes y respaldo automático *offline-first* en Google Drive.
+Aplicación de escritorio nativa para **Ubuntu Linux** orientada al registro, recorte y análisis de sesiones diarias de práctica de piano mediante conexión USB-MIDI, con reproducción interna por sintetizador SoundFont (`.sf2`), comentarios anclados a la línea de tiempo, notas en Markdown con imágenes y almacenamiento en una **bóveda**: una carpeta elegida por el usuario (al estilo de Obsidian) que contiene todos los datos. La app no sincroniza nada por su cuenta; si el usuario pone la bóveda dentro de Dropbox, Syncthing o similar, ese servicio hace la copia.
 
 ### 1.1. Decisiones de Diseño Consolidadas
 1. **Recorte Destructivo sobre Pista Bruta (Slicing):**
@@ -14,6 +14,12 @@ Aplicación de escritorio nativa para **Ubuntu Linux** orientada al registro, re
    - Durante la reproducción de fragmentos o de la pista bruta, el motor interno (`rustysynth`) sintetiza el archivo `.mid` en tiempo real usando un archivo SoundFont (`.sf2`).
 3. **Visualización de Actividad en Línea de Tiempo:**
    - El backend analiza cualquier archivo `.mid` y devuelve un vector de densidad de notas por intervalos de tiempo (buckets) para dibujar bloques visuales de actividad en el reproductor/recortador.
+4. **Bóvedas en lugar de sincronización propia:**
+   - Todos los datos (base de datos, MIDI e imágenes) viven en la carpeta de la bóveda, con rutas relativas a ella, para que pueda moverse o sincronizarse entre equipos.
+   - La configuración propia del equipo (bóveda actual, recientes, SoundFont elegido, idioma) queda fuera, en `~/.config/piano-tracker/config.json`.
+5. **Multi-idioma:**
+   - La interfaz y los mensajes del backend están en inglés y español. Se usa el idioma del sistema si está disponible y, si no, inglés; el usuario puede elegirlo en Ajustes y en la pantalla de bienvenida.
+   - Todos los textos están en `src/locales/<código>.json`, compartidos por Angular y Rust, para que añadir un idioma sea añadir un fichero.
 
 ---
 
@@ -26,15 +32,14 @@ Paquetes nativos requeridos para compilar Tauri v2 y el subsistema de audio/MIDI
 - `libasound2-dev` (requerido por `midir` y `cpal` en Linux)
 
 ### 2.2. Backend: Rust (Tauri v2)
-- **Framework:** `tauri = "2"`, `tauri-plugin-fs`, `tauri-plugin-dialog`, `tauri-plugin-shell`
-- **Serialización y Async:** `serde`, `serde_json`, `tokio` (features: `full`), `uuid` (features: `v4`), `chrono`
+- **Framework:** `tauri = "2"` (feature `protocol-asset`), `tauri-plugin-fs`, `tauri-plugin-dialog`
+- **Serialización:** `serde`, `serde_json`, `uuid` (features: `v4`), `chrono`, `base64` (imágenes pegadas en las notas)
 - **MIDI Input/Output:** `midir = "0.10"` (lectura de puertos ALSA MIDI en hilo dedicado)
 - **MIDI Parsing y Slicing:** `midly = "0.5"` (lectura, manipulación de ticks/tempos y escritura SMF)
 - **Audio y Sintetizador:**
   - `cpal = "0.15"` (salida de audio de baja latencia hacia ALSA/PipeWire)
   - `rustysynth = "1.3"` (sintetizador SoundFont `.sf2` puro en Rust, sin dependencias en C)
 - **Base de Datos:** `rusqlite = { version = "0.31", features = ["bundled"] }`
-- **Google Drive Sync & OAuth2:** `reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }`, `url`, `sha2`, `base64`
 
 ### 2.3. Frontend: Angular (v18+ Standalone)
 - **Arquitectura:** Componentes *Standalone*, gestión de estado reactiva con **Angular Signals**, comunicación mediante `@tauri-apps/api/core` (`invoke`) y `@tauri-apps/api/event` (`listen`).
@@ -46,14 +51,20 @@ Paquetes nativos requeridos para compilar Tauri v2 y el subsistema de audio/MIDI
 
 ## 3. Modelo de Base de Datos (SQLite)
 
-Ruta de almacenamiento local: `~/.local/share/piano-tracker/piano_tracker.sqlite`
-Directorios locales gestionados:
-- `~/.local/share/piano-tracker/midi/raw/` (pistas brutas de sesión)
-- `~/.local/share/piano-tracker/midi/fragments/` (fragmentos recortados)
-- `~/.local/share/piano-tracker/media/` (imágenes de notas Markdown)
-- `~/.local/share/piano-tracker/assets/default_piano.sf2` (SoundFont de piano)
+Estructura de una bóveda (`<Bóveda>` es la carpeta elegida por el usuario):
+- `<Bóveda>/.piano-tracker/vault.json` (marcador de bóveda) y `.piano-tracker/lock` (equipo y pid mientras está abierta)
+- `<Bóveda>/piano_tracker.sqlite` (base de datos, en `journal_mode = DELETE`: un único fichero en reposo)
+- `<Bóveda>/midi/raw/` (pistas brutas de sesión)
+- `<Bóveda>/midi/fragments/` (fragmentos recortados)
+- `<Bóveda>/media/` (imágenes de notas Markdown)
 
-### 3.1. Esquema SQL Completo
+Fuera de la bóveda:
+- `~/.config/piano-tracker/config.json` (bóveda actual, recientes y SoundFont elegido)
+- `~/.local/share/piano-tracker/assets/default_piano.sf2` (piano sintético generado, regenerable)
+
+Las columnas de rutas (`raw_midi_path`, `file_path`, `local_path`) y las imágenes del Markdown guardan rutas **relativas a la bóveda** (`midi/raw/…`, `media/…`). La API las devuelve absolutas.
+
+### 3.1. Esquema SQL Completo (versión 2)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -66,8 +77,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     raw_midi_path TEXT,
     raw_duration_ms INTEGER NOT NULL DEFAULT 0,
     markdown_notes TEXT NOT NULL DEFAULT '',
-    updated_at TEXT NOT NULL,
-    sync_status TEXT NOT NULL DEFAULT 'PENDING' -- 'PENDING', 'SYNCED', 'ERROR'
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS midi_fragments (
@@ -79,9 +89,7 @@ CREATE TABLE IF NOT EXISTS midi_fragments (
     bpm INTEGER NOT NULL,
     duration_ms INTEGER NOT NULL,
     order_index INTEGER NOT NULL DEFAULT 0,
-    drive_file_id TEXT,
     created_at TEXT NOT NULL,
-    sync_status TEXT NOT NULL DEFAULT 'PENDING',
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -98,20 +106,7 @@ CREATE TABLE IF NOT EXISTS session_media (
     id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
     local_path TEXT NOT NULL,
-    drive_file_id TEXT,
-    sync_status TEXT NOT NULL DEFAULT 'PENDING',
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS sync_queue (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entity_type TEXT NOT NULL, -- 'MIDI_FRAGMENT', 'MEDIA_IMAGE', 'DB_SNAPSHOT'
-    entity_id TEXT NOT NULL,
-    action TEXT NOT NULL,      -- 'UPLOAD', 'UPDATE', 'DELETE'
-    payload_path TEXT,
-    created_at TEXT NOT NULL,
-    retry_count INTEGER NOT NULL DEFAULT 0,
-    last_error TEXT
 );
 
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -119,6 +114,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 ```
+
+La versión 1 incluía la cola `sync_queue` y las columnas `sync_status` y `drive_file_id` de Google Drive. La migración a la versión 2 las elimina, borra los ajustes `google_*` y `drive_*`, y convierte las rutas absolutas antiguas en relativas (también en `markdown_notes`).
 
 ---
 
@@ -160,17 +157,13 @@ CREATE TABLE IF NOT EXISTS app_settings (
   - Lee los eventos del `.mid` seleccionado, avanza el reloj en función de los frames de audio consumidos por `cpal`, alimenta `rustysynth` y emite cada $50\text{ ms}$ un evento Tauri `playback-progress` con `{ file_path, current_ms, duration_ms, is_playing }`.
   - Soporta `play`, `pause`, `stop` y `seek(ms)` (enviando `reset_all_controllers` y `note_off_all` al hacer seek).
 
-### 4.4. Sincronización Offline-First con Google Drive (`drive_sync.rs`)
-- **OAuth 2.0 Loopback Flow:**
-  - Lee `client_id` y `client_secret` configurados en `app_settings` (con interfaz en Ajustes para que el usuario introduzca sus credenciales de Google Cloud Console).
-  - Al pulsar "Conectar Google Drive", levanta un servidor TCP local en `127.0.0.1:0`, abre el navegador del sistema con la URL de autorización (`scope: https://www.googleapis.com/auth/drive.file`), captura el código OAuth, canjea el `access_token` y `refresh_token`, y los guarda en `app_settings`.
-- **Estructura en Drive:**
-  - Busca o crea la carpeta raíz `PianoTracker` y subcarpetas `midi` y `media`.
-- **Worker de Cola (`sync_worker`):**
-  - Bucle `tokio::spawn` que se ejecuta cada 15 segundos o al recibir una notificación de cambio.
-  - Procesa registros de `sync_queue` en orden FIFO.
-  - Si hay conexión y credenciales válidas, sube o actualiza los archivos `.mid`, las imágenes `.png/.jpg` y el snapshot de `piano_tracker_backup.sqlite`.
-  - Si falla por falta de red, incrementa `retry_count` y mantiene el estado en `PENDING` sin bloquear la app.
+### 4.4. Bóvedas (`vault.rs`)
+- **Crear:** en una carpeta nueva o vacía; crea la estructura y el marcador `.piano-tracker/vault.json`.
+- **Abrir:** acepta una carpeta con el marcador o con `piano_tracker.sqlite` (la carpeta de datos de la versión anterior). Aplica migraciones y escribe `.piano-tracker/lock` con `{ host, pid, opened_at }`.
+- **Bloqueo:** si al abrir hay un lock de otro equipo, o de otro proceso vivo en este, se pide confirmación antes de abrir. El lock se borra al cerrar la bóveda o la app. Abrir la misma base de datos en dos equipos a la vez acaba en copias en conflicto del servicio de sincronización.
+- **Copias en conflicto:** al abrir se avisa si hay ficheros `piano_tracker*conflict*.sqlite` (Dropbox, Syncthing).
+- **Importar datos antiguos:** mueve `piano_tracker.sqlite`, `midi/` y `media/` desde `~/.local/share/piano-tracker` a una bóveda nueva, tras volcar el WAL al fichero principal.
+- **Asset protocol:** al abrir una bóveda se añade su carpeta al alcance del asset protocol para servir las imágenes de las notas.
 
 ---
 
@@ -197,17 +190,28 @@ CREATE TABLE IF NOT EXISTS app_settings (
 - `create_session(title: String, bpm: u32) -> Result<SessionDetailDto, String>`
 - `update_session(session_id: String, title: String, bpm: u32, markdown_notes: String) -> Result<(), String>`
 - `delete_session(session_id: String) -> Result<(), String>`
-- `save_session_image(session_id: String, file_name: String, base64_data: String) -> Result<String, String>`
+- `save_session_image(session_id: String, file_name: String, base64_data: String) -> Result<String, String>` (devuelve la ruta relativa a la bóveda, `media/…`)
 - `update_fragment_meta(fragment_id: String, title: String, explanation: String) -> Result<(), String>`
 - `delete_fragment(fragment_id: String) -> Result<(), String>`
 - `add_timeline_comment(fragment_id: String, timestamp_ms: u64, content: String) -> Result<TimelineCommentDto, String>`
 - `delete_timeline_comment(comment_id: String) -> Result<(), String>`
 
-### Sincronización Google Drive
-- `save_google_credentials(client_id: String, client_secret: String) -> Result<(), String>`
-- `start_google_auth() -> Result<String, String>`
-- `get_sync_status() -> Result<SyncStatusDto, String>`
-- `trigger_sync_now() -> Result<SyncStatusDto, String>`
+### Bóveda
+- `get_vault_info() -> Result<VaultInfo, String>`
+- `create_vault(path: String) -> Result<VaultInfo, String>`
+- `open_vault(path: String, force: bool) -> Result<VaultOpenResult, String>` (`opened = false` + `lock_warning` si parece abierta en otro equipo)
+- `import_legacy_data(path: String) -> Result<VaultInfo, String>`
+- `close_vault() -> Result<VaultInfo, String>`
+- `forget_recent_vault(path: String) -> Result<VaultInfo, String>`
+- `reveal_vault() -> Result<(), String>`
+
+### SoundFont
+- `get_soundfont_info() -> Result<SoundfontInfo, String>`
+- `set_soundfont(path: String) -> Result<SoundfontInfo, String>`
+
+### Idioma
+- `get_language() -> Result<LanguageInfo, String>`
+- `set_language(language: Option<String>) -> Result<LanguageInfo, String>` (`None` = el del sistema)
 
 ---
 
@@ -215,8 +219,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 1. **Barra Lateral Izquierda (Navegación y Estado):**
    - Botón "+ Nueva Sesión de Práctica".
-   - Lista cronológica de sesiones con indicador de estado de sincronización (icono nube verde `SYNCED`, ámbar `PENDING`, gris `OFFLINE`).
-   - Selector rápido de puerto USB-MIDI y botón de Ajustes / Cuenta de Google Drive en el pie de la barra.
+   - Lista cronológica de sesiones.
+   - Selector rápido de puerto USB-MIDI y botón de Ajustes (con el nombre de la bóveda abierta) en el pie de la barra.
+   - Sin bóveda abierta, la app muestra una pantalla de bienvenida: crear bóveda (nombre + ubicación), abrir una existente, recientes e importación de los datos de la versión anterior.
 2. **Cabecera de Sesión y Panel de Grabación / Metrónomo:**
    - Título editable de la sesión y fecha.
    - Controles de Metrónomo: Selector numérico/slider de BPM ($40 - 240$), botón de activar claqueta, switch de monitoreo de sintetizador en vivo, y botón principal **Grabar / Detener** con cronómetro en vivo.
@@ -236,4 +241,4 @@ CREATE TABLE IF NOT EXISTS app_settings (
      - **Panel lateral derecho dentro de la tarjeta:** Lista ordenada cronológicamente con todos los comentarios del fragmento. Hacer clic en cualquier comentario salta (`seek`) automáticamente a ese instante.
 5. **Editor de Notas de la Sesión (Markdown + Imágenes):**
    - Pestaña o panel dividido (Edición / Vista Previa / Split) para escribir apuntes generales de la sesión en Markdown.
-   - Soporta pegar imágenes del portapapeles (`Ctrl+V`) o arrastrarlas; las guarda en disco, las registra en `session_media` + `sync_queue` y las renderiza en la vista previa.
+   - Soporta pegar imágenes del portapapeles (`Ctrl+V`) o arrastrarlas; las guarda en `media/` dentro de la bóveda, las registra en `session_media`, inserta su ruta relativa en el Markdown y las renderiza en la vista previa.

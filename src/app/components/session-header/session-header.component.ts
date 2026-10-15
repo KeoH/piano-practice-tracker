@@ -1,30 +1,29 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
-import { formatLongDate, formatMs, plural } from '../../core/format';
+import { formatMs } from '../../core/format';
+import { I18nService } from '../../core/i18n/i18n.service';
+import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
-import { SyncStore } from '../../core/sync.store';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
 
-/** Cabecera de sesión: título editable, fecha, resumen (pista, fragmentos, copia) y menú de acciones. */
+/** Cabecera de sesión: título editable, fecha, resumen (pista, fragmentos, guardado) y menú de acciones. */
 @Component({
   selector: 'app-session-header',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, TranslatePipe, PluralPipe],
   templateUrl: './session-header.component.html',
   host: { '(document:pointerdown)': 'onDocumentPointer($event)' },
 })
 export class SessionHeaderComponent {
   protected readonly store = inject(SessionStore);
   protected readonly rec = inject(RecordingStore);
-  private readonly sync = inject(SyncStore);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
+  protected readonly i18n = inject(I18nService);
 
   protected readonly formatMs = formatMs;
-  protected readonly formatLongDate = formatLongDate;
-  protected readonly plural = plural;
 
   protected readonly session = this.store.session;
   protected readonly titleDraft = signal('');
@@ -33,21 +32,12 @@ export class SessionHeaderComponent {
     () => !!this.session() && this.rec.recordingSessionId() === this.session()!.id,
   );
 
-  /** Estado de guardado / copia en Drive de la sesión. */
-  protected readonly syncChip = computed(() => {
-    const s = this.session();
-    if (this.store.savingCount() > 0) return { label: 'Guardando…', dot: 'bg-accent animate-pulse' };
-    switch (s ? this.sync.cloudState(s.sync_status) : 'OFFLINE') {
-      case 'SYNCED':
-        return { label: 'Guardado en Drive', dot: 'bg-ok' };
-      case 'PENDING':
-        return { label: 'Pendiente de subir', dot: 'bg-accent' };
-      case 'ERROR':
-        return { label: 'Error al subir', dot: 'bg-rec' };
-      default:
-        return { label: 'Solo en este equipo', dot: 'bg-faint' };
-    }
-  });
+  /** Estado de guardado de la sesión en la bóveda. */
+  protected readonly saveChip = computed(() =>
+    this.store.savingCount() > 0
+      ? { label: this.i18n.t('header.saving'), dot: 'bg-accent animate-pulse' }
+      : { label: this.i18n.t('header.saved'), dot: 'bg-ok' },
+  );
 
   private readonly menuWrap = viewChild<ElementRef<HTMLElement>>('menuWrap');
   private readonly firstItem = viewChild<ElementRef<HTMLButtonElement>>('firstItem');
@@ -102,13 +92,13 @@ export class SessionHeaderComponent {
     const s = this.session();
     if (!s) return;
     if (this.isThisRecording()) {
-      this.toast.warning('Detén la grabación antes de borrar la sesión');
+      this.toast.warning(this.i18n.t('header.stopToDelete'));
       return;
     }
     const ok = await this.confirm.ask({
-      title: 'Borrar sesión',
-      message: `Se borrará «${s.title}» junto con su pista bruta, fragmentos, comentarios e imágenes.\nEsta acción no se puede deshacer.`,
-      confirmLabel: 'Borrar sesión',
+      title: this.i18n.t('header.deleteTitle'),
+      message: this.i18n.t('header.deleteMessage', { title: s.title }),
+      confirmLabel: this.i18n.t('header.deleteTitle'),
     });
     if (ok) await this.store.remove(s.id);
   }

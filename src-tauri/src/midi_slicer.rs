@@ -155,8 +155,8 @@ impl TickClock {
 
 /// Lee fichero completo y devuelve eventos + duración en microsegundos.
 fn read_timed_events_us(path: &Path) -> Result<(Vec<TimedMidiEvent>, u64), String> {
-    let data = std::fs::read(path).map_err(|e| format!("No se pudo leer {}: {e}", path.display()))?;
-    let smf = Smf::parse(&data).map_err(|e| format!("Fichero MIDI inválido {}: {e}", path.display()))?;
+    let data = std::fs::read(path).map_err(|e| t!("backend.io.read", path = path.display(), e = e))?;
+    let smf = Smf::parse(&data).map_err(|e| t!("backend.midi.invalidFile", path = path.display(), e = e))?;
 
     // Mapa de tempos de todas las pistas.
     let clock = match smf.header.timing {
@@ -239,7 +239,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("No se pudo crear {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| t!("backend.io.createDir", path = parent.display(), e = e))?;
         }
     }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "out".into());
@@ -253,7 +253,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     })();
     if let Err(e) = result {
         let _ = std::fs::remove_file(&tmp);
-        return Err(format!("No se pudo escribir {}: {e}", path.display()));
+        return Err(t!("backend.io.write", path = path.display(), e = e));
     }
     Ok(())
 }
@@ -294,7 +294,7 @@ fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: 
     let mut smf = Smf::new(Header::new(Format::SingleTrack, Timing::Metrical(u15::new(TICKS_PER_QUARTER))));
     smf.tracks.push(track);
     let mut buf: Vec<u8> = Vec::new();
-    smf.write_std(&mut buf).map_err(|e| format!("No se pudo serializar MIDI: {e}"))?;
+    smf.write_std(&mut buf).map_err(|e| t!("backend.midi.serializeFailed", e = e))?;
     atomic_write(path, &buf)
 }
 
@@ -351,11 +351,11 @@ pub fn analyze_midi_activity(path: &Path, max_blocks: usize) -> Result<MidiActiv
 
 fn validate_range(start_ms: u64, end_ms: u64, duration_ms: u64) -> Result<(u64, u64), String> {
     if start_ms >= end_ms {
-        return Err(format!("Rango inválido: inicio ({start_ms} ms) debe ser menor que fin ({end_ms} ms)"));
+        return Err(t!("backend.midi.rangeInvalid", start = start_ms, end = end_ms));
     }
     let end = end_ms.min(duration_ms);
     if start_ms >= end {
-        return Err(format!("Rango inválido: el inicio ({start_ms} ms) está fuera de la duración ({duration_ms} ms)"));
+        return Err(t!("backend.midi.rangeOutside", start = start_ms, duration = duration_ms));
     }
     Ok((start_ms, end))
 }

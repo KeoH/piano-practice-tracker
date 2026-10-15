@@ -1,0 +1,450 @@
+{
+  "app": {
+    "notTauri": "Backend Tauri no disponible (ejecutando en un navegador normal).",
+    "browseOnly": "La interfaz es navegable pero las acciones no se ejecutarán.",
+    "hide": "Ocultar"
+  },
+  "vault": {
+    "lockTitle": "La bóveda parece estar en uso",
+    "openAnyway": "Abrir igualmente",
+    "pickOpenTitle": "Abrir bóveda de Piano Tracker",
+    "created": "Bóveda creada",
+    "imported": "Datos importados en la bóveda",
+    "stopRecordingFirst": "Detén la grabación antes de cambiar de bóveda",
+    "errors": {
+      "read": "No se pudo leer la bóveda",
+      "open": "No se pudo abrir la bóveda",
+      "create": "No se pudo crear la bóveda",
+      "import": "No se pudieron importar los datos",
+      "close": "No se pudo cerrar la bóveda",
+      "forget": "No se pudo quitar de la lista",
+      "reveal": "No se pudo abrir la carpeta",
+      "picker": "No se pudo abrir el selector de carpetas"
+    }
+  },
+  "session": {
+    "defaultTitle": "Práctica {date}",
+    "created": "Sesión creada",
+    "deleted": "Sesión eliminada",
+    "errors": {
+      "loadList": "No se pudieron cargar las sesiones",
+      "load": "No se pudo cargar la sesión",
+      "create": "No se pudo crear la sesión",
+      "delete": "No se pudo borrar la sesión",
+      "save": "No se pudo guardar la sesión"
+    },
+    "tabs": {
+      "label": "Secciones de la sesión",
+      "record": "Grabar y recortar",
+      "fragments": "Fragmentos",
+      "notes": "Notas"
+    },
+    "noRawTake": "Aún no hay pista bruta. Pulsa **Grabar** y toca: después podrás quedarte con los mejores pasajes como fragmentos.",
+    "fragmentCount_one": "{n} fragmento",
+    "fragmentCount_other": "{n} fragmentos",
+    "fragmentsTotal": "en total. Abre uno para escucharlo y dejar comentarios en el segundo exacto.",
+    "noFragments": "Sin fragmentos todavía. En **Grabar y recortar**, selecciona un pasaje de la pista bruta y pulsa **Extraer fragmento**.",
+    "goToRawTake": "Ir a la pista bruta",
+    "loading": "Cargando sesión…"
+  },
+  "recorder": {
+    "saved": "Grabación guardada",
+    "errors": {
+      "listPorts": "No se pudieron listar los puertos MIDI",
+      "applySettings": "No se pudieron aplicar los ajustes",
+      "start": "No se pudo iniciar la grabación",
+      "stop": "No se pudo detener la grabación"
+    },
+    "simulatorPort": "Simulador MIDI (sin teclado)",
+    "label": "Grabación",
+    "record": "Grabar",
+    "stop": "Detener grabación",
+    "status": {
+      "recording": "Grabando",
+      "otherSession": "Grabando en otra sesión",
+      "ready": "Listo para grabar"
+    },
+    "hint": {
+      "appending": "Se añade al final de la pista bruta, a partir de {time}",
+      "willAppend": "Lo que toques se añade al final de la pista bruta ({time})",
+      "first": "Lo que toques será la pista bruta de esta sesión"
+    },
+    "port": {
+      "choose": "Elige una entrada",
+      "virtual": "Genera notas de prueba"
+    },
+    "tempo": "Tempo",
+    "tempoDown": "Bajar tempo",
+    "tempoUp": "Subir tempo",
+    "tempoSlider": "Tempo en BPM (deslizador)",
+    "metronome": "Claqueta",
+    "metronomeHint": "Suena al tempo elegido",
+    "liveSynth": "Oír mientras toco",
+    "liveSynthHint": "Sonido del piano de la app"
+  },
+  "playback": {
+    "errors": {
+      "play": "No se pudo reproducir",
+      "pause": "No se pudo pausar",
+      "seek": "No se pudo posicionar",
+      "stop": "No se pudo detener"
+    }
+  },
+  "settings": {
+    "sound": {
+      "pickTitle": "Elegir SoundFont de piano",
+      "tab": "Sonido",
+      "title": "Sonido del piano",
+      "intro": "El SoundFont que suena al reproducir y al oírte mientras tocas.",
+      "builtinName": "Piano sintético integrado",
+      "fallback": "Respaldo",
+      "custom": "Archivo elegido por ti",
+      "pick": "Elegir otro archivo .sf2…",
+      "loading": "Cargando SoundFont…",
+      "noSf3": "Los archivos .sf3 no son compatibles.",
+      "onlyBuiltinTitle": "¿Solo tienes el piano sintético?",
+      "onlyBuiltinText": "Instala un SoundFont con muestras reales y reinicia la app:",
+      "bluetooth": "Con auriculares o altavoces Bluetooth el sonido llega unos 200 ms tarde. Para tocar oyendo la app, mejor por cable.",
+      "changed": "Sonido cambiado a {name}",
+      "builtinDescription": "Integrado en la app. Siempre disponible, menos realista",
+      "systemSamples": "Muestras reales · instalado en el sistema",
+      "samples": "Muestras reales",
+      "errors": {
+        "read": "No se pudo leer la configuración de sonido",
+        "load": "No se pudo cargar el SoundFont",
+        "picker": "No se pudo abrir el selector de archivos"
+      }
+    },
+    "general": {
+      "languageError": "No se pudo cambiar el idioma",
+      "tab": "General",
+      "language": "Idioma",
+      "auto": "Automático (sistema: {lang})",
+      "languageHint": "El idioma de la app. Automático sigue el idioma del sistema y usa inglés si no está disponible."
+    },
+    "title": "Ajustes",
+    "close": "Cerrar ajustes",
+    "sections": "Secciones de ajustes",
+    "noBackend": "El backend de escritorio no está disponible en este navegador; los ajustes no se pueden guardar.",
+    "vault": {
+      "tab": "Bóveda",
+      "intro": "La carpeta donde se guarda todo: la base de datos, las grabaciones MIDI y las imágenes de las notas.",
+      "reveal": "Mostrar carpeta",
+      "openOther": "Abrir otra bóveda…",
+      "close": "Cerrar bóveda",
+      "stopRecording": "Detén la grabación para cambiar de bóveda.",
+      "recent": "Recientes",
+      "unavailable": "No disponible · {path}",
+      "open": "Abrir",
+      "forget": "Quitar de recientes",
+      "syncTitle": "Copias de seguridad y varios equipos",
+      "syncText": "La app no sube nada a internet. Si pones la bóveda dentro de una carpeta sincronizada (Dropbox, Syncthing, Nextcloud…), ese servicio hará la copia. Cierra la app en un equipo y espera a que termine de sincronizar antes de abrirla en otro: la base de datos no admite cambios en dos sitios a la vez."
+    }
+  },
+  "common": {
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "loading": "Cargando…",
+    "untitled": "Sin título",
+    "optional": "(opcional)"
+  },
+  "toasts": {
+    "dismiss": "Cerrar aviso"
+  },
+  "dates": {
+    "thisWeek": "Esta semana",
+    "lastWeek": "Semana pasada",
+    "noDate": "Sin fecha"
+  },
+  "sidebar": {
+    "tagline": "Diario de práctica",
+    "newSession": "Nueva sesión",
+    "searchLabel": "Buscar sesiones por título",
+    "searchPlaceholder": "Buscar sesión",
+    "listLabel": "Sesiones de práctica",
+    "recording": "Grabando",
+    "rawDuration": "Duración de la pista bruta",
+    "fragmentCount_zero": "sin fragmentos",
+    "fragmentCount_one": "{n} fragmento",
+    "fragmentCount_other": "{n} fragmentos",
+    "noMatches": "Ninguna sesión coincide con la búsqueda.",
+    "empty": "Aún no hay sesiones.",
+    "midiInput": "Entrada MIDI",
+    "noPorts": "Sin puertos",
+    "rescanPorts": "Buscar teclados de nuevo",
+    "noVault": "Sin bóveda",
+    "stopToSwitch": "Detén la grabación antes de cambiar de sesión",
+    "stopToCreate": "Detén la grabación antes de crear otra sesión",
+    "port": {
+      "notFound": "Elige otra entrada al grabar",
+      "none": "Conecta un teclado USB",
+      "virtual": "Notas de prueba, sin teclado",
+      "connected": "Teclado conectado"
+    }
+  },
+  "header": {
+    "saving": "Guardando…",
+    "saved": "Guardado",
+    "stopToDelete": "Detén la grabación antes de borrar la sesión",
+    "deleteTitle": "Borrar sesión",
+    "deleteMenu": "Borrar sesión…",
+    "deleteMessage": "Se borrará «{title}» junto con su pista bruta, fragmentos, comentarios e imágenes.\nEsta acción no se puede deshacer.",
+    "titleLabel": "Título de la sesión",
+    "rename": "Renombrar sesión",
+    "recording": "Grabando",
+    "stop": "Detener",
+    "rawTake": "Pista bruta",
+    "fragmentCount_zero": "Sin fragmentos",
+    "fragmentCount_one": "{n} fragmento",
+    "fragmentCount_other": "{n} fragmentos",
+    "moreActions": "Más acciones de la sesión",
+    "actions": "Acciones de la sesión"
+  },
+  "home": {
+    "title": "¿Qué vas a practicar hoy?",
+    "subtitle": "Graba con tu teclado USB, quédate con los pasajes que importan y anota lo que quieres mejorar.",
+    "continue": "Seguir con «{title}»",
+    "noMidiInput": "Sin entrada MIDI",
+    "vaultName": "Bóveda {name}",
+    "steps": {
+      "record": {
+        "title": "Graba",
+        "text": "Pulsa Grabar y toca. Puedes parar y seguir: cada toma se añade al final de la pista bruta."
+      },
+      "trim": {
+        "title": "Recorta",
+        "text": "Selecciona un pasaje en la pista y guárdalo como fragmento. Lo que sobra, descártalo."
+      },
+      "annotate": {
+        "title": "Anota",
+        "text": "Deja comentarios en el segundo exacto de cada fragmento y apuntes con imágenes en las notas."
+      }
+    }
+  },
+  "player": {
+    "play": "Reproducir",
+    "pause": "Pausa",
+    "stop": "Detener",
+    "position": "Posición actual"
+  },
+  "fragments": {
+    "titleLabel": "Título",
+    "explanationLabel": "Explicación",
+    "explanationPlaceholder": "¿Qué trabajaste en este pasaje?",
+    "playTitle": "Reproducir «{title}»",
+    "pauseTitle": "Pausar «{title}»",
+    "duration": "Duración",
+    "comments": "Comentarios",
+    "commentsSr": "comentarios",
+    "expand": "Abrir fragmento",
+    "collapse": "Cerrar fragmento",
+    "commentAt": "Comentario en {time}: {text}",
+    "playbackPosition": "Posición de reproducción",
+    "commentAtLabel": "Comentar en",
+    "commentPlaceholder": "Qué quieres recordar de este momento",
+    "add": "Añadir",
+    "editMeta": "Editar título y explicación",
+    "explanationPlaceholder2": "Notas generales del pasaje…",
+    "commentsOf": "Comentarios de {title}",
+    "goTo": "Ir a {time}: {text}",
+    "playFromHere": "Reproducir desde aquí",
+    "deleteComment": "Borrar comentario",
+    "noComments": "Sin comentarios todavía. Escribe uno mientras escuchas.",
+    "commentsHint": "Pulsa un comentario para saltar a ese momento.",
+    "delete": "Borrar fragmento",
+    "deleted": "Fragmento borrado",
+    "deleteMessage_zero": "Se borrará «{title}».\nEsta acción no se puede deshacer.",
+    "deleteMessage_one": "Se borrará «{title}» y su comentario.\nEsta acción no se puede deshacer.",
+    "deleteMessage_other": "Se borrará «{title}» y sus {n} comentarios.\nEsta acción no se puede deshacer.",
+    "errors": {
+      "analyze": "No se pudo analizar el fragmento",
+      "addComment": "No se pudo añadir el comentario",
+      "deleteComment": "No se pudo borrar el comentario",
+      "save": "No se pudo guardar el fragmento",
+      "delete": "No se pudo borrar el fragmento"
+    }
+  },
+  "slicer": {
+    "analyzing": "Analizando…",
+    "pausedWhileRecording": "Recorte en pausa mientras grabas",
+    "help": "Arrastra sobre la pista para elegir un pasaje · clic para escuchar desde ahí",
+    "reanalyze": "Volver a analizar la pista",
+    "selectionStart": "Inicio de la selección",
+    "selectionEnd": "Fin de la selección",
+    "playSelection": "Reproducir la selección",
+    "start": "Inicio",
+    "end": "Fin",
+    "selectAll": "Toda la pista",
+    "clearSelection": "Quitar selección",
+    "discard": "Descartar",
+    "extract": "Extraer fragmento",
+    "extracting": "Extrayendo…",
+    "footer": "**Extraer** guarda el pasaje como fragmento y lo quita de la pista bruta. **Descartar** lo borra sin guardarlo.",
+    "extractNote": "El pasaje se guarda como fragmento independiente y desaparece de la pista bruta.",
+    "invalidTime": "Formato de tiempo no válido (usa mm:ss o mm:ss.d)",
+    "invalidRange": "Selecciona un rango válido (inicio < fin)",
+    "defaultFragmentTitle": "Fragmento {n}",
+    "titleRequired": "El fragmento necesita un título",
+    "extracted": "Fragmento «{title}» creado ({duration})",
+    "discardTitle": "Descartar selección",
+    "discardMessage": "Se eliminará de la pista bruta el tramo {start} – {end} ({duration}).\nLos eventos posteriores se desplazarán para cerrar el hueco.",
+    "discardConfirm": "Descartar tramo",
+    "discarded": "Tramo descartado",
+    "errors": {
+      "analyze": "No se pudo analizar la pista bruta",
+      "extract": "No se pudo extraer el fragmento",
+      "discard": "No se pudo descartar el tramo"
+    }
+  },
+  "timeline": {
+    "noActivity": "Sin actividad de notas"
+  },
+  "notes": {
+    "title": "Notas de la sesión",
+    "savingImage": "Guardando imagen…",
+    "unsaved": "Cambios sin guardar",
+    "saveError": "Error al guardar",
+    "insertImage": "Insertar imagen",
+    "textareaLabel": "Notas en Markdown",
+    "modes": {
+      "label": "Vista del editor",
+      "edit": "Escribir",
+      "split": "Ambos",
+      "preview": "Leer"
+    },
+    "placeholder": "## Objetivos de hoy\n- [ ] Escalas en Re mayor a 90 BPM\n- [ ] Compases 12–20, manos separadas\n\nPega capturas de la partitura con Ctrl+V…",
+    "dropImage": "Suelta la imagen para insertarla",
+    "previewLabel": "Vista previa",
+    "empty": "Nada que mostrar todavía. Escribe tus objetivos, observaciones o pega una captura de la partitura.",
+    "footerHint": "Pega o arrastra imágenes directamente en el texto",
+    "words_one": "{n} palabra",
+    "words_other": "{n} palabras",
+    "chars_one": "{n} carácter",
+    "chars_other": "{n} caracteres",
+    "saveShortcut": "guarda",
+    "imagesNeedDesktop": "Guardar imágenes requiere la app de escritorio",
+    "imageTooLarge": "«{name}» supera {max} MB",
+    "errors": {
+      "save": "No se pudieron guardar las notas",
+      "image": "No se pudo guardar la imagen"
+    }
+  },
+  "welcome": {
+    "title": "Elige dónde guardar tus prácticas",
+    "intro": "Una bóveda es una carpeta con todo lo tuyo: sesiones, grabaciones MIDI e imágenes. Si la creas dentro de Dropbox, Syncthing o similar, ese servicio se encargará de la copia de seguridad.",
+    "legacy": {
+      "title": "Tienes datos de la versión anterior",
+      "location": "Están en",
+      "text": "Al importarlos se mueven a la bóveda nueva que elijas abajo, con sus sesiones, fragmentos e imágenes.",
+      "import": "Importar mis datos en la bóveda nueva"
+    },
+    "create": {
+      "title": "Crear bóveda nueva",
+      "name": "Nombre",
+      "location": "Ubicación",
+      "locationPlaceholder": "Elige una carpeta, por ejemplo ~/Dropbox",
+      "choose": "Elegir…",
+      "willCreate": "Se creará",
+      "preparing": "Preparando…",
+      "createAndImport": "Crear e importar",
+      "submit": "Crear bóveda",
+      "pickTitle": "Carpeta donde crear la bóveda"
+    },
+    "open": {
+      "title": "Abrir bóveda existente",
+      "folder": "Abrir carpeta…"
+    }
+  },
+  "backend": {
+    "noVault": "No hay ninguna bóveda abierta",
+    "stopRecordingToSwitchVault": "Detén la grabación antes de cambiar de bóveda",
+    "stopRecordingToImport": "Detén la grabación antes de importar",
+    "sessionIsRecording": "La sesión se está grabando; detén la grabación primero",
+    "noRawTrack": "La sesión no tiene una pista bruta grabada",
+    "internal": "Error interno: {e}",
+    "rangeEndBeforeStart": "El final del rango debe ser posterior al inicio",
+    "commentEmpty": "El comentario está vacío",
+    "revealFailed": "No se pudo abrir el gestor de archivos: {e}",
+    "defaults": {
+      "fragmentTitle": "Fragmento sin título",
+      "sessionTitle": "Sesión de práctica"
+    },
+    "image": {
+      "invalidBase64": "Imagen en base64 inválida: {e}",
+      "empty": "La imagen está vacía",
+      "saveFailed": "No se pudo guardar la imagen: {e}",
+      "outsideVault": "La imagen se guardó fuera de la bóveda: {path}"
+    },
+    "soundfont": {
+      "invalidFile": "Selecciona un fichero SoundFont .sf2 existente (los .sf3 no son compatibles)",
+      "busy": "Ya se está cargando un SoundFont; espera unos segundos",
+      "loadFailed": "No se pudo cargar el SoundFont {path}",
+      "incompatible": "El SoundFont {path} no es compatible con el sintetizador",
+      "builtinName": "Piano sintético integrado"
+    },
+    "playback": {
+      "noFile": "No hay ningún fichero cargado"
+    },
+    "recorder": {
+      "alreadyRunning": "Ya hay una grabación en curso",
+      "notRunning": "No hay ninguna grabación en curso",
+      "otherSession": "La grabación en curso pertenece a otra sesión",
+      "simulatorFailed": "No se pudo iniciar el simulador MIDI: {e}",
+      "captureFailed": "No se pudo iniciar la captura MIDI: {e}",
+      "timeout": "Tiempo de espera agotado al abrir el puerto MIDI",
+      "midiUnavailable": "MIDI del sistema no disponible: {e}",
+      "portNotFound": "Puerto MIDI no encontrado: {port}",
+      "connectFailed": "No se pudo conectar al puerto {port}: {e}"
+    },
+    "midi": {
+      "invalidFile": "Fichero MIDI inválido {path}: {e}",
+      "serializeFailed": "No se pudo serializar MIDI: {e}",
+      "rangeInvalid": "Rango inválido: el inicio ({start} ms) debe ser menor que el fin ({end} ms)",
+      "rangeOutside": "Rango inválido: el inicio ({start} ms) está fuera de la duración ({duration} ms)"
+    },
+    "io": {
+      "serializeConfig": "No se pudo serializar la configuración: {e}",
+      "createDir": "No se pudo crear {path}: {e}",
+      "read": "No se pudo leer {path}: {e}",
+      "write": "No se pudo escribir {path}: {e}",
+      "save": "No se pudo guardar {path}: {e}",
+      "open": "No se pudo abrir {path}: {e}",
+      "copy": "No se pudo copiar {from} a {to}: {e}",
+      "movedButNotRemoved": "Se copió {path} pero no se pudo borrar el original: {e}"
+    },
+    "vault": {
+      "pathNotAbsolute": "La ruta de la bóveda debe ser absoluta",
+      "notAFolder": "{path} no es una carpeta",
+      "alreadyVault": "{path} ya es una bóveda; ábrela en lugar de crearla",
+      "notEmpty": "La carpeta {path} no está vacía; elige una carpeta nueva o vacía",
+      "missing": "La carpeta {path} no existe",
+      "notAVault": "{path} no es una bóveda de Piano Tracker",
+      "invalidRelativePath": "Ruta no válida dentro de la bóveda: {path}",
+      "lockDateFormat": "%d/%m/%Y %H:%M",
+      "lockPlaceThisComputer": "otra ventana de la app en este equipo",
+      "lockPlaceOtherComputer": "el equipo «{host}»",
+      "lockWarning": "Esta bóveda parece estar abierta en {place} desde el {when}. Si se usa en dos sitios a la vez, el servicio de sincronización puede crear copias en conflicto de la base de datos. Ciérrala allí antes de continuar, o ábrela igualmente si sabes que ya no está en uso.",
+      "conflictCopy": "Hay una copia en conflicto de la base de datos en la bóveda («{name}»). La app usa {db}; revisa la otra copia y bórrala cuando ya no la necesites."
+    },
+    "legacy": {
+      "noData": "No hay datos de la versión anterior en {path}",
+      "destInside": "La bóveda nueva no puede estar dentro de la carpeta de datos antigua",
+      "prepareFailed": "No se pudo preparar {path} (¿está abierta en otra app?): {e}"
+    },
+    "db": {
+      "error": "Error de base de datos: {e}",
+      "sessionMissing": "La sesión '{id}' no existe",
+      "fragmentMissing": "El fragmento '{id}' no existe",
+      "commentMissing": "El comentario '{id}' no existe",
+      "removeTemp": "No se pudo eliminar el temporal {path}: {e}",
+      "invalidBackupPath": "Ruta de copia de seguridad no válida: {path}",
+      "backupFailed": "No se pudo crear la copia de seguridad: {e}",
+      "backupMoveFailed": "No se pudo mover la copia de seguridad a {path}: {e}",
+      "openFailed": "No se pudo abrir la base de datos {path}: {e}",
+      "prepareFailed": "No se pudo preparar la base de datos {path}: {e}",
+      "newerSchema": "La base de datos tiene una versión de esquema ({version}) más reciente que la aplicación ({supported})",
+      "migrationFailed": "Error al migrar la base de datos (v{version}): {e}",
+      "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo"
+    }
+  }
+}

@@ -11,6 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { formatMs } from '../../core/format';
+import { I18nService } from '../../core/i18n/i18n.service';
 import type { ActivityBlock } from '../../core/models';
 
 export interface TimeRange {
@@ -51,6 +52,7 @@ export class TimelineCanvasComponent {
 
   private readonly canvas = viewChild.required<ElementRef<HTMLCanvasElement>>('cv');
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly i18n = inject(I18nService);
   private readonly size = signal({ w: 0, h: 0, dpr: 1 });
 
   constructor() {
@@ -78,6 +80,8 @@ export class TimelineCanvasComponent {
     const showRuler = this.showRuler();
     const rgb = this.barRgb();
     const progress = this.progressMs();
+    // Se lee aquí para que el efecto redibuje al cambiar de idioma.
+    const emptyLabel = this.i18n.t('timeline.noActivity');
     if (w <= 0 || h <= 0) return;
 
     const cv = this.canvas().nativeElement;
@@ -156,7 +160,7 @@ export class TimelineCanvasComponent {
       ctx.font = '12px "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('Sin actividad de notas', w / 2, trackH / 2);
+      ctx.fillText(emptyLabel, w / 2, trackH / 2);
     }
 
     // Selección

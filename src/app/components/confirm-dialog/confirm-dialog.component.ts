@@ -1,9 +1,11 @@
 import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, viewChild } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
+import { TranslatePipe } from '../../core/i18n/translate.pipe';
 
 @Component({
   selector: 'app-confirm-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [TranslatePipe],
   template: `
     @if (confirm.current(); as req) {
       <div class="fixed inset-0 z-[70] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" (click)="confirm.answer(false)">
@@ -19,7 +21,7 @@ import { ConfirmService } from '../../core/confirm.service';
           <h2 id="confirm-title" class="text-lg font-semibold text-fg-strong">{{ req.title }}</h2>
           <p id="confirm-msg" class="mt-2 text-sm leading-relaxed whitespace-pre-line text-muted">{{ req.message }}</p>
           <div class="mt-6 flex justify-end gap-2.5">
-            <button type="button" class="btn btn-lg" (click)="confirm.answer(false)">Cancelar</button>
+            <button type="button" class="btn btn-lg" (click)="confirm.answer(false)">{{ 'common.cancel' | t }}</button>
             <button #ok type="button" class="btn btn-lg" [class.btn-danger]="req.danger" [class.btn-primary]="!req.danger" (click)="confirm.answer(true)">
               {{ req.confirmLabel }}
             </button>

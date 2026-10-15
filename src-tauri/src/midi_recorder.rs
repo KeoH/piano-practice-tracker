@@ -23,7 +23,7 @@ use crate::midi_slicer::{
 use crate::models::MidiPortInfo;
 
 pub const SIMULATOR_PORT_ID: &str = "simulator";
-pub const SIMULATOR_PORT_NAME: &str = "Simulador MIDI (sin teclado)";
+pub const SIMULATOR_PORT_NAME: &str = "MIDI simulator (no keyboard)";
 const MIDIR_PREFIX: &str = "midir:";
 const CLIENT_NAME: &str = "piano-tracker";
 
@@ -128,7 +128,7 @@ impl MidiRecorder {
     pub fn start(&self, port_id: &str, bpm: u32, resume_from: Option<&Path>, sink: MidiSink) -> Result<(), String> {
         let mut active = lock(&self.active);
         if active.is_some() {
-            return Err("Ya hay una grabación en curso".into());
+            return Err(t!("backend.recorder.alreadyRunning"));
         }
         let (base_events, offset_ms) = match resume_from {
             Some(p) if p.exists() => read_timed_events(p)?,
@@ -149,7 +149,7 @@ impl MidiRecorder {
             let handle = std::thread::Builder::new()
                 .name("midi-simulator".into())
                 .spawn(move || run_simulator(sh, bpm, stop_rx))
-                .map_err(|e| format!("No se pudo iniciar el simulador MIDI: {e}"))?;
+                .map_err(|e| t!("backend.recorder.simulatorFailed", e = e))?;
             (handle, Source::Simulator)
         } else {
             let wanted = port_id.strip_prefix(MIDIR_PREFIX).unwrap_or(port_id).to_string();
@@ -158,7 +158,7 @@ impl MidiRecorder {
             let handle = std::thread::Builder::new()
                 .name("midi-input".into())
                 .spawn(move || run_midir_connection(wanted, sh, stop_rx, ready_tx))
-                .map_err(|e| format!("No se pudo iniciar la captura MIDI: {e}"))?;
+                .map_err(|e| t!("backend.recorder.captureFailed", e = e))?;
             match ready_rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
@@ -167,7 +167,7 @@ impl MidiRecorder {
                 }
                 Err(_) => {
                     let _ = stop_tx.send(());
-                    return Err("Tiempo de espera agotado al abrir el puerto MIDI".into());
+                    return Err(t!("backend.recorder.timeout"));
                 }
             }
             (handle, Source::Midir)
@@ -198,7 +198,7 @@ impl MidiRecorder {
     /// Detiene la grabación, cierra notas/pedal en el instante de stop, escribe el SMF
     /// (BPM activo) y devuelve la duración total en ms.
     pub fn stop(&self, output_path: &Path) -> Result<u64, String> {
-        let mut rec = lock(&self.active).take().ok_or_else(|| "No hay ninguna grabación en curso".to_string())?;
+        let mut rec = lock(&self.active).take().ok_or_else(|| t!("backend.recorder.notRunning"))?;
         let _ = rec.stop_tx.send(());
         if let Some(t) = rec.thread.take() {
             if t.join().is_err() {
@@ -265,7 +265,7 @@ fn run_midir_connection(
     let mut input = match midir::MidiInput::new(CLIENT_NAME) {
         Ok(i) => i,
         Err(e) => {
-            let _ = ready_tx.send(Err(format!("MIDI del sistema no disponible: {e}")));
+            let _ = ready_tx.send(Err(t!("backend.recorder.midiUnavailable", e = e)));
             return;
         }
     };
@@ -281,7 +281,7 @@ fn run_midir_connection(
         .or_else(|| names.iter().find(|(_, n)| strip(n) == strip(&wanted)))
         .map(|(i, _)| *i);
     let Some(port) = idx.and_then(|i| ports.get(i)) else {
-        let _ = ready_tx.send(Err(format!("Puerto MIDI no encontrado: {wanted}")));
+        let _ = ready_tx.send(Err(t!("backend.recorder.portNotFound", port = wanted)));
         return;
     };
     let sh = Arc::clone(&shared);
@@ -293,7 +293,7 @@ fn run_midir_connection(
             conn.close();
         }
         Err(e) => {
-            let _ = ready_tx.send(Err(format!("No se pudo conectar al puerto {wanted}: {e}")));
+            let _ = ready_tx.send(Err(t!("backend.recorder.connectFailed", port = wanted, e = e)));
         }
     }
 }

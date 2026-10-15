@@ -25,10 +25,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$HOME/.local/share/piano-tracker/**",
-          "$DATA/piano-tracker/**"
-        ]
+        "scope": []
       }
     }
   },

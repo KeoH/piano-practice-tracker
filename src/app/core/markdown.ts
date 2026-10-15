@@ -21,10 +21,11 @@ function safeHref(href: string): string | null {
 /**
  * Crea un renderizador Markdown seguro:
  * - El HTML crudo (bloques y etiquetas en línea) se escapa en lugar de inyectarse.
- * - Las imágenes con ruta absoluta local (`/…`) se reescriben con `resolveLocal` (convertFileSrc).
+ * - Las imágenes locales se reescriben con `resolveLocal` (asset protocol): rutas relativas a la
+ *   bóveda (`media/…`, como las inserta el editor) y absolutas (`/…`, notas antiguas).
  * - Se bloquean enlaces `javascript:`.
  */
-export function createMarkdownRenderer(resolveLocal: (absPath: string) => string): (md: string) => string {
+export function createMarkdownRenderer(resolveLocal: (path: string) => string): (md: string) => string {
   const marked = new Marked({
     gfm: true,
     breaks: true,
@@ -35,7 +36,7 @@ export function createMarkdownRenderer(resolveLocal: (absPath: string) => string
       },
       image({ href, title, text }: Tokens.Image): string {
         let src = safeHref(href ?? '') ?? '';
-        if (src.startsWith('/')) src = resolveLocal(decodeSafe(src));
+        if (isLocalPath(src)) src = resolveLocal(decodeSafe(src));
         const t = title ? ` title="${escapeHtml(title)}"` : '';
         return `<img src="${escapeHtml(src)}" alt="${escapeHtml(text ?? '')}"${t} loading="lazy">`;
       },
@@ -55,6 +56,12 @@ export function createMarkdownRenderer(resolveLocal: (absPath: string) => string
       return `<pre>${escapeHtml(String(err))}</pre>`;
     }
   };
+}
+
+/** Ruta de fichero local: absoluta (`/…`) o relativa sin esquema (`media/x.png`). */
+function isLocalPath(src: string): boolean {
+  if (!src || src.startsWith('//') || src.startsWith('#')) return false;
+  return src.startsWith('/') || !/^[a-z][a-z0-9+.-]*:/i.test(src);
 }
 
 function decodeSafe(s: string): string {

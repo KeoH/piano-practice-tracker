@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import type { PlaybackProgress } from './models';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
+import { I18nService } from './i18n/i18n.service';
 
 /**
  * Reproductor global único. El backend solo reproduce un fichero a la vez; el progreso
@@ -13,6 +14,7 @@ import { ToastService } from './toast.service';
 export class PlaybackStore {
   private readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
+  private readonly i18n = inject(I18nService);
 
   /** Último progreso recibido (o estimado de forma optimista). */
   readonly progress = signal<PlaybackProgress | null>(null);
@@ -75,7 +77,7 @@ export class PlaybackStore {
       });
     } catch (err) {
       this.stopAt = null;
-      this.toast.error(err, 'No se pudo reproducir');
+      this.toast.error(err, this.i18n.t('playback.errors.play'));
     }
   }
 
@@ -85,7 +87,7 @@ export class PlaybackStore {
       const p = this.progress();
       if (p) this.progress.set({ ...p, is_playing: false });
     } catch (err) {
-      this.toast.error(err, 'No se pudo pausar');
+      this.toast.error(err, this.i18n.t('playback.errors.pause'));
     }
   }
 
@@ -105,7 +107,7 @@ export class PlaybackStore {
       try {
         await this.api.seekMidiPlayback(target);
       } catch (err) {
-        this.toast.error(err, 'No se pudo posicionar');
+        this.toast.error(err, this.i18n.t('playback.errors.seek'));
       }
     }
   }
@@ -120,7 +122,7 @@ export class PlaybackStore {
     try {
       await this.api.stopMidiPlayback();
     } catch (err) {
-      this.toast.error(err, 'No se pudo detener');
+      this.toast.error(err, this.i18n.t('playback.errors.stop'));
     }
     if (p) {
       this.progress.set({ ...p, current_ms: 0, is_playing: false });

@@ -45,6 +45,8 @@ Este documento desglosa las tareas secuenciales y paralelizables para construir 
   - Emitir eventos `playback-progress` hacia el frontend de Angular cada $50\text{ ms}$.
 
 ## Fase 5: Sincronización con Google Drive (OAuth2 + Worker)
+> Sustituida por las bóvedas de la Fase 10: `drive_sync.rs` y la cola `sync_queue` se eliminaron.
+
 - [x] **5.1. Flujo OAuth2 Loopback (`drive_sync.rs`):**
   - Implementar servidor local efímero en `127.0.0.1` para capturar el callback de Google OAuth2, intercambiar el código por tokens (`access_token`, `refresh_token`) y persistirlos en `app_settings`.
 - [x] **5.2. Cliente de Google Drive API v3:**
@@ -86,3 +88,39 @@ Este documento desglosa las tareas secuenciales y paralelizables para construir 
   - Ejecutar `cargo test` y `cargo build` en `src-tauri` para validar que el binario de escritorio en Linux compila limpiamente.
 - [x] **9.2. Revisión del Checklist:**
   - Marcar todas las tareas completadas en `task.md`.
+
+## Fase 10: Bóvedas en lugar de Google Drive
+- [x] **10.1. Eliminar la sincronización con Google Drive:**
+  - Borrar `drive_sync.rs`, sus comandos, el evento `sync-status`, `SyncStatusDto` y las dependencias `reqwest`, `url`, `sha2`, `rand`, `tokio` y `tauri-plugin-shell`.
+- [x] **10.2. Base de datos v2 (`db.rs`):**
+  - Migración que elimina `sync_queue`, `sync_status`, `drive_file_id` y los ajustes de Google.
+  - Rutas relativas a la bóveda en la base de datos y en las imágenes del Markdown; la API las devuelve absolutas.
+  - `journal_mode = DELETE` para que la base de datos sea un único fichero en reposo.
+- [x] **10.3. Módulo `vault.rs`:**
+  - Configuración del equipo en `~/.config/piano-tracker/config.json` (bóveda actual, recientes, SoundFont).
+  - Crear, abrir y cerrar bóvedas, lock por equipo y pid, aviso de copias en conflicto e importación de los datos de la versión anterior.
+- [x] **10.4. Frontend:**
+  - `VaultStore`, pantalla de bienvenida (`vault-welcome`) y pestaña *Bóveda* en Ajustes (`settings-dialog`).
+  - Quitar los indicadores de nube de la barra lateral, la cabecera de sesión y los fragmentos.
+  - Imágenes del Markdown con rutas relativas a la bóveda.
+- [ ] **10.5. Verificación manual con `npm run tauri dev`:**
+  - Importar los datos antiguos a una bóveda dentro de Dropbox y comprobar sesiones, reproducción e imágenes.
+  - Grabar con el simulador, recortar y pegar una imagen: todo debe quedar dentro de la bóveda.
+  - Copiar la bóveda a otra ruta, abrirla con «Abrir otra bóveda…» y comprobar que todo funciona.
+  - Abrir la misma bóveda en dos instancias: la segunda debe avisar del lock.
+
+## Fase 11: Multi-idioma (inglés y español)
+- [x] **11.1. Ficheros de idioma compartidos:** `src/locales/en.json` (referencia) y `es.json`, usados por Angular y por Rust.
+- [x] **11.2. Backend (`i18n.rs`):**
+  - Macro `t!`, idioma del sistema por variables de entorno con inglés de reserva, y preferencia en `AppConfig.language`.
+  - Comandos `get_language` / `set_language`.
+  - Mensajes de error traducidos y tests de paridad de claves y huecos.
+- [x] **11.3. Frontend:**
+  - `I18nService`, pipes `t` / `tp`, `LanguageStore`, claves tipadas y fechas con `Intl` según el idioma.
+  - Todos los componentes traducidos.
+  - Selector de idioma en Ajustes → General y en la pantalla de bienvenida.
+- [ ] **11.4. Verificación manual con `npm run tauri dev`:**
+  - Arrancar con `LANG=es_ES.UTF-8` (español) y con `LANG=fr_FR.UTF-8` (inglés).
+  - Cambiar de idioma en Ajustes sin recargar y comprobar que se mantiene al reiniciar.
+  - Provocar un error del backend (p. ej. crear una bóveda en una carpeta no vacía) y verlo en el idioma elegido.
+

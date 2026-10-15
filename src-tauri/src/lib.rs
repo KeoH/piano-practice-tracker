@@ -1,44 +1,44 @@
+// Primero, para que la macro `t!` esté disponible en el resto de módulos.
+#[macro_use]
+pub mod i18n;
 pub mod audio_engine;
 pub mod commands;
 pub mod db;
-pub mod drive_sync;
 pub mod midi_recorder;
 pub mod midi_slicer;
 pub mod models;
 pub mod paths;
 pub mod sf2_builder;
 pub mod soundfont;
+pub mod vault;
 
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::sync::{Arc, Mutex, RwLock};
 
 use tauri::{Emitter, Manager};
 
 use crate::audio_engine::{AudioEngine, ProgressEmitter};
 use crate::commands::{AppState, SoundfontState};
-use crate::db::Database;
-use crate::drive_sync::{DriveSync, SyncStatusEmitter};
 use crate::midi_recorder::MidiRecorder;
-use crate::models::{PlaybackProgress, SyncStatusDto};
-use crate::paths::AppPaths;
+use crate::models::PlaybackProgress;
+use crate::paths::AppDirs;
+use crate::vault::AppConfig;
 
 pub const EVENT_PLAYBACK_PROGRESS: &str = "playback-progress";
-pub const EVENT_SYNC_STATUS: &str = "sync-status";
 
-/// Construye el estado de la aplicación: directorios, SoundFont, SQLite, audio y sync.
+/// Construye el estado de la aplicación: directorios, SoundFont, audio y la última bóveda abierta.
 fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
-    let paths = AppPaths::default_location();
-    paths.ensure_dirs()?;
+    let dirs = AppDirs::default_location();
+    dirs.ensure_dirs()?;
 
     // El SoundFont se genera localmente si falta: la app nunca depende de descargas.
-    let sf2 = match sf2_builder::ensure_soundfont(&paths.sf2_file) {
+    let sf2 = match sf2_builder::ensure_soundfont(&dirs.sf2_file) {
         Ok(p) => p,
         Err(e) => {
             log::error!("No se pudo preparar el SoundFont: {e}");
-            paths.sf2_file.clone()
+            dirs.sf2_file.clone()
         }
     };
-
-    let db = Arc::new(Database::open(&paths.db_file)?);
 
     let handle = app.clone();
     let progress: ProgressEmitter = Arc::new(move |p: PlaybackProgress| {
@@ -49,37 +49,44 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
         log::warn!("Sin dispositivo de audio: el motor funciona en modo salida nula");
     }
 
-    let handle = app.clone();
-    let sync_emitter: SyncStatusEmitter = Arc::new(move |s: SyncStatusDto| {
-        let _ = handle.emit(EVENT_SYNC_STATUS, s);
-    });
-    let sync = DriveSync::new(db.clone(), paths.clone(), sync_emitter);
-    tauri::async_runtime::spawn(sync.clone().run_worker());
+    let config = AppConfig::load(&dirs.config_file);
+    // Antes de reabrir la bóveda, para que sus avisos salgan ya en el idioma elegido.
+    i18n::set_language(i18n::resolve(config.language.as_deref()));
+    let last_vault = config.current_vault.clone();
+    let state = AppState {
+        dirs,
+        config: Mutex::new(config),
+        vault: RwLock::new(None),
+        recorder: MidiRecorder::new(),
+        audio: audio.clone(),
+        recording_session: Mutex::new(None),
+        soundfont: Arc::new(Mutex::new(SoundfontState { current: sf2.clone(), loading: false })),
+    };
+
+    // Reabre la última bóveda. Si no está disponible o parece abierta en otro equipo, la app
+    // arranca sin bóveda y el frontend muestra la pantalla de bienvenida.
+    if let Some(last) = last_vault {
+        match commands::activate_vault(app, &state, Path::new(&last), false) {
+            Ok(r) if r.opened => {}
+            Ok(r) => log::warn!("{}", r.lock_warning.unwrap_or_default()),
+            Err(e) => log::warn!("No se pudo abrir la última bóveda: {e}"),
+        }
+    }
 
     // El motor arranca al instante con el piano integrado; el SoundFont preferido (p. ej.
     // FluidR3_GM.sf2 del sistema, con muestras reales de piano) se carga en segundo plano.
-    let saved = db.get_setting(soundfont::SETTING_SOUNDFONT_PATH).ok().flatten();
-    let preferred = soundfont::preferred(&paths, saved.as_deref());
-    let soundfont_state = Arc::new(Mutex::new(SoundfontState { current: sf2.clone(), loading: false }));
+    let saved = state.config.lock().unwrap_or_else(|p| p.into_inner()).soundfont_path.clone();
+    let preferred = soundfont::preferred(&state.dirs, saved.as_deref());
     if preferred != sf2 {
-        commands::load_soundfont_in_background(audio.clone(), soundfont_state.clone(), preferred);
+        commands::load_soundfont_in_background(audio, state.soundfont.clone(), preferred);
     }
 
-    Ok(AppState {
-        paths,
-        db,
-        recorder: MidiRecorder::new(),
-        audio,
-        sync,
-        recording_session: Mutex::new(None),
-        soundfont: soundfont_state,
-    })
+    Ok(state)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(
@@ -114,13 +121,28 @@ pub fn run() {
             commands::delete_fragment,
             commands::add_timeline_comment,
             commands::delete_timeline_comment,
-            commands::save_google_credentials,
-            commands::start_google_auth,
-            commands::get_sync_status,
-            commands::trigger_sync_now,
             commands::get_soundfont_info,
             commands::set_soundfont,
+            commands::get_vault_info,
+            commands::create_vault,
+            commands::open_vault,
+            commands::import_legacy_data,
+            commands::close_vault,
+            commands::forget_recent_vault,
+            commands::reveal_vault,
+            commands::get_language,
+            commands::set_language,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            // Al salir se libera el lock de la bóveda para que otro equipo pueda abrirla sin aviso.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Some(v) = state.vault.read().unwrap_or_else(|p| p.into_inner()).as_ref() {
+                        v.release_lock();
+                    }
+                }
+            }
+        });
 }

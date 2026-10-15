@@ -1,5 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
 import { formatMs } from '../../core/format';
+import { I18nService } from '../../core/i18n/i18n.service';
+import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import { BPM_MAX, BPM_MIN, RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
@@ -9,13 +11,14 @@ import { IconComponent } from '../icon/icon.component';
 @Component({
   selector: 'app-recorder-deck',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, TranslatePipe],
   templateUrl: './recorder-deck.component.html',
 })
 export class RecorderDeckComponent {
   private readonly store = inject(SessionStore);
   protected readonly rec = inject(RecordingStore);
   protected readonly api = inject(TauriApiService);
+  private readonly i18n = inject(I18nService);
 
   protected readonly BPM_MIN = BPM_MIN;
   protected readonly BPM_MAX = BPM_MAX;
@@ -29,9 +32,9 @@ export class RecorderDeckComponent {
   protected readonly hasRaw = computed(() => !!this.session()?.raw_midi_path);
   protected readonly portStatus = computed(() => {
     const p = this.rec.selectedPort();
-    if (!p) return { label: this.rec.ports().length ? 'Elige una entrada' : 'Conecta un teclado USB', ok: false };
-    if (p.is_virtual) return { label: 'Genera notas de prueba', ok: false };
-    return { label: 'Teclado conectado', ok: true };
+    if (!p) return { label: this.i18n.t(this.rec.ports().length ? 'recorder.port.choose' : 'sidebar.port.none'), ok: false };
+    if (p.is_virtual) return { label: this.i18n.t('recorder.port.virtual'), ok: false };
+    return { label: this.i18n.t('sidebar.port.connected'), ok: true };
   });
 
   private bpmSaveTimer: ReturnType<typeof setTimeout> | null = null;

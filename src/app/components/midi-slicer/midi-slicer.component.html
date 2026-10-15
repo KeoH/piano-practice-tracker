@@ -1,16 +1,16 @@
 <section class="panel" aria-labelledby="slicer-h">
   <header class="flex flex-wrap items-center gap-x-3 gap-y-2 px-6 pt-5">
-    <h2 id="slicer-h" class="text-[17px] font-semibold">Pista bruta</h2>
+    <h2 id="slicer-h" class="text-[17px] font-semibold">{{ 'header.rawTake' | t }}</h2>
     <span class="tabular text-[13px] text-muted">{{ formatMs(durationMs()) }}</span>
     @if (loading()) {
-      <span class="text-[13px] text-faint" role="status">Analizando…</span>
+      <span class="text-[13px] text-faint" role="status">{{ 'slicer.analyzing' | t }}</span>
     }
     @if (recordingHere()) {
-      <span class="inline-flex h-[26px] items-center rounded-full bg-rec/15 px-2.5 text-xs font-medium text-rec-soft">Recorte en pausa mientras grabas</span>
+      <span class="inline-flex h-[26px] items-center rounded-full bg-rec/15 px-2.5 text-xs font-medium text-rec-soft">{{ 'slicer.pausedWhileRecording' | t }}</span>
     }
     <span class="flex-1"></span>
-    <span class="text-[13px] text-muted">Arrastra sobre la pista para elegir un pasaje · clic para escuchar desde ahí</span>
-    <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" aria-label="Volver a analizar la pista" title="Volver a analizar la pista">
+    <span class="text-[13px] text-muted">{{ 'slicer.help' | t }}</span>
+    <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" [attr.aria-label]="'slicer.reanalyze' | t" [title]="'slicer.reanalyze' | t">
       <app-icon name="refresh" [size]="17" [class.animate-spin]="loading()" />
     </button>
   </header>
@@ -41,7 +41,7 @@
           [style.left.%]="pct(sel.start)"
           role="slider"
           tabindex="0"
-          aria-label="Inicio de la selección"
+          [attr.aria-label]="'slicer.selectionStart' | t"
           [attr.aria-valuemin]="0"
           [attr.aria-valuemax]="sel.end"
           [attr.aria-valuenow]="sel.start"
@@ -57,7 +57,7 @@
           [style.left.%]="pct(sel.end)"
           role="slider"
           tabindex="0"
-          aria-label="Fin de la selección"
+          [attr.aria-label]="'slicer.selectionEnd' | t"
           [attr.aria-valuemin]="sel.start"
           [attr.aria-valuemax]="durationMs()"
           [attr.aria-valuenow]="sel.end"
@@ -85,22 +85,22 @@
           class="flex h-12 w-12 items-center justify-center rounded-full bg-ivory text-ink-900 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           (click)="isPlaying() ? pause() : play()"
           [disabled]="!isPlaying() && (locked() || !rawPath())"
-          [attr.aria-label]="isPlaying() ? 'Pausa' : validSelection() ? 'Reproducir la selección' : 'Reproducir'"
-          [title]="isPlaying() ? 'Pausa' : validSelection() ? 'Reproducir la selección' : 'Reproducir'"
+          [attr.aria-label]="(isPlaying() ? 'player.pause' : validSelection() ? 'slicer.playSelection' : 'player.play') | t"
+          [title]="(isPlaying() ? 'player.pause' : validSelection() ? 'slicer.playSelection' : 'player.play') | t"
         >
           <app-icon [name]="isPlaying() ? 'pause' : 'play'" [size]="18" />
         </button>
-        <button type="button" class="btn btn-icon h-11 w-11 rounded-full text-fg-soft" (click)="stop()" [disabled]="!showPlayhead()" aria-label="Detener" title="Detener">
+        <button type="button" class="btn btn-icon h-11 w-11 rounded-full text-fg-soft" (click)="stop()" [disabled]="!showPlayhead()" [attr.aria-label]="'player.stop' | t" [title]="'player.stop' | t">
           <app-icon name="stop" [size]="14" />
         </button>
-        <span class="tabular ml-1.5 text-[15px]" aria-label="Posición actual">
+        <span class="tabular ml-1.5 text-[15px]" [attr.aria-label]="'player.position' | t">
           <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
         </span>
       </div>
 
       <div class="flex flex-wrap items-end gap-2.5">
         <div>
-          <label for="sel-start" class="mb-1.5 block text-xs font-semibold text-muted">Inicio</label>
+          <label for="sel-start" class="mb-1.5 block text-xs font-semibold text-muted">{{ 'slicer.start' | t }}</label>
           <input #startIn id="sel-start" class="field tabular w-24 text-center" placeholder="mm:ss"
             [value]="selection() ? formatMs(selection()!.start, true) : ''"
             [disabled]="locked() || durationMs() <= 0"
@@ -108,31 +108,30 @@
         </div>
         <span class="flex h-10 items-center text-faint" aria-hidden="true">→</span>
         <div>
-          <label for="sel-end" class="mb-1.5 block text-xs font-semibold text-muted">Fin</label>
+          <label for="sel-end" class="mb-1.5 block text-xs font-semibold text-muted">{{ 'slicer.end' | t }}</label>
           <input #endIn id="sel-end" class="field tabular w-24 text-center" placeholder="mm:ss"
             [value]="selection() ? formatMs(selection()!.end, true) : ''"
             [disabled]="locked() || durationMs() <= 0"
             (change)="onTimeInput(endIn, 'end')" (keydown.enter)="onTimeInput(endIn, 'end')" />
         </div>
-        <button type="button" class="btn btn-ghost text-fg-soft" (click)="selectAll()" [disabled]="locked() || durationMs() <= 0">Toda la pista</button>
+        <button type="button" class="btn btn-ghost text-fg-soft" (click)="selectAll()" [disabled]="locked() || durationMs() <= 0">{{ 'slicer.selectAll' | t }}</button>
         @if (selection()) {
-          <button type="button" class="btn btn-ghost text-fg-soft" (click)="clearSelection()">Quitar selección</button>
+          <button type="button" class="btn btn-ghost text-fg-soft" (click)="clearSelection()">{{ 'slicer.clearSelection' | t }}</button>
         }
       </div>
 
       <div class="ml-auto flex flex-wrap gap-2.5">
         <button type="button" class="btn btn-danger btn-lg" (click)="discard()" [disabled]="!validSelection() || locked()">
-          <app-icon name="trash" [size]="16" /> Descartar
+          <app-icon name="trash" [size]="16" /> {{ 'slicer.discard' | t }}
         </button>
         <button type="button" class="btn btn-primary btn-lg" (click)="openExtract()" [disabled]="!validSelection() || locked()">
-          <app-icon name="scissors" [size]="16" /> Extraer fragmento
+          <app-icon name="scissors" [size]="16" /> {{ 'slicer.extract' | t }}
         </button>
       </div>
     </div>
 
     <p class="mt-4.5 border-t border-line pt-4 text-[13px] leading-normal text-muted">
-      <strong class="font-semibold text-fg">Extraer</strong> guarda el pasaje como fragmento y lo quita de la pista bruta.
-      <strong class="font-semibold text-fg">Descartar</strong> lo borra sin guardarlo.
+      <app-rich-text [text]="'slicer.footer' | t" />
     </p>
   </div>
 </section>
@@ -148,29 +147,29 @@
       (keydown.escape)="extractOpen.set(false)"
       (submit)="$event.preventDefault(); extract()"
     >
-      <h2 id="extract-h" class="text-lg font-semibold text-fg-strong">Extraer fragmento</h2>
+      <h2 id="extract-h" class="text-lg font-semibold text-fg-strong">{{ 'slicer.extract' | t }}</h2>
       @if (selection(); as sel) {
         <p class="tabular mt-1 text-[13px] text-muted">
           {{ formatMs(sel.start, true) }} → {{ formatMs(sel.end, true) }} · {{ formatMs(sel.end - sel.start, true) }}
         </p>
       }
       <p class="mt-3 rounded-[10px] bg-accent/10 px-3 py-2 text-[13px] text-fg">
-        El pasaje se guarda como fragmento independiente y desaparece de la pista bruta.
+        {{ 'slicer.extractNote' | t }}
       </p>
       <div class="mt-5 flex flex-col gap-4">
         <div>
-          <label for="frag-title" class="label">Título</label>
+          <label for="frag-title" class="label">{{ 'fragments.titleLabel' | t }}</label>
           <input id="frag-title" class="field" autofocus [value]="extractTitle()" (input)="extractTitle.set($any($event.target).value)" />
         </div>
         <div>
-          <label for="frag-expl" class="label">Explicación <span class="font-normal text-faint">(opcional)</span></label>
-          <textarea id="frag-expl" class="field min-h-24 resize-y" placeholder="¿Qué trabajaste en este pasaje?"
+          <label for="frag-expl" class="label">{{ 'fragments.explanationLabel' | t }} <span class="font-normal text-faint">{{ 'common.optional' | t }}</span></label>
+          <textarea id="frag-expl" class="field min-h-24 resize-y" [placeholder]="'fragments.explanationPlaceholder' | t"
             [value]="extractExplanation()" (input)="extractExplanation.set($any($event.target).value)"></textarea>
         </div>
       </div>
       <div class="mt-6 flex justify-end gap-2.5">
-        <button type="button" class="btn btn-lg" (click)="extractOpen.set(false)">Cancelar</button>
-        <button type="submit" class="btn btn-primary btn-lg" [disabled]="working()">{{ working() ? 'Extrayendo…' : 'Extraer fragmento' }}</button>
+        <button type="button" class="btn btn-lg" (click)="extractOpen.set(false)">{{ 'common.cancel' | t }}</button>
+        <button type="submit" class="btn btn-primary btn-lg" [disabled]="working()">{{ (working() ? 'slicer.extracting' : 'slicer.extract') | t }}</button>
       </div>
     </form>
   </div>
