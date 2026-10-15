@@ -1,0 +1,3 @@
+# Limita el paralelismo de compilación: con todos los núcleos el equipo se queda sin RAM.
+[build]
+jobs = 4

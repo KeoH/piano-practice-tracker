@@ -1,0 +1,134 @@
+@if (session(); as s) {
+  <!-- gap-px sobre fondo de línea: dibuja los separadores entre filas y columnas -->
+  <section class="flex flex-col gap-px overflow-hidden rounded-2xl border border-line bg-line" aria-label="Grabación">
+    <!-- Grabar / detener -->
+    <div class="flex items-center gap-5 p-6 transition-colors" [class]="isThisRecording() ? 'bg-[#1e1416]' : 'bg-ink-800'">
+      <button
+        type="button"
+        class="flex h-[76px] w-[76px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+        [class]="isThisRecording()
+          ? 'rec-ring bg-[#e5484d] hover:bg-[#ec5a5f]'
+          : 'border-2 border-[#5a2a2c] bg-[#221416] hover:border-rec/70 hover:bg-[#2a181a]'"
+        [disabled]="rec.busy() || otherRecording() || !api.available"
+        [attr.aria-label]="isThisRecording() ? 'Detener grabación' : 'Grabar'"
+        [attr.aria-pressed]="isThisRecording()"
+        (click)="toggleRecording()"
+      >
+        @if (isThisRecording()) {
+          <span class="h-6 w-6 rounded-[5px] bg-white"></span>
+        } @else {
+          <span class="h-7 w-7 rounded-full bg-rec"></span>
+        }
+      </button>
+      <div class="flex min-w-0 flex-col gap-1.5">
+        <span class="tabular text-4xl leading-none font-medium tracking-tight" [class]="isThisRecording() ? 'text-rec-soft' : 'text-fg'" aria-live="off">
+          {{ formatMs(isThisRecording() ? rec.elapsedMs() : 0, true) }}
+        </span>
+        <span class="flex items-center gap-2 text-sm font-semibold" [class]="isThisRecording() ? 'text-rec-soft' : 'text-fg'" role="status">
+          @if (isThisRecording()) {
+            <span class="rec-dot dot h-2 w-2 bg-rec"></span> Grabando
+          } @else if (otherRecording()) {
+            Grabando en otra sesión
+          } @else {
+            Listo para grabar
+          }
+        </span>
+        <span class="text-[13px] text-muted">
+          @if (isThisRecording() && hasRaw()) {
+            Se añade al final de la pista bruta, a partir de {{ formatMs(s.raw_duration_ms) }}
+          } @else if (hasRaw()) {
+            Lo que toques se añade al final de la pista bruta ({{ formatMs(s.raw_duration_ms) }})
+          } @else {
+            Lo que toques será la pista bruta de esta sesión
+          }
+        </span>
+      </div>
+    </div>
+
+    <!-- Ajustes de grabación -->
+    <div class="@container">
+    <div class="grid h-full grid-cols-1 gap-px @lg:grid-cols-2 @2xl:grid-cols-[1fr_0.9fr_1.15fr]">
+      <div class="flex flex-col gap-2.5 bg-ink-800 px-[22px] py-5">
+        <label for="midi-port" class="text-[13px] font-semibold text-fg-soft">Entrada MIDI</label>
+        <div class="flex gap-2">
+          <select
+            id="midi-port"
+            class="field h-11 min-w-0 flex-1"
+            [value]="rec.selectedPortId()"
+            [disabled]="rec.isRecording()"
+            (change)="rec.selectPort($any($event.target).value)"
+          >
+            @for (p of rec.ports(); track p.id) {
+              <option [value]="p.id" [selected]="p.id === rec.selectedPortId()">{{ p.name }}</option>
+            } @empty {
+              <option value="">Sin puertos</option>
+            }
+          </select>
+          <button
+            type="button"
+            class="btn btn-icon h-11 w-11 text-muted"
+            (click)="rec.refreshPorts()"
+            [disabled]="rec.portsLoading() || rec.isRecording()"
+            aria-label="Buscar teclados de nuevo"
+            title="Buscar teclados de nuevo"
+          >
+            <app-icon name="refresh" [size]="17" [class.animate-spin]="rec.portsLoading()" />
+          </button>
+        </div>
+        <span class="flex items-center gap-1.5 text-xs text-muted">
+          <span class="dot" [class]="portStatus().ok ? 'bg-ok' : 'bg-faint'"></span>{{ portStatus().label }}
+        </span>
+      </div>
+
+      <div class="flex flex-col gap-2.5 bg-ink-800 px-[22px] py-5">
+        <label for="bpm-num" class="text-[13px] font-semibold text-fg-soft">Tempo</label>
+        <div class="flex items-center gap-1.5">
+          <button type="button" class="btn btn-icon h-11 w-11 text-xl" (click)="nudgeBpm(-1)" aria-label="Bajar tempo">−</button>
+          <input
+            id="bpm-num"
+            type="number"
+            class="field no-spin tabular h-11 w-[72px] px-1 text-center text-xl font-medium text-accent"
+            [min]="BPM_MIN"
+            [max]="BPM_MAX"
+            [value]="rec.bpm()"
+            (input)="onBpmInput($any($event.target).value)"
+            (change)="onBpmCommit($any($event.target))"
+            (blur)="onBpmCommit($any($event.target))"
+          />
+          <button type="button" class="btn btn-icon h-11 w-11 text-xl" (click)="nudgeBpm(1)" aria-label="Subir tempo">+</button>
+          <span class="ml-0.5 text-[13px] text-muted">BPM</span>
+        </div>
+        <input
+          type="range"
+          class="range w-full"
+          aria-label="Tempo en BPM (deslizador)"
+          [min]="BPM_MIN"
+          [max]="BPM_MAX"
+          step="1"
+          [value]="rec.bpm()"
+          (input)="onBpmInput($any($event.target).value)"
+        />
+      </div>
+
+      <div class="flex flex-col justify-center bg-ink-800 px-[22px] py-3.5 @lg:col-span-2 @2xl:col-span-1">
+        <div class="flex min-h-[52px] items-center gap-3">
+          <app-icon name="metronome" [size]="20" class="text-muted" />
+          <span id="lbl-metronome" class="flex flex-1 cursor-pointer flex-col gap-0.5" (click)="rec.toggleMetronome()">
+            <span class="text-sm font-medium">Claqueta</span>
+            <span class="text-xs text-faint">Suena al tempo elegido</span>
+          </span>
+          <button type="button" role="switch" class="switch" [attr.aria-checked]="rec.metronomeOn()" aria-labelledby="lbl-metronome" (click)="rec.toggleMetronome()"></button>
+        </div>
+        <div class="flex min-h-[52px] items-center gap-3 border-t border-line">
+          <app-icon name="headphones" [size]="20" class="text-muted" />
+          <span id="lbl-live-synth" class="flex flex-1 cursor-pointer flex-col gap-0.5" (click)="rec.toggleLiveSynth()">
+            <span class="text-sm font-medium">Oír mientras toco</span>
+            <span class="text-xs text-faint">Sonido del piano de la app</span>
+          </span>
+          <button type="button" role="switch" class="switch" [attr.aria-checked]="rec.liveSynthOn()" aria-labelledby="lbl-live-synth" (click)="rec.toggleLiveSynth()"></button>
+        </div>
+      </div>
+    </div>
+    </div>
+  </section>
+}

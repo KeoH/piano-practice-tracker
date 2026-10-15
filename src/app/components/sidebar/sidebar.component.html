@@ -1,0 +1,138 @@
+<!-- Marca -->
+<div class="flex items-center gap-3 px-5 pt-5 pb-4">
+  <span class="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] bg-accent/15 text-accent">
+    <app-icon name="piano" [size]="22" />
+  </span>
+  <div class="flex flex-col gap-0.5 leading-tight">
+    <p class="text-[15px] font-semibold text-fg">Piano Practice</p>
+    <p class="text-xs text-faint">Diario de práctica</p>
+  </div>
+</div>
+
+<div class="flex flex-col gap-2.5 px-4 pb-4">
+  <button type="button" class="btn btn-primary btn-lg w-full" (click)="newSession()" [disabled]="!api.available">
+    <app-icon name="plus" [size]="18" /> Nueva sesión
+  </button>
+  <div class="relative">
+    <app-icon name="search" [size]="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+    <label for="session-filter" class="sr-only">Buscar sesiones por título</label>
+    <input
+      id="session-filter"
+      type="search"
+      class="field bg-ink-850 pl-9"
+      placeholder="Buscar sesión"
+      [value]="store.filter()"
+      (input)="store.filter.set($any($event.target).value)"
+    />
+  </div>
+</div>
+
+<nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" aria-label="Sesiones de práctica">
+  @if (store.listLoading() && totalCount() === 0) {
+    <p class="px-2.5 py-4 text-[13px] text-faint">Cargando…</p>
+  }
+  @for (g of groups(); track g.label) {
+    <section>
+      <h2 class="px-2.5 pb-1.5 text-xs font-semibold text-faint">{{ g.label }}</h2>
+      <ul class="flex flex-col gap-0.5">
+        @for (s of g.items; track s.id) {
+          @let state = cloud(s);
+          @let active = store.selectedId() === s.id;
+          <li>
+            <button
+              type="button"
+              class="flex min-h-[52px] w-full items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-colors"
+              [class]="active ? 'border-line-hover bg-ink-700' : 'border-transparent hover:bg-ink-800'"
+              [attr.aria-current]="active ? 'page' : null"
+              (click)="select(s)"
+            >
+              <span class="flex min-w-0 flex-1 flex-col gap-[3px]">
+                <span class="flex min-w-0 items-center gap-[7px] text-sm font-medium" [class]="active ? 'text-fg-strong' : 'text-fg-soft'">
+                  @if (rec.recordingSessionId() === s.id) {
+                    <span class="rec-dot dot h-2 w-2 bg-rec" role="img" aria-label="Grabando"></span>
+                  }
+                  <span class="truncate">{{ s.title || 'Sin título' }}</span>
+                </span>
+                <span class="flex gap-1.5 text-xs whitespace-nowrap text-faint">
+                  <span>{{ formatShortDate(s.session_date) }}</span>
+                  <span aria-hidden="true">·</span>
+                  <span class="tabular text-[11.5px]" title="Duración de la pista bruta">{{ formatMs(s.raw_duration_ms) }}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{{ plural(s.fragment_count, 'fragmento', 'fragmentos', 'sin fragmentos') }}</span>
+                </span>
+              </span>
+              @if (state === 'PENDING') {
+                <app-icon name="cloud-up" [size]="17" class="text-accent" />
+                <span class="sr-only">Pendiente de subir a Drive</span>
+              } @else if (state === 'ERROR') {
+                <app-icon name="alert" [size]="17" class="text-rec" />
+                <span class="sr-only">Error al subir a Drive</span>
+              }
+            </button>
+          </li>
+        }
+      </ul>
+    </section>
+  } @empty {
+    @if (!store.listLoading()) {
+      <p class="px-2.5 py-6 text-center text-[13px] text-faint">
+        {{ store.filter() ? 'Ninguna sesión coincide con la búsqueda.' : 'Aún no hay sesiones.' }}
+      </p>
+    }
+  }
+</nav>
+
+<!-- Pie: teclado y ajustes -->
+<div class="flex flex-col gap-0.5 border-t border-line p-2.5">
+  <div class="flex flex-col gap-1.5 px-2.5 py-2">
+    <label for="midi-port" class="text-xs font-semibold text-fg-soft">Entrada MIDI</label>
+    <div class="flex gap-1.5">
+      <select
+        id="midi-port"
+        class="field min-w-0 flex-1 bg-ink-850 text-[13px]"
+        [value]="rec.selectedPortId()"
+        [disabled]="rec.isRecording()"
+        (change)="rec.selectPort($any($event.target).value)"
+      >
+        @for (p of rec.ports(); track p.id) {
+          <option [value]="p.id" [selected]="p.id === rec.selectedPortId()">{{ p.name }}</option>
+        } @empty {
+          <option value="">Sin puertos</option>
+        }
+      </select>
+      <button
+        type="button"
+        class="btn btn-icon text-muted"
+        (click)="rec.refreshPorts()"
+        [disabled]="rec.portsLoading() || rec.isRecording()"
+        aria-label="Buscar teclados de nuevo"
+        title="Buscar teclados de nuevo"
+      >
+        <app-icon name="refresh" [size]="16" [class.animate-spin]="rec.portsLoading()" />
+      </button>
+    </div>
+    <span class="flex items-center gap-1.5 text-xs text-faint">
+      <span class="dot" [class]="port().ok ? 'bg-ok' : 'bg-faint'"></span>{{ port().detail }}
+    </span>
+  </div>
+  <button
+    type="button"
+    class="flex min-h-12 w-full items-center gap-3 rounded-[10px] px-2.5 py-1.5 text-left transition-colors hover:bg-ink-800"
+    (click)="sync.settingsOpen.set(true)"
+    aria-haspopup="dialog"
+  >
+    <app-icon name="settings" [size]="18" class="text-muted" />
+    <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span class="text-[13px] font-medium text-fg">Ajustes</span>
+      <span class="flex items-center gap-1.5 text-xs text-faint">
+        <span class="dot" [class]="toneDot(sync.summary().tone)"></span>
+        <span class="truncate">
+          {{ sync.summary().label }}
+          @if (sync.summary().tone === 'ok' && sync.status()?.last_sync_at; as last) {
+            · {{ formatRelative(last) }}
+          }
+        </span>
+      </span>
+    </span>
+  </button>
+</div>

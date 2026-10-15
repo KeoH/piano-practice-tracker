@@ -1,0 +1,87 @@
+<section class="panel flex flex-col overflow-hidden" aria-labelledby="notes-h">
+  <header class="flex flex-wrap items-center gap-x-4 gap-y-2.5 border-b border-line py-3.5 pr-4 pl-6">
+    <h2 id="notes-h" class="text-[17px] font-semibold">Notas de la sesión</h2>
+    <span class="flex items-center gap-3 text-[13px]" aria-live="polite">
+      @if (uploading() > 0) {
+        <span class="inline-flex items-center gap-1.5 text-accent"><app-icon name="image" [size]="14" /> Guardando imagen…</span>
+      }
+      @switch (saveState()) {
+        @case ('saving') {
+          <span class="text-accent">Guardando…</span>
+        }
+        @case ('dirty') {
+          <span class="text-faint">Cambios sin guardar</span>
+        }
+        @case ('saved') {
+          <span class="inline-flex items-center gap-1.5 text-ok"><app-icon name="check" [size]="15" /> Guardado</span>
+        }
+        @case ('error') {
+          <span class="text-rec-soft">Error al guardar</span>
+        }
+      }
+    </span>
+    <span class="flex-1"></span>
+    <input #filePicker type="file" accept="image/*" multiple class="hidden" (change)="onFilesPicked(filePicker)" />
+    <button type="button" class="btn" (click)="filePicker.click()" [disabled]="mode() === 'preview'">
+      <app-icon name="image" [size]="16" /> Insertar imagen
+    </button>
+    <div class="flex rounded-[10px] border border-line-strong bg-ink-900 p-[3px]" role="group" aria-label="Vista del editor">
+      @for (m of modes; track m.id) {
+        <button
+          type="button"
+          class="h-[34px] rounded-[7px] px-3.5 text-[13px] font-medium transition-colors"
+          [class]="mode() === m.id ? 'bg-[#2a2a33] text-fg-strong' : 'text-muted hover:text-fg'"
+          [attr.aria-pressed]="mode() === m.id"
+          (click)="setMode(m.id)"
+        >
+          {{ m.label }}
+        </button>
+      }
+    </div>
+  </header>
+
+  <div class="grid min-h-[560px] flex-1" [class.grid-cols-2]="mode() === 'split'">
+    @if (mode() !== 'preview') {
+      <div class="relative flex min-w-0 flex-col bg-ink-850" [class.border-r]="mode() === 'split'" [class.border-line]="mode() === 'split'">
+        <span class="px-6 pt-3 text-xs font-semibold text-faint" aria-hidden="true">Markdown</span>
+        <label for="md-text" class="sr-only">Notas en Markdown</label>
+        <textarea
+          #ta
+          id="md-text"
+          class="min-h-[520px] w-full flex-1 resize-y bg-transparent px-6 pt-3 pb-6 font-mono text-[13.5px] leading-[1.75] text-[#d9d7d0] placeholder:text-faint focus:outline-none focus-visible:outline-none"
+          spellcheck="true"
+          placeholder="## Objetivos de hoy&#10;- [ ] Escalas en Re mayor a 90 BPM&#10;- [ ] Compases 12–20, manos separadas&#10;&#10;Pega capturas de la partitura con Ctrl+V…"
+          [value]="text()"
+          (input)="onInput($any($event.target).value)"
+          (paste)="onPaste($event)"
+          (dragover)="onDragOver($event)"
+          (dragleave)="dragOver.set(false)"
+          (drop)="onDrop($event)"
+          (keydown)="onKeydown($event)"
+        ></textarea>
+        @if (dragOver()) {
+          <div class="pointer-events-none absolute inset-3 flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-accent/70 bg-accent/5 text-sm text-fg">
+            <app-icon name="image" [size]="18" /> Suelta la imagen para insertarla
+          </div>
+        }
+      </div>
+    }
+    @if (mode() !== 'edit') {
+      <div class="max-h-[70vh] min-h-[520px] min-w-0 overflow-y-auto px-8 pt-3 pb-8">
+        <span class="mb-3 block text-xs font-semibold text-faint" aria-hidden="true">Vista previa</span>
+        @if (text().trim()) {
+          <div class="md-preview" [innerHTML]="html()"></div>
+        } @else {
+          <p class="text-sm text-faint">Nada que mostrar todavía. Escribe tus objetivos, observaciones o pega una captura de la partitura.</p>
+        }
+      </div>
+    }
+  </div>
+
+  <footer class="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-6 py-3 text-xs text-faint">
+    <span>Pega o arrastra imágenes directamente en el texto</span>
+    <span class="flex-1"></span>
+    <span class="tabular">{{ stats().words }} palabras · {{ stats().chars }} caracteres</span>
+    <span><span class="kbd">Ctrl</span> + <span class="kbd">S</span> guarda</span>
+  </footer>
+</section>

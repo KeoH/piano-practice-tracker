@@ -1,0 +1,177 @@
+<section class="panel" aria-labelledby="slicer-h">
+  <header class="flex flex-wrap items-center gap-x-3 gap-y-2 px-6 pt-5">
+    <h2 id="slicer-h" class="text-[17px] font-semibold">Pista bruta</h2>
+    <span class="tabular text-[13px] text-muted">{{ formatMs(durationMs()) }}</span>
+    @if (loading()) {
+      <span class="text-[13px] text-faint" role="status">Analizando…</span>
+    }
+    @if (recordingHere()) {
+      <span class="inline-flex h-[26px] items-center rounded-full bg-rec/15 px-2.5 text-xs font-medium text-rec-soft">Recorte en pausa mientras grabas</span>
+    }
+    <span class="flex-1"></span>
+    <span class="text-[13px] text-muted">Arrastra sobre la pista para elegir un pasaje · clic para escuchar desde ahí</span>
+    <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" aria-label="Volver a analizar la pista" title="Volver a analizar la pista">
+      <app-icon name="refresh" [size]="17" [class.animate-spin]="loading()" />
+    </button>
+  </header>
+
+  <div class="px-6 pt-4 pb-6">
+    <!-- Línea de tiempo -->
+    <div
+      #track
+      class="relative cursor-crosshair touch-none overflow-hidden rounded-xl border border-line select-none"
+      (pointerdown)="onTrackDown($event)"
+      (pointermove)="onPointerMove($event)"
+      (pointerup)="onPointerUp($event)"
+      (pointercancel)="onPointerUp($event)"
+    >
+      <app-timeline-canvas [blocks]="activity()?.blocks ?? []" [durationMs]="durationMs()" [selection]="selection()" [height]="152" />
+
+      @if (selection(); as sel) {
+        <!-- Duración de la selección -->
+        @if (pct(sel.end) - pct(sel.start) > 6) {
+          <span
+            class="tabular pointer-events-none absolute top-2 z-10 flex h-[22px] -translate-x-1/2 items-center rounded-md bg-accent px-2 text-[11.5px] font-medium text-on-accent"
+            [style.left.%]="(pct(sel.start) + pct(sel.end)) / 2"
+          >{{ formatMs(sel.end - sel.start, true) }}</span>
+        }
+        <!-- Tiradores de inicio/fin -->
+        <div
+          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
+          [style.left.%]="pct(sel.start)"
+          role="slider"
+          tabindex="0"
+          aria-label="Inicio de la selección"
+          [attr.aria-valuemin]="0"
+          [attr.aria-valuemax]="sel.end"
+          [attr.aria-valuenow]="sel.start"
+          [attr.aria-valuetext]="formatMs(sel.start, true)"
+          (pointerdown)="onHandleDown($event, 'start')"
+          (keydown)="onHandleKey($event, 'start')"
+        >
+          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
+          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
+        </div>
+        <div
+          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
+          [style.left.%]="pct(sel.end)"
+          role="slider"
+          tabindex="0"
+          aria-label="Fin de la selección"
+          [attr.aria-valuemin]="sel.start"
+          [attr.aria-valuemax]="durationMs()"
+          [attr.aria-valuenow]="sel.end"
+          [attr.aria-valuetext]="formatMs(sel.end, true)"
+          (pointerdown)="onHandleDown($event, 'end')"
+          (keydown)="onHandleKey($event, 'end')"
+        >
+          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
+          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
+        </div>
+      }
+
+      @if (showPlayhead()) {
+        <div class="pointer-events-none absolute top-0 bottom-[18px] z-20 -ml-px w-0.5 bg-ivory shadow-[0_0_8px] shadow-ivory/60" [style.left.%]="pct(position())">
+          <span class="absolute top-0 -left-[5px] h-0 w-0 border-x-[6px] border-t-[8px] border-x-transparent border-t-ivory"></span>
+        </div>
+      }
+    </div>
+
+    <!-- Controles -->
+    <div class="mt-5 flex flex-wrap items-center gap-x-7 gap-y-4">
+      <div class="flex items-center gap-2">
+        <button
+          type="button"
+          class="flex h-12 w-12 items-center justify-center rounded-full bg-ivory text-ink-900 transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          (click)="isPlaying() ? pause() : play()"
+          [disabled]="!isPlaying() && (locked() || !rawPath())"
+          [attr.aria-label]="isPlaying() ? 'Pausa' : validSelection() ? 'Reproducir la selección' : 'Reproducir'"
+          [title]="isPlaying() ? 'Pausa' : validSelection() ? 'Reproducir la selección' : 'Reproducir'"
+        >
+          <app-icon [name]="isPlaying() ? 'pause' : 'play'" [size]="18" />
+        </button>
+        <button type="button" class="btn btn-icon h-11 w-11 rounded-full text-fg-soft" (click)="stop()" [disabled]="!showPlayhead()" aria-label="Detener" title="Detener">
+          <app-icon name="stop" [size]="14" />
+        </button>
+        <span class="tabular ml-1.5 text-[15px]" aria-label="Posición actual">
+          <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-end gap-2.5">
+        <div>
+          <label for="sel-start" class="mb-1.5 block text-xs font-semibold text-muted">Inicio</label>
+          <input #startIn id="sel-start" class="field tabular w-24 text-center" placeholder="mm:ss"
+            [value]="selection() ? formatMs(selection()!.start, true) : ''"
+            [disabled]="locked() || durationMs() <= 0"
+            (change)="onTimeInput(startIn, 'start')" (keydown.enter)="onTimeInput(startIn, 'start')" />
+        </div>
+        <span class="flex h-10 items-center text-faint" aria-hidden="true">→</span>
+        <div>
+          <label for="sel-end" class="mb-1.5 block text-xs font-semibold text-muted">Fin</label>
+          <input #endIn id="sel-end" class="field tabular w-24 text-center" placeholder="mm:ss"
+            [value]="selection() ? formatMs(selection()!.end, true) : ''"
+            [disabled]="locked() || durationMs() <= 0"
+            (change)="onTimeInput(endIn, 'end')" (keydown.enter)="onTimeInput(endIn, 'end')" />
+        </div>
+        <button type="button" class="btn btn-ghost text-fg-soft" (click)="selectAll()" [disabled]="locked() || durationMs() <= 0">Toda la pista</button>
+        @if (selection()) {
+          <button type="button" class="btn btn-ghost text-fg-soft" (click)="clearSelection()">Quitar selección</button>
+        }
+      </div>
+
+      <div class="ml-auto flex flex-wrap gap-2.5">
+        <button type="button" class="btn btn-danger btn-lg" (click)="discard()" [disabled]="!validSelection() || locked()">
+          <app-icon name="trash" [size]="16" /> Descartar
+        </button>
+        <button type="button" class="btn btn-primary btn-lg" (click)="openExtract()" [disabled]="!validSelection() || locked()">
+          <app-icon name="scissors" [size]="16" /> Extraer fragmento
+        </button>
+      </div>
+    </div>
+
+    <p class="mt-4.5 border-t border-line pt-4 text-[13px] leading-normal text-muted">
+      <strong class="font-semibold text-fg">Extraer</strong> guarda el pasaje como fragmento y lo quita de la pista bruta.
+      <strong class="font-semibold text-fg">Descartar</strong> lo borra sin guardarlo.
+    </p>
+  </div>
+</section>
+
+@if (extractOpen()) {
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" (click)="extractOpen.set(false)">
+    <form
+      class="w-full max-w-md rounded-2xl border border-line-strong bg-ink-800 p-6 shadow-2xl shadow-black/60"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="extract-h"
+      (click)="$event.stopPropagation()"
+      (keydown.escape)="extractOpen.set(false)"
+      (submit)="$event.preventDefault(); extract()"
+    >
+      <h2 id="extract-h" class="text-lg font-semibold text-fg-strong">Extraer fragmento</h2>
+      @if (selection(); as sel) {
+        <p class="tabular mt-1 text-[13px] text-muted">
+          {{ formatMs(sel.start, true) }} → {{ formatMs(sel.end, true) }} · {{ formatMs(sel.end - sel.start, true) }}
+        </p>
+      }
+      <p class="mt-3 rounded-[10px] bg-accent/10 px-3 py-2 text-[13px] text-fg">
+        El pasaje se guarda como fragmento independiente y desaparece de la pista bruta.
+      </p>
+      <div class="mt-5 flex flex-col gap-4">
+        <div>
+          <label for="frag-title" class="label">Título</label>
+          <input id="frag-title" class="field" autofocus [value]="extractTitle()" (input)="extractTitle.set($any($event.target).value)" />
+        </div>
+        <div>
+          <label for="frag-expl" class="label">Explicación <span class="font-normal text-faint">(opcional)</span></label>
+          <textarea id="frag-expl" class="field min-h-24 resize-y" placeholder="¿Qué trabajaste en este pasaje?"
+            [value]="extractExplanation()" (input)="extractExplanation.set($any($event.target).value)"></textarea>
+        </div>
+      </div>
+      <div class="mt-6 flex justify-end gap-2.5">
+        <button type="button" class="btn btn-lg" (click)="extractOpen.set(false)">Cancelar</button>
+        <button type="submit" class="btn btn-primary btn-lg" [disabled]="working()">{{ working() ? 'Extrayendo…' : 'Extraer fragmento' }}</button>
+      </div>
+    </form>
+  </div>
+}

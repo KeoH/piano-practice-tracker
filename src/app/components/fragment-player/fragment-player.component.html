@@ -1,0 +1,210 @@
+@let f = fragment();
+<article class="overflow-hidden rounded-2xl border bg-ink-800 transition-colors" [class]="expanded() || isActive() ? 'border-line-hover' : 'border-line'">
+  <!-- Cabecera -->
+  <header class="flex items-center gap-4 py-3.5 pr-4 pl-5">
+    <span class="tabular w-[22px] shrink-0 text-[13px] text-faint">{{ number() }}</span>
+    <button
+      type="button"
+      class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors"
+      [class]="isPlaying() ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'border border-line-hover text-fg hover:bg-ink-750'"
+      (click)="togglePlay()"
+      [attr.aria-label]="(isPlaying() ? 'Pausar «' : 'Reproducir «') + f.title + '»'"
+    >
+      <app-icon [name]="isPlaying() ? 'pause' : 'play'" [size]="16" />
+    </button>
+    <button
+      type="button"
+      class="flex min-w-0 flex-1 flex-col gap-[3px] py-1 text-left"
+      [attr.aria-expanded]="expanded()"
+      [attr.aria-controls]="'frag-body-' + f.id"
+      (click)="expanded.set(!expanded())"
+    >
+      <span class="max-w-full truncate text-[15px] font-semibold text-fg">{{ f.title }}</span>
+      @if (f.explanation) {
+        <span class="max-w-full truncate text-[13px] text-muted">{{ f.explanation }}</span>
+      }
+    </button>
+    <div class="flex items-center gap-3.5 text-[13px] whitespace-nowrap text-muted">
+      <span class="tabular">
+        @if (isActive()) {
+          <span class="text-ivory">{{ formatMs(position()) }}</span><span class="text-faint"> / </span>
+        }
+        <span class="text-fg" title="Duración">{{ formatMs(f.duration_ms) }}</span>
+      </span>
+      <span class="tabular inline-flex h-6 items-center rounded-md bg-ink-700 px-2 text-xs text-fg-soft">{{ f.bpm }} BPM</span>
+      <span class="inline-flex items-center gap-1.5" title="Comentarios">
+        <app-icon name="comment" [size]="15" />{{ f.comments.length }}<span class="sr-only"> comentarios</span>
+      </span>
+      @if (cloudState() === 'PENDING') {
+        <span class="text-accent" title="Pendiente de subir a Drive"><app-icon name="cloud-up" [size]="17" /><span class="sr-only">Pendiente de subir a Drive</span></span>
+      } @else if (cloudState() === 'ERROR') {
+        <span class="text-rec" title="Error al subir a Drive"><app-icon name="alert" [size]="17" /><span class="sr-only">Error al subir a Drive</span></span>
+      }
+    </div>
+    <button
+      type="button"
+      class="btn btn-ghost btn-icon"
+      [attr.aria-expanded]="expanded()"
+      [attr.aria-controls]="'frag-body-' + f.id"
+      [attr.aria-label]="expanded() ? 'Cerrar fragmento' : 'Abrir fragmento'"
+      (click)="expanded.set(!expanded())"
+    >
+      <app-icon name="chevron" [size]="18" class="transition-transform" [class]="expanded() ? '-rotate-90' : 'rotate-90'" />
+    </button>
+  </header>
+
+  @if (expanded()) {
+    <div [id]="'frag-body-' + f.id" class="flex flex-wrap border-t border-line">
+      <!-- Columna principal -->
+      <div class="flex min-w-0 flex-[999_1_520px] flex-col gap-4.5 px-6 pt-5.5 pb-6">
+        <!-- Línea de tiempo con comentarios -->
+        <div class="relative pt-12">
+          @if (popup(); as c) {
+            <div
+              class="popup-in pointer-events-none absolute -top-2 z-30 max-w-xs -translate-x-1/2 rounded-lg bg-ivory px-2.5 py-1.5 text-[13px] text-on-accent shadow-lg shadow-black/50"
+              [style.left.%]="popupLeft(c.timestamp_ms)"
+              role="status"
+            >
+              <span class="tabular mr-1.5 font-medium">{{ formatMs(c.timestamp_ms) }}</span>
+              <span class="line-clamp-2">{{ c.content }}</span>
+            </div>
+          }
+
+          <div class="relative">
+            @for (c of comments(); track c.id; let n = $index) {
+              @let current = popup()?.id === c.id;
+              <button
+                type="button"
+                class="tabular absolute -top-[34px] z-20 flex h-[26px] w-[26px] -translate-x-1/2 items-center justify-center rounded-full text-[11px] font-medium text-on-accent transition-colors"
+                [class]="current ? 'bg-ivory' : 'bg-accent hover:bg-accent-hover focus-visible:bg-ivory'"
+                [style.left.%]="pct(c.timestamp_ms)"
+                [attr.aria-label]="'Comentario en ' + formatMs(c.timestamp_ms) + ': ' + c.content"
+                (mouseenter)="hoverComment.set(c)"
+                (mouseleave)="hoverComment.set(null)"
+                (focus)="hoverComment.set(c)"
+                (blur)="hoverComment.set(null)"
+                (click)="seekTo(c)"
+              >
+                {{ n + 1 }}
+              </button>
+              <span
+                class="pointer-events-none absolute -top-2 bottom-[18px] z-10 w-px"
+                [class]="current ? 'bg-ivory/50' : 'bg-accent/40'"
+                [style.left.%]="pct(c.timestamp_ms)"
+              ></span>
+            }
+
+            <div
+              #timeline
+              class="relative cursor-pointer touch-none overflow-hidden rounded-xl border border-line select-none"
+              role="slider"
+              tabindex="0"
+              aria-label="Posición de reproducción"
+              [attr.aria-valuemin]="0"
+              [attr.aria-valuemax]="durationMs()"
+              [attr.aria-valuenow]="position()"
+              [attr.aria-valuetext]="formatMs(position())"
+              (pointerdown)="onTimelineDown($event)"
+              (pointermove)="onTimelineMove($event)"
+              (pointerup)="onTimelineUp($event)"
+              (pointercancel)="onTimelineUp($event)"
+              (keydown)="onTimelineKey($event)"
+            >
+              <app-timeline-canvas
+                [blocks]="activity()?.blocks ?? []"
+                [durationMs]="durationMs()"
+                [height]="102"
+                [progressMs]="position() > 0 ? position() : null"
+              />
+              <div class="pointer-events-none absolute top-0 bottom-[18px] z-10 -ml-px w-0.5 bg-ivory shadow-[0_0_8px] shadow-ivory/60" [style.left.%]="pct(position())"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Transporte -->
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" class="inline-flex h-11 items-center gap-2 rounded-full bg-ivory px-[18px] text-sm font-semibold text-ink-900 transition-opacity hover:opacity-90" (click)="togglePlay()">
+            <app-icon [name]="isPlaying() ? 'pause' : 'play'" [size]="15" /> {{ isPlaying() ? 'Pausa' : 'Reproducir' }}
+          </button>
+          <button type="button" class="btn btn-icon h-11 w-11 rounded-full text-fg-soft" (click)="stop()" aria-label="Detener" title="Detener">
+            <app-icon name="stop" [size]="14" />
+          </button>
+          <span class="tabular text-[15px]">
+            <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
+          </span>
+          @if (activityLoading()) {
+            <span class="text-[13px] text-faint" role="status">Analizando…</span>
+          }
+        </div>
+
+        <!-- Nuevo comentario -->
+        <div>
+          <label class="label" [for]="'new-comment-' + f.id">
+            Comentar en <span class="tabular text-accent">{{ formatMs(position()) }}</span>
+          </label>
+          <div class="flex gap-2">
+            <input
+              [id]="'new-comment-' + f.id"
+              class="field h-11"
+              placeholder="Qué quieres recordar de este momento"
+              [value]="newComment()"
+              [disabled]="addingComment()"
+              (input)="newComment.set($any($event.target).value)"
+              (keydown.enter)="addComment()"
+            />
+            <button type="button" class="btn btn-primary btn-lg" (click)="addComment()" [disabled]="!newComment().trim() || addingComment()">Añadir</button>
+          </div>
+        </div>
+
+        <!-- Título y explicación -->
+        <details class="border-t border-line pt-3.5">
+          <summary class="flex min-h-8 cursor-pointer items-center text-[13px] font-semibold text-fg-soft">Editar título y explicación</summary>
+          <div class="mt-3 flex flex-col gap-3">
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-muted" [for]="'frag-title-' + f.id">Título</label>
+              <input [id]="'frag-title-' + f.id" class="field" [value]="titleDraft()"
+                (input)="titleDraft.set($any($event.target).value)" (blur)="saveMeta()" (keydown.enter)="$any($event.target).blur()" />
+            </div>
+            <div>
+              <label class="mb-1.5 block text-xs font-semibold text-muted" [for]="'frag-expl-' + f.id">Explicación</label>
+              <textarea [id]="'frag-expl-' + f.id" class="field min-h-16 resize-y" rows="2" placeholder="Notas generales del pasaje…"
+                [value]="explanationDraft()" (input)="explanationDraft.set($any($event.target).value)" (blur)="saveMeta()"></textarea>
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <!-- Panel lateral de comentarios -->
+      <aside class="min-w-0 flex-[1_1_300px] border-l border-line bg-ink-850 px-3.5 py-5" [attr.aria-label]="'Comentarios de ' + f.title">
+        <h3 class="mb-2.5 px-2 text-[13px] font-semibold text-fg-soft">Comentarios · {{ comments().length }}</h3>
+        <ul class="flex max-h-96 flex-col gap-1 overflow-y-auto">
+          @for (c of comments(); track c.id) {
+            @let current = popup()?.id === c.id;
+            <li class="group flex items-start gap-0.5 rounded-[10px] p-1 transition-colors" [class]="current ? 'bg-ink-700' : 'hover:bg-ink-800'">
+              <button type="button" class="flex min-w-0 flex-1 items-start gap-2.5 rounded-lg p-2 text-left" (click)="seekTo(c)" [attr.aria-label]="'Ir a ' + formatMs(c.timestamp_ms) + ': ' + c.content">
+                <span class="tabular inline-flex h-[22px] shrink-0 items-center rounded-md px-1.5 text-xs" [class]="current ? 'bg-ivory text-on-accent' : 'bg-accent/15 text-accent'">
+                  {{ formatMs(c.timestamp_ms) }}
+                </span>
+                <span class="text-sm leading-snug break-words text-[#e4e2dc]">{{ c.content }}</span>
+              </button>
+              <button type="button" class="btn btn-ghost btn-icon h-9 w-9 opacity-70 group-hover:opacity-100" (click)="playFrom(c)" aria-label="Reproducir desde aquí" title="Reproducir desde aquí">
+                <app-icon name="play" [size]="13" />
+              </button>
+              <button type="button" class="btn btn-ghost btn-icon h-9 w-9 opacity-70 group-hover:opacity-100 hover:text-rec-soft" (click)="deleteComment(c)" aria-label="Borrar comentario" title="Borrar comentario">
+                <app-icon name="trash" [size]="15" />
+              </button>
+            </li>
+          } @empty {
+            <li class="px-2 py-3 text-[13px] leading-normal text-faint">Sin comentarios todavía. Escribe uno mientras escuchas.</li>
+          }
+        </ul>
+        @if (comments().length) {
+          <p class="mx-2 mt-3.5 text-xs leading-normal text-faint">Pulsa un comentario para saltar a ese momento.</p>
+        }
+        <button type="button" class="btn btn-danger mx-2 mt-5" (click)="deleteFragment()">
+          <app-icon name="trash" [size]="15" /> Borrar fragmento
+        </button>
+      </aside>
+    </div>
+  }
+</article>
