@@ -42,3 +42,6 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Coverage reports (CI writes the Rust one here)
+/coverage-rust

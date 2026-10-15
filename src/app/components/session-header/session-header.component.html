@@ -4,7 +4,7 @@
       <p class="mb-2 text-[13px] text-muted">{{ i18n.longDate(s.session_date) }}</p>
       <div class="flex items-center gap-1">
         <label for="session-title" class="sr-only">{{ 'header.titleLabel' | t }}</label>
-        <!-- El span invisible da al campo el ancho de su texto, para que el lápiz quede a su lado -->
+        <!-- The invisible span gives the input the width of its text, so the pencil sits right next to it -->
         <div class="-ml-2 inline-grid min-w-0 grid-cols-[minmax(0,auto)] text-[30px] leading-tight font-semibold tracking-tight">
           <span class="invisible col-start-1 row-start-1 overflow-hidden border px-2 py-0.5 whitespace-pre" aria-hidden="true">{{ titleDraft() || ' ' }}</span>
           <input

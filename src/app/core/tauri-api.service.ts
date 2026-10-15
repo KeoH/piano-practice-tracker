@@ -20,7 +20,7 @@ import {
   type VaultOpenResult,
 } from './models';
 
-/** Error controlado de IPC: `message` siempre es un string legible. */
+/** Handled IPC error: `message` is always a readable string. */
 export class IpcError extends Error {
   constructor(
     readonly command: string,
@@ -32,9 +32,9 @@ export class IpcError extends Error {
 }
 
 /**
- * Fachada tipada sobre los comandos IPC de Tauri.
- * Argumentos en camelCase (convención de Tauri v2), respuestas en snake_case (ver models.ts).
- * Todas las promesas rechazan con `IpcError` (mensaje string).
+ * Typed facade over the Tauri IPC commands.
+ * Arguments in camelCase (Tauri v2 convention), responses in snake_case (see models.ts).
+ * Every promise rejects with `IpcError` (string message).
  */
 @Injectable({ providedIn: 'root' })
 export class TauriApiService {
@@ -50,7 +50,7 @@ export class TauriApiService {
     }
   }
 
-  /** URL servible por el webview para una ruta absoluta local (asset protocol). */
+  /** Webview-servable URL for a local absolute path (asset protocol). */
   fileSrc(absPath: string): string {
     if (!this.available) return absPath;
     try {
@@ -60,7 +60,7 @@ export class TauriApiService {
     }
   }
 
-  // ---- Dispositivos MIDI y grabación ----
+  // ---- MIDI devices and recording ----
   listMidiPorts(): Promise<MidiPortInfo[]> {
     return this.call('list_midi_ports');
   }
@@ -83,7 +83,7 @@ export class TauriApiService {
     return this.call('stop_recording', { sessionId });
   }
 
-  // ---- Recorte y reproducción ----
+  // ---- Slicing and playback ----
   getMidiActivity(filePath: string): Promise<MidiActivityDto> {
     return this.call('get_midi_activity', { filePath });
   }
@@ -116,7 +116,7 @@ export class TauriApiService {
     return this.call('stop_midi_playback');
   }
 
-  // ---- Sesiones, fragmentos y comentarios ----
+  // ---- Sessions, fragments and comments ----
   getSessions(): Promise<SessionSummaryDto[]> {
     return this.call('get_sessions');
   }
@@ -137,7 +137,7 @@ export class TauriApiService {
     return this.call('delete_session', { sessionId });
   }
 
-  /** Devuelve la ruta del fichero guardado RELATIVA a la bóveda (`media/…`). `base64Data` sin prefijo `data:`. */
+  /** Returns the saved file's path RELATIVE to the vault (`media/…`). `base64Data` without the `data:` prefix. */
   saveSessionImage(sessionId: string, fileName: string, base64Data: string): Promise<string> {
     return this.call('save_session_image', { sessionId, fileName, base64Data });
   }
@@ -162,22 +162,22 @@ export class TauriApiService {
     return this.call('delete_timeline_comment', { commentId });
   }
 
-  // ---- Bóveda ----
+  // ---- Vault ----
   getVaultInfo(): Promise<VaultInfo> {
     return this.call('get_vault_info');
   }
 
-  /** Crea una bóveda en `path` (carpeta nueva o vacía) y la abre. */
+  /** Creates a vault in `path` (a new or empty folder) and opens it. */
   createVault(path: string): Promise<VaultInfo> {
     return this.call('create_vault', { path });
   }
 
-  /** Abre una bóveda; con `force` ignora el aviso de que está abierta en otro equipo. */
+  /** Opens a vault; with `force` it ignores the warning that it is open on another computer. */
   openVault(path: string, force = false): Promise<VaultOpenResult> {
     return this.call('open_vault', { path, force });
   }
 
-  /** Crea una bóveda en `path` moviendo a ella los datos de la versión anterior. */
+  /** Creates a vault in `path`, moving the previous version's data into it. */
   importLegacyData(path: string): Promise<VaultInfo> {
     return this.call('import_legacy_data', { path });
   }
@@ -190,12 +190,12 @@ export class TauriApiService {
     return this.call('forget_recent_vault', { path });
   }
 
-  /** Abre la carpeta de la bóveda en el gestor de archivos. */
+  /** Opens the vault folder in the file manager. */
   revealVault(): Promise<void> {
     return this.call('reveal_vault');
   }
 
-  /** Diálogo nativo para elegir una carpeta; devuelve null si se cancela. */
+  /** Native dialog to choose a folder; returns null if cancelled. */
   async pickFolder(title: string): Promise<string | null> {
     if (!this.available) return null;
     try {
@@ -207,12 +207,12 @@ export class TauriApiService {
     }
   }
 
-  // ---- Idioma ----
+  // ---- Language ----
   getLanguage(): Promise<LanguageInfo> {
     return this.call('get_language');
   }
 
-  /** `null` vuelve al idioma del sistema. */
+  /** `null` goes back to the system language. */
   setLanguage(language: string | null): Promise<LanguageInfo> {
     return this.call('set_language', { language });
   }
@@ -222,12 +222,12 @@ export class TauriApiService {
     return this.call('get_soundfont_info');
   }
 
-  /** Carga el SoundFont (.sf2) indicado; resuelve cuando ya suena con él. */
+  /** Loads the given SoundFont (.sf2); resolves once it is playing with it. */
   setSoundfont(path: string): Promise<SoundfontInfo> {
     return this.call('set_soundfont', { path });
   }
 
-  /** Diálogo nativo para elegir un fichero .sf2; devuelve null si se cancela. */
+  /** Native dialog to choose an .sf2 file; returns null if cancelled. */
   async pickSoundfontFile(): Promise<string | null> {
     if (!this.available) return null;
     try {
@@ -244,7 +244,7 @@ export class TauriApiService {
     }
   }
 
-  // ---- Eventos ----
+  // ---- Events ----
   onPlaybackProgress(cb: (p: PlaybackProgress) => void): Promise<UnlistenFn> {
     return this.listenTo<PlaybackProgress>(EVENT_PLAYBACK_PROGRESS, cb);
   }
@@ -254,7 +254,7 @@ export class TauriApiService {
     try {
       return await listen<T>(event, (e) => cb(e.payload));
     } catch (err) {
-      console.warn(`No se pudo suscribir a ${event}:`, err);
+      console.warn(`Could not subscribe to ${event}:`, err);
       return () => undefined;
     }
   }

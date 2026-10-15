@@ -1,7 +1,7 @@
-//! Comandos IPC de Tauri (contrato de la sección 5 de la especificación).
+//! Tauri IPC commands (the contract in section 5 of the specification).
 //!
-//! Todos son `async` para no bloquear el hilo principal de la UI; los módulos que
-//! envuelven son síncronos y rápidos salvo el análisis/recorte MIDI.
+//! They are all `async` so they don't block the UI's main thread; the modules they wrap are
+//! synchronous and fast, except MIDI analysis/slicing.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -18,30 +18,30 @@ use crate::paths::AppDirs;
 use crate::soundfont;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
 
-/// Máximo de bloques de actividad devueltos al frontend.
+/// Maximum number of activity blocks returned to the frontend.
 const ACTIVITY_BLOCKS: usize = 200;
 
 pub struct AppState {
-    /// Directorios de la app ajenos a la bóveda (configuración y SoundFont integrado).
+    /// App directories outside the vault (configuration and built-in SoundFont).
     pub dirs: AppDirs,
     pub config: Mutex<AppConfig>,
-    /// Bóveda abierta. `None` hasta que el usuario crea o abre una.
+    /// Open vault. `None` until the user creates or opens one.
     pub vault: RwLock<Option<Arc<Vault>>>,
     pub recorder: MidiRecorder,
     pub audio: Arc<AudioEngine>,
-    /// Sesión que se está grabando ahora mismo (si hay alguna).
+    /// Session being recorded right now (if any).
     pub recording_session: Mutex<Option<String>>,
     pub soundfont: Arc<Mutex<SoundfontState>>,
 }
 
-/// SoundFont activo y si hay una carga en segundo plano en curso.
+/// Active SoundFont and whether a background load is in progress.
 pub struct SoundfontState {
     pub current: PathBuf,
     pub loading: bool,
 }
 
-/// Carga `path` en el motor en un hilo aparte; al terminar actualiza el estado compartido.
-/// Si falla, se mantiene el SoundFont anterior.
+/// Loads `path` into the engine on a separate thread; when done it updates the shared state.
+/// If it fails, the previous SoundFont is kept.
 pub fn load_soundfont_in_background(audio: Arc<AudioEngine>, state: Arc<Mutex<SoundfontState>>, path: PathBuf) {
     let previous = {
         let mut s = state.lock().unwrap_or_else(|p| p.into_inner());
@@ -60,7 +60,7 @@ pub fn load_soundfont_in_background(audio: Arc<AudioEngine>, state: Arc<Mutex<So
 }
 
 impl AppState {
-    /// Bóveda abierta, o error si no hay ninguna.
+    /// Open vault, or an error if there is none.
     pub fn vault(&self) -> Result<Arc<Vault>, String> {
         self.vault
             .read()
@@ -78,14 +78,14 @@ impl AppState {
         vault::vault_info(&config, self.current_vault().as_deref(), &self.dirs)
     }
 
-    /// Guarda la configuración del equipo; un fallo solo se registra.
+    /// Saves the machine configuration; a failure is only logged.
     fn save_config(&self, config: &AppConfig) {
         if let Err(e) = config.save(&self.dirs.config_file) {
             log::error!("{e}");
         }
     }
 
-    /// Libera la bóveda abierta (lock incluido). Falla si hay una grabación en curso.
+    /// Releases the open vault (lock included). Fails if a recording is in progress.
     pub fn close_vault(&self) -> Result<(), String> {
         if self.recorder.is_recording() {
             return Err(t!("backend.stopRecordingToSwitchVault"));
@@ -93,7 +93,7 @@ impl AppState {
         let _ = self.audio.stop();
         let old = self.vault.write().unwrap_or_else(|p| p.into_inner()).take();
         if let Some(old) = old {
-            // Si algún comando aún la usa, el lock se libera igualmente ya.
+            // Even if a command still uses it, the lock is released right away.
             old.release_lock();
         }
         Ok(())
@@ -129,13 +129,13 @@ impl AppState {
 fn remove_file_quietly(path: &Path) {
     if let Err(e) = std::fs::remove_file(path) {
         if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("No se pudo borrar {}: {e}", path.display());
+            log::warn!("Could not delete {}: {e}", path.display());
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Dispositivos MIDI y grabación
+// MIDI devices and recording
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -158,7 +158,7 @@ pub async fn start_recording(
     }
     let session = vault.db.get_session(&session_id)?;
     let bpm = bpm.clamp(40, 240);
-    // La pista bruta existente se reanuda acumulando su duración.
+    // An existing raw take is resumed, accumulating its duration.
     let resume_from = session.raw_midi_path.as_ref().map(PathBuf::from).filter(|p| p.exists());
 
     state.audio.stop()?;
@@ -215,7 +215,7 @@ pub async fn stop_recording(state: State<'_, AppState>, session_id: String) -> R
 }
 
 // ---------------------------------------------------------------------------
-// Recorte y reproducción
+// Slicing and playback
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -239,7 +239,7 @@ pub async fn extract_midi_fragment(
     }
     let session = vault.db.get_session(&req.session_id)?;
     let raw = state.raw_path_of(&session)?;
-    // El reproductor podría estar leyendo la pista bruta que vamos a reescribir.
+    // The player could be reading the raw take we are about to rewrite.
     state.audio.stop()?;
 
     let fragment_id = uuid::Uuid::new_v4().to_string();
@@ -321,7 +321,7 @@ pub async fn stop_midi_playback(state: State<'_, AppState>) -> Result<(), String
 }
 
 // ---------------------------------------------------------------------------
-// Sesiones, fragmentos y comentarios
+// Sessions, fragments and comments
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -368,16 +368,16 @@ pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> R
     Ok(())
 }
 
-/// Nombre de fichero seguro: solo `[A-Za-z0-9._-]`, sin rutas, con extensión de imagen.
+/// Safe file name: only `[A-Za-z0-9._-]`, no paths, with an image extension.
 fn sanitize_image_name(file_name: &str, bytes: &[u8]) -> String {
-    let base = Path::new(file_name).file_name().and_then(|n| n.to_str()).unwrap_or("imagen");
+    let base = Path::new(file_name).file_name().and_then(|n| n.to_str()).unwrap_or("image");
     let mut clean: String = base
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
         .collect();
     clean = clean.trim_matches('.').to_string();
     if clean.is_empty() {
-        clean = "imagen".into();
+        clean = "image".into();
     }
     let has_ext = Path::new(&clean)
         .extension()
@@ -409,7 +409,7 @@ pub async fn save_session_image(
     base64_data: String,
 ) -> Result<String, String> {
     let vault = state.vault()?;
-    // Tolera un prefijo `data:image/png;base64,` por si el frontend lo envía.
+    // Tolerates a `data:image/png;base64,` prefix in case the frontend sends it.
     let payload = base64_data.split_once(',').map(|(_, b)| b).unwrap_or(&base64_data);
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(payload.trim())
@@ -427,7 +427,7 @@ pub async fn save_session_image(
         remove_file_quietly(&dest);
         return Err(e);
     }
-    // El Markdown guarda la ruta relativa a la bóveda, para que siga valiendo en otro equipo.
+    // The Markdown stores the path relative to the vault, so it still works on another computer.
     vault
         .paths
         .to_relative(&dest)
@@ -479,7 +479,7 @@ pub async fn delete_timeline_comment(state: State<'_, AppState>, comment_id: Str
 }
 
 // ---------------------------------------------------------------------------
-// SoundFont (sonido del sintetizador)
+// SoundFont (synthesizer sound)
 // ---------------------------------------------------------------------------
 
 fn soundfont_info(state: &AppState) -> SoundfontInfo {
@@ -495,7 +495,7 @@ pub async fn get_soundfont_info(state: State<'_, AppState>) -> Result<SoundfontI
     Ok(soundfont_info(&state))
 }
 
-/// Carga el SoundFont indicado (puede tardar unos segundos con ficheros grandes) y lo recuerda.
+/// Loads the given SoundFont (can take a few seconds with large files) and remembers it.
 #[tauri::command]
 pub async fn set_soundfont(state: State<'_, AppState>, path: String) -> Result<SoundfontInfo, String> {
     let path = PathBuf::from(path.trim());
@@ -533,12 +533,12 @@ pub async fn set_soundfont(state: State<'_, AppState>, path: String) -> Result<S
 }
 
 // ---------------------------------------------------------------------------
-// Bóveda
+// Vault
 // ---------------------------------------------------------------------------
 
-/// Abre la bóveda de `dir` y la hace actual: cierra la anterior, la recuerda en la configuración,
-/// adopta el SoundFont que la versión anterior guardaba en la base de datos y permite al asset
-/// protocol servir sus imágenes.
+/// Opens the vault in `dir` and makes it current: closes the previous one, remembers it in the
+/// configuration, adopts the SoundFont the previous version stored in the database and lets
+/// the asset protocol serve its images.
 pub fn activate_vault(app: &tauri::AppHandle, state: &AppState, dir: &Path, force: bool) -> Result<VaultOpenResult, String> {
     let dir = vault::normalize(dir);
     if state.current_vault().is_some_and(|v| v.paths.base == dir) {
@@ -547,7 +547,7 @@ pub fn activate_vault(app: &tauri::AppHandle, state: &AppState, dir: &Path, forc
     if state.recorder.is_recording() {
         return Err(t!("backend.stopRecordingToSwitchVault"));
     }
-    // Se comprueba antes de cerrar la actual: si la nueva no vale o está bloqueada, sigue abierta.
+    // Checked before closing the current one: if the new one is invalid or locked, it stays open.
     if let Some(msg) = vault::precheck(&dir, force)? {
         return Ok(VaultOpenResult { info: state.vault_info(), opened: false, lock_warning: Some(msg) });
     }
@@ -560,7 +560,7 @@ pub fn activate_vault(app: &tauri::AppHandle, state: &AppState, dir: &Path, forc
     };
 
     if let Err(e) = app.asset_protocol_scope().allow_directory(&opened.paths.base, true) {
-        log::warn!("No se pudo permitir el acceso a las imágenes de la bóveda: {e}");
+        log::warn!("Could not allow access to the vault's images: {e}");
     }
     {
         let mut config = state.config.lock().unwrap_or_else(|p| p.into_inner());
@@ -582,7 +582,7 @@ pub async fn get_vault_info(state: State<'_, AppState>) -> Result<VaultInfo, Str
     Ok(state.vault_info())
 }
 
-/// Crea una bóveda vacía en `path` (carpeta nueva o vacía) y la abre.
+/// Creates an empty vault in `path` (a new or empty folder) and opens it.
 #[tauri::command]
 pub async fn create_vault(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
     let dir = PathBuf::from(path.trim());
@@ -590,8 +590,8 @@ pub async fn create_vault(app: tauri::AppHandle, state: State<'_, AppState>, pat
     activate_vault(&app, &state, &dir, false).map(|r| r.info)
 }
 
-/// Abre una bóveda existente. Si parece abierta en otro equipo devuelve `opened = false` y el
-/// aviso; el frontend puede reintentar con `force = true`.
+/// Opens an existing vault. If it seems to be open on another computer it returns
+/// `opened = false` and the warning; the frontend can retry with `force = true`.
 #[tauri::command]
 pub async fn open_vault(
     app: tauri::AppHandle,
@@ -602,7 +602,7 @@ pub async fn open_vault(
     activate_vault(&app, &state, Path::new(path.trim()), force)
 }
 
-/// Crea una bóveda en `path` con los datos de la versión anterior (se mueven) y la abre.
+/// Creates a vault in `path` with the previous version's data (moved into it) and opens it.
 #[tauri::command]
 pub async fn import_legacy_data(app: tauri::AppHandle, state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
     if state.recorder.is_recording() {
@@ -610,7 +610,7 @@ pub async fn import_legacy_data(app: tauri::AppHandle, state: State<'_, AppState
     }
     let dest = PathBuf::from(path.trim());
     let legacy = state.dirs.data_dir.clone();
-    // La base de datos antigua no puede estar abierta mientras se mueve.
+    // The old database cannot be open while it is being moved.
     if state.current_vault().is_some_and(|v| vault::normalize(&v.paths.base) == vault::normalize(&legacy)) {
         state.close_vault()?;
     }
@@ -623,7 +623,7 @@ pub async fn import_legacy_data(app: tauri::AppHandle, state: State<'_, AppState
     activate_vault(&app, &state, &dest, false).map(|r| r.info)
 }
 
-/// Cierra la bóveda actual (para elegir otra). La app vuelve a la pantalla de bienvenida.
+/// Closes the current vault (to choose another one). The app goes back to the welcome screen.
 #[tauri::command]
 pub async fn close_vault(state: State<'_, AppState>) -> Result<VaultInfo, String> {
     state.close_vault()?;
@@ -635,7 +635,7 @@ pub async fn close_vault(state: State<'_, AppState>) -> Result<VaultInfo, String
     Ok(state.vault_info())
 }
 
-/// Olvida una bóveda de la lista de recientes (no borra nada en disco).
+/// Forgets a vault from the recent list (deletes nothing on disk).
 #[tauri::command]
 pub async fn forget_recent_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
     {
@@ -646,7 +646,7 @@ pub async fn forget_recent_vault(state: State<'_, AppState>, path: String) -> Re
     Ok(state.vault_info())
 }
 
-/// Abre la carpeta de la bóveda en el gestor de archivos.
+/// Opens the vault folder in the file manager.
 #[tauri::command]
 pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
     let vault = state.vault()?;
@@ -654,7 +654,7 @@ pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
         .arg(&vault.paths.base)
         .spawn()
         .map(|mut child| {
-            // Recoge el proceso al terminar para no dejar zombis.
+            // Reaps the process when it exits so no zombies are left.
             std::thread::spawn(move || {
                 let _ = child.wait();
             });
@@ -663,7 +663,7 @@ pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Idioma
+// Language
 // ---------------------------------------------------------------------------
 
 fn language_info(config: &AppConfig) -> LanguageInfo {
@@ -679,7 +679,7 @@ pub async fn get_language(state: State<'_, AppState>) -> Result<LanguageInfo, St
     Ok(language_info(&state.config.lock().unwrap_or_else(|p| p.into_inner())))
 }
 
-/// Cambia el idioma de los mensajes del backend y lo recuerda; `None` vuelve al del sistema.
+/// Changes the language of the backend messages and remembers it; `None` goes back to the system language.
 #[tauri::command]
 pub async fn set_language(state: State<'_, AppState>, language: Option<String>) -> Result<LanguageInfo, String> {
     let preference = language.as_deref().and_then(i18n::normalize).map(str::to_string);
@@ -698,8 +698,8 @@ mod tests {
     fn sanitizes_image_names() {
         let png = [0x89, b'P', b'N', b'G', 0, 0];
         assert_eq!(sanitize_image_name("../../etc/passwd", &png), "passwd.png");
-        assert_eq!(sanitize_image_name("mi foto.JPG", &[]), "mi_foto.JPG");
-        assert_eq!(sanitize_image_name("", &[0xFF, 0xD8, 0]), "imagen.jpg");
-        assert_eq!(sanitize_image_name("...", &png), "imagen.png");
+        assert_eq!(sanitize_image_name("my photo.JPG", &[]), "my_photo.JPG");
+        assert_eq!(sanitize_image_name("", &[0xFF, 0xD8, 0]), "image.jpg");
+        assert_eq!(sanitize_image_name("...", &png), "image.png");
     }
 }

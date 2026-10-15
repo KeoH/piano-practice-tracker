@@ -1,20 +1,20 @@
 @import "tailwindcss";
 
 /*
- * Paleta «laca de piano»: fondo casi negro, texto marfil, un único acento latón.
- * El rojo se reserva para grabar y el verde para «todo bien».
+ * "Piano lacquer" palette: near-black background, ivory text, a single brass accent.
+ * Red is reserved for recording and green for "all good".
  */
 @theme {
   --font-sans: "Hanken Grotesk Variable", "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-ink-950: #0c0c0f; /* barra lateral */
-  --color-ink-925: #0e0e11; /* fondo de pistas */
-  --color-ink-900: #111114; /* fondo de la app y de los campos */
-  --color-ink-850: #141418; /* subpaneles */
-  --color-ink-800: #18181d; /* paneles */
-  --color-ink-750: #1f1f26; /* botones */
-  --color-ink-700: #24242c; /* elemento seleccionado */
+  --color-ink-950: #0c0c0f; /* sidebar */
+  --color-ink-925: #0e0e11; /* track background */
+  --color-ink-900: #111114; /* app and field background */
+  --color-ink-850: #141418; /* sub-panels */
+  --color-ink-800: #18181d; /* panels */
+  --color-ink-750: #1f1f26; /* buttons */
+  --color-ink-700: #24242c; /* selected item */
   --color-line: #26262e;
   --color-line-strong: #2b2b33;
   --color-line-hover: #3a3a45;
@@ -38,7 +38,7 @@
   color-scheme: dark;
 }
 
-/* `rem` se queda en 16 px (escala de Tailwind); el texto base de la app es de 14 px. */
+/* `rem` stays at 16 px (Tailwind scale); the app's base text is 14 px. */
 html,
 body {
   height: 100%;
@@ -120,7 +120,7 @@ app-root {
   }
 }
 
-/* Interruptor accesible (button[role=switch]) */
+/* Accessible switch (button[role=switch]) */
 .switch {
   position: relative;
   display: inline-flex;
@@ -156,14 +156,14 @@ app-root {
   cursor: not-allowed;
 }
 
-/* Deslizador de BPM */
+/* BPM slider */
 input[type="range"].range {
   accent-color: var(--color-accent);
   height: 1rem;
   margin: 0;
 }
 
-/* Sin flechas en los campos numéricos (hay botones − / +) */
+/* No arrows in number fields (there are − / + buttons) */
 input[type="number"].no-spin {
   -moz-appearance: textfield;
 }
@@ -227,7 +227,7 @@ input[type="number"].no-spin::-webkit-outer-spin-button {
   }
 }
 
-/* Tipografía del preview Markdown */
+/* Markdown preview typography */
 .md-preview {
   font-size: 15px;
   line-height: 1.65;

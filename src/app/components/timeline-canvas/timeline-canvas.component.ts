@@ -20,18 +20,19 @@ export interface TimeRange {
 }
 
 const TICK_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
-/** Alto de la regla de tiempo bajo la pista (los overlays del padre usan `bottom-[18px]`). */
+/** Height of the time ruler below the track (the parent's overlays use `bottom-[18px]`). */
 export const RULER_H = 18;
 const TRACK_BG = '#0e0e11';
-/** Latón del acento (`--color-accent`). */
+/** Brass accent (`--color-accent`). */
 const ACCENT_RGB = '233, 180, 76';
-/** Barras del tramo ya reproducido. */
+/** Bars of the section already played. */
 const PLAYED_RGB = '207, 205, 213';
 
 /**
- * Lienzo de actividad MIDI: barras por bloque (altura ∝ nº de notas, opacidad ∝ velocidad),
- * regla de tiempo, rango seleccionado (barras en latón) y tramo ya reproducido (barras claras). Escala por devicePixelRatio y se redibuja
- * con ResizeObserver. El playhead, handles y pins se superponen en DOM desde el padre.
+ * MIDI activity canvas: bars per block (height ∝ number of notes, opacity ∝ velocity), time ruler,
+ * selected range (brass bars) and the section already played (light bars). It scales by
+ * devicePixelRatio and redraws with ResizeObserver. The playhead, handles and pins are overlaid in
+ * the DOM by the parent.
  */
 @Component({
   selector: 'app-timeline-canvas',
@@ -45,9 +46,9 @@ export class TimelineCanvasComponent {
   readonly selection = input<TimeRange | null>(null);
   readonly height = input(96);
   readonly showRuler = input(true);
-  /** Color base de las barras (r,g,b). */
+  /** Base colour of the bars (r,g,b). */
   readonly barRgb = input('104, 104, 120');
-  /** Posición de reproducción: las barras anteriores se pintan más claras (null = sin progreso). */
+  /** Playback position: earlier bars are drawn lighter (null = no progress). */
   readonly progressMs = input<number | null>(null);
 
   private readonly canvas = viewChild.required<ElementRef<HTMLCanvasElement>>('cv');
@@ -80,7 +81,7 @@ export class TimelineCanvasComponent {
     const showRuler = this.showRuler();
     const rgb = this.barRgb();
     const progress = this.progressMs();
-    // Se lee aquí para que el efecto redibuje al cambiar de idioma.
+    // Read here so the effect redraws when the language changes.
     const emptyLabel = this.i18n.t('timeline.noActivity');
     if (w <= 0 || h <= 0) return;
 
@@ -99,7 +100,7 @@ export class TimelineCanvasComponent {
     const rulerH = showRuler ? RULER_H : 0;
     const trackH = h - rulerH;
 
-    // Fondo de pista y línea central
+    // Track background and centre line
     ctx.fillStyle = TRACK_BG;
     ctx.fillRect(0, 0, w, trackH);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
@@ -111,7 +112,7 @@ export class TimelineCanvasComponent {
 
     const xOf = (ms: number) => (duration > 0 ? (ms / duration) * w : 0);
 
-    // Rejilla de tiempo
+    // Time grid
     let stepS = TICK_STEPS_S[TICK_STEPS_S.length - 1];
     if (duration > 0) {
       const pxPerSecond = w / (duration / 1000);
@@ -126,7 +127,7 @@ export class TimelineCanvasComponent {
       ctx.stroke();
     }
 
-    // Barras de actividad (se repintan recortadas en otro color para el progreso y la selección)
+    // Activity bars (redrawn clipped in another colour for progress and selection)
     const maxCount = blocks.reduce((m, b) => Math.max(m, b.note_count), 0);
     const hasBars = duration > 0 && maxCount > 0;
     const drawBars = (color: string) => {
@@ -163,7 +164,7 @@ export class TimelineCanvasComponent {
       ctx.fillText(emptyLabel, w / 2, trackH / 2);
     }
 
-    // Selección
+    // Selection
     if (sel && duration > 0 && sel.end > sel.start) {
       const sx0 = xOf(sel.start);
       const sx1 = xOf(sel.end);
@@ -175,7 +176,7 @@ export class TimelineCanvasComponent {
       if (hasBars) clipped(sx0, sx1, () => drawBars(ACCENT_RGB));
     }
 
-    // Regla
+    // Ruler
     if (showRuler) {
       ctx.fillStyle = TRACK_BG;
       ctx.fillRect(0, trackH, w, rulerH);

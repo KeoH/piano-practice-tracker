@@ -9,9 +9,9 @@ import { LanguageSelectComponent } from '../language-select/language-select.comp
 const DEFAULT_NAME = 'PianoTracker';
 
 /**
- * Pantalla sin bóveda abierta: crear una nueva (nombre + ubicación), abrir una existente,
- * reabrir una reciente o importar los datos de la versión anterior. Es lo primero que ve una
- * instalación nueva, así que también deja elegir el idioma.
+ * Screen without an open vault: create a new one (name + location), open an existing one, reopen a
+ * recent one or import the previous version's data. It is the first thing a new install shows,
+ * so it also lets the user choose the language.
  */
 @Component({
   selector: 'app-vault-welcome',
@@ -119,7 +119,7 @@ export class VaultWelcomeComponent {
   protected readonly parent = signal<string | null>(null);
   protected readonly importLegacy = signal(true);
 
-  /** Ruta completa de la bóveda nueva. */
+  /** Full path of the new vault. */
   protected readonly target = computed(() => {
     const parent = this.parent();
     const name = this.name().trim();

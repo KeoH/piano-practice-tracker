@@ -1,6 +1,6 @@
 @let f = fragment();
 <article class="overflow-hidden rounded-2xl border bg-ink-800 transition-colors" [class]="expanded() || isActive() ? 'border-line-hover' : 'border-line'">
-  <!-- Cabecera -->
+  <!-- Header -->
   <header class="flex items-center gap-4 py-3.5 pr-4 pl-5">
     <span class="tabular w-[22px] shrink-0 text-[13px] text-faint">{{ number() }}</span>
     <button
@@ -50,9 +50,9 @@
 
   @if (expanded()) {
     <div [id]="'frag-body-' + f.id" class="flex flex-wrap border-t border-line">
-      <!-- Columna principal -->
+      <!-- Main column -->
       <div class="flex min-w-0 flex-[999_1_520px] flex-col gap-4.5 px-6 pt-5.5 pb-6">
-        <!-- Línea de tiempo con comentarios -->
+        <!-- Timeline with comments -->
         <div class="relative pt-12">
           @if (popup(); as c) {
             <div
@@ -116,7 +116,7 @@
           </div>
         </div>
 
-        <!-- Transporte -->
+        <!-- Transport -->
         <div class="flex flex-wrap items-center gap-3">
           <button type="button" class="inline-flex h-11 items-center gap-2 rounded-full bg-ivory px-[18px] text-sm font-semibold text-ink-900 transition-opacity hover:opacity-90" (click)="togglePlay()">
             <app-icon [name]="isPlaying() ? 'pause' : 'play'" [size]="15" /> {{ (isPlaying() ? 'player.pause' : 'player.play') | t }}
@@ -132,7 +132,7 @@
           }
         </div>
 
-        <!-- Nuevo comentario -->
+        <!-- New comment -->
         <div>
           <label class="label" [for]="'new-comment-' + f.id">
             {{ 'fragments.commentAtLabel' | t }} <span class="tabular text-accent">{{ formatMs(position()) }}</span>
@@ -151,7 +151,7 @@
           </div>
         </div>
 
-        <!-- Título y explicación -->
+        <!-- Title and explanation -->
         <details class="border-t border-line pt-3.5">
           <summary class="flex min-h-8 cursor-pointer items-center text-[13px] font-semibold text-fg-soft">{{ 'fragments.editMeta' | t }}</summary>
           <div class="mt-3 flex flex-col gap-3">
@@ -169,7 +169,7 @@
         </details>
       </div>
 
-      <!-- Panel lateral de comentarios -->
+      <!-- Comments side panel -->
       <aside class="min-w-0 flex-[1_1_300px] border-l border-line bg-ink-850 px-3.5 py-5" [attr.aria-label]="'fragments.commentsOf' | t: { title: f.title }">
         <h3 class="mb-2.5 px-2 text-[13px] font-semibold text-fg-soft">{{ 'fragments.comments' | t }} · {{ comments().length }}</h3>
         <ul class="flex max-h-96 flex-col gap-1 overflow-y-auto">

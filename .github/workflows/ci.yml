@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  pull_request:
+  # release.yml runs it again on every push to main before release-please.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Also type-checks the templates (strictTemplates).
+      - name: Build
+        run: npm run build
+
+      - name: Test with coverage
+        run: npm run test:ci
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-frontend
+          path: coverage/piano-tracker
+          if-no-files-found: ignore
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-linux
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # `tauri::generate_context!` embeds `frontendDist` at compile time; the tests don't need the real one.
+      - name: Placeholder frontend
+        working-directory: .
+        run: mkdir -p dist/piano-tracker/browser && echo '<!doctype html>' > dist/piano-tracker/browser/index.html
+
+      # The #[ignore] tests (real audio, system SoundFont) stay out, as they do locally.
+      - name: Test with coverage
+        run: cargo llvm-cov --lib --no-report
+
+      - name: Coverage reports
+        run: |
+          out="$GITHUB_WORKSPACE/coverage-rust"
+          mkdir -p "$out"
+          cargo llvm-cov report --summary-only
+          cargo llvm-cov report --json --summary-only --output-path "$out/summary.json"
+          cargo llvm-cov report --lcov --output-path "$out/lcov.info"
+          cargo llvm-cov report --html --output-dir "$out"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-backend
+          path: coverage-rust
+          if-no-files-found: ignore
+
+  coverage:
+    name: Coverage report
+    needs: [frontend, backend]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-*
+          path: coverage
+
+      - name: Summarize
+        run: |
+          node .github/scripts/coverage-summary.mjs \
+            coverage/coverage-frontend/coverage-summary.json \
+            coverage/coverage-backend/summary.json > coverage-report.md
+          cat coverage-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Fork PRs get a read-only token: they only see the job summary.
+      - uses: marocchino/sticky-pull-request-comment@v3
+        if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+        with:
+          header: coverage
+          path: coverage-report.md

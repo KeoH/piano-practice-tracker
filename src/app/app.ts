@@ -39,14 +39,14 @@ export class App implements OnInit {
   protected readonly bannerVisible = signal(!this.api.available);
 
   ngOnInit(): void {
-    // Primero el idioma: los avisos del arranque (p. ej. de la bóveda) ya salen traducidos.
+    // Language first: startup warnings (e.g. from the vault) already come out translated.
     void this.language.init();
     void this.playback.init();
     void this.vault.init();
     void this.recording.refreshPorts();
   }
 
-  /** Espacio = play/pausa del reproductor activo (si el foco no está en un campo editable). */
+  /** Space = play/pause of the active player (if focus is not on an editable field). */
   protected onGlobalKey(ev: KeyboardEvent): void {
     if (ev.code !== 'Space' || ev.repeat || ev.ctrlKey || ev.altKey || ev.metaKey) return;
     if (this.confirm.current() || this.vault.settingsOpen() || !this.vault.isOpen()) return;

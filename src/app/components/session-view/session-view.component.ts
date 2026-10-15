@@ -23,9 +23,9 @@ const TABS: { id: SessionTab; label: MessageKey }[] = [
 ];
 
 /**
- * Área principal: cabecera y pestañas de la sesión (grabar y recortar, fragmentos, notas) o la
- * pantalla de inicio. Las pestañas se ocultan con `hidden` en lugar de destruirse, para conservar
- * la selección del recortador, los fragmentos abiertos y el editor.
+ * Main area: the session header and tabs (record & trim, fragments, notes) or the home screen.
+ * Tabs are hidden with `hidden` instead of being destroyed, to keep the slicer's selection, the
+ * open fragments and the editor.
  */
 @Component({
   selector: 'app-session-view',
@@ -191,7 +191,7 @@ export class SessionViewComponent {
   protected readonly fragmentsTotalMs = computed(() =>
     this.store.fragments().reduce((sum, f) => sum + f.duration_ms, 0),
   );
-  /** Sesión más reciente, para «Seguir con…» en la pantalla de inicio. */
+  /** Most recent session, for "Continue with…" on the home screen. */
   protected readonly lastSession = computed(() => {
     const all = this.store.sessions();
     return all.length
@@ -207,7 +207,7 @@ export class SessionViewComponent {
     void this.store.create();
   }
 
-  /** Flechas izquierda/derecha, Inicio y Fin mueven entre pestañas. */
+  /** Left/right arrows, Home and End move between tabs. */
   protected onTabKey(ev: KeyboardEvent): void {
     const i = TABS.findIndex((t) => t.id === this.store.tab());
     let next = i;

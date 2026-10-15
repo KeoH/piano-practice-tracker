@@ -7,8 +7,8 @@ import { LanguageStore } from '../../core/language.store';
 const AUTO = 'auto';
 
 /**
- * Selector de idioma: «Automático (el del sistema)» o uno concreto. Cada idioma se muestra con su
- * nombre en ese idioma, para que se reconozca aunque la interfaz esté en otro.
+ * Language selector: "Automatic (the system language)" or a specific one. Each language is shown
+ * by its name in that language, so it can be recognized even when the UI is in another one.
  */
 @Component({
   selector: 'app-language-select',

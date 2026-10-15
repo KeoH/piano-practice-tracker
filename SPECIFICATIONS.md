@@ -1,70 +1,70 @@
 # Technical Specification: Piano Practice Tracker (Tauri v2 + Angular)
 
-## 1. Visión General del Sistema
-Aplicación de escritorio nativa para **Ubuntu Linux** orientada al registro, recorte y análisis de sesiones diarias de práctica de piano mediante conexión USB-MIDI, con reproducción interna por sintetizador SoundFont (`.sf2`), comentarios anclados a la línea de tiempo, notas en Markdown con imágenes y almacenamiento en una **bóveda**: una carpeta elegida por el usuario (al estilo de Obsidian) que contiene todos los datos. La app no sincroniza nada por su cuenta; si el usuario pone la bóveda dentro de Dropbox, Syncthing o similar, ese servicio hace la copia.
+## 1. System Overview
+A native desktop application for **Ubuntu Linux** for recording, slicing and analyzing daily piano practice sessions over a USB-MIDI connection, with built-in playback through a SoundFont (`.sf2`) synthesizer, comments anchored to the timeline, Markdown notes with images, and storage in a **vault**: a folder chosen by the user (Obsidian-style) that holds all the data. The app syncs nothing on its own; if the user puts the vault inside Dropbox, Syncthing or similar, that service makes the copy.
 
-### 1.1. Decisiones de Diseño Consolidadas
-1. **Recorte Destructivo sobre Pista Bruta (Slicing):**
-   - Cada sesión permite grabar una pista larga continua (`raw_session_<id>.mid`, ej. 20-30 minutos).
-   - El usuario visualiza bloques de actividad MIDI (zonas con notas vs. silencios) en la línea de tiempo.
-   - Al seleccionar un rango $[t_{start}, t_{end}]$ y extraerlo como un **Fragmento**, el motor en Rust crea un nuevo archivo independiente (`frag_<uuid>.mid`) ajustado a $t = 0$ y **elimina ese tramo del archivo bruto de la sesión**, desplazando los eventos posteriores para cerrar el hueco. También permite descartar rangos de silencio o errores directamente de la pista bruta.
-2. **Monitoreo de Audio y Metrónomo:**
-   - Durante la grabación, el metrónomo suena a través del motor de audio de la app (`cpal`).
-   - El monitoreo en vivo del sintetizador de piano durante la grabación es **opcional** (desactivado por defecto para que el usuario escuche su propio piano digital sin latencia; activable mediante un interruptor en la UI).
-   - Durante la reproducción de fragmentos o de la pista bruta, el motor interno (`rustysynth`) sintetiza el archivo `.mid` en tiempo real usando un archivo SoundFont (`.sf2`).
-3. **Visualización de Actividad en Línea de Tiempo:**
-   - El backend analiza cualquier archivo `.mid` y devuelve un vector de densidad de notas por intervalos de tiempo (buckets) para dibujar bloques visuales de actividad en el reproductor/recortador.
-4. **Bóvedas en lugar de sincronización propia:**
-   - Todos los datos (base de datos, MIDI e imágenes) viven en la carpeta de la bóveda, con rutas relativas a ella, para que pueda moverse o sincronizarse entre equipos.
-   - La configuración propia del equipo (bóveda actual, recientes, SoundFont elegido, idioma) queda fuera, en `~/.config/piano-tracker/config.json`.
-5. **Multi-idioma:**
-   - La interfaz y los mensajes del backend están en inglés y español. Se usa el idioma del sistema si está disponible y, si no, inglés; el usuario puede elegirlo en Ajustes y en la pantalla de bienvenida.
-   - Todos los textos están en `src/locales/<código>.json`, compartidos por Angular y Rust, para que añadir un idioma sea añadir un fichero.
+### 1.1. Consolidated Design Decisions
+1. **Destructive Slicing of the Raw Take:**
+   - Each session can record one long continuous track (`raw_session_<id>.mid`, e.g. 20-30 minutes).
+   - The user sees MIDI activity blocks (areas with notes vs. silence) on the timeline.
+   - When a range $[t_{start}, t_{end}]$ is selected and extracted as a **Fragment**, the Rust engine creates a new standalone file (`frag_<uuid>.mid`) aligned to $t = 0$ and **removes that section from the session's raw file**, shifting the later events to close the gap. Ranges of silence or mistakes can also be discarded directly from the raw take.
+2. **Audio Monitoring and Metronome:**
+   - During recording, the metronome plays through the app's audio engine (`cpal`).
+   - Live monitoring through the piano synthesizer during recording is **optional** (off by default so the user hears their own digital piano with no latency; it can be turned on with a switch in the UI).
+   - During playback of fragments or of the raw take, the built-in engine (`rustysynth`) synthesizes the `.mid` file in real time using a SoundFont (`.sf2`) file.
+3. **Activity Display on the Timeline:**
+   - The backend analyzes any `.mid` file and returns a vector of note density per time interval (buckets) to draw visual activity blocks in the player/slicer.
+4. **Vaults instead of a custom sync:**
+   - All the data (database, MIDI and images) lives in the vault folder, with paths relative to it, so it can be moved or synced between computers.
+   - The machine's own configuration (current vault, recent ones, chosen SoundFont, language) stays outside it, in `~/.config/piano-tracker/config.json`.
+5. **Multi-language:**
+   - The UI and the backend messages are available in English and Spanish. The system language is used if available, otherwise English; the user can choose it in Settings and on the welcome screen.
+   - All texts live in `src/locales/<code>.json`, shared by Angular and Rust, so adding a language means adding a file.
 
 ---
 
-## 2. Stack Tecnológico y Dependencias
+## 2. Technology Stack and Dependencies
 
-### 2.1. Requisitos del Sistema (Ubuntu Linux)
-Paquetes nativos requeridos para compilar Tauri v2 y el subsistema de audio/MIDI (ALSA):
+### 2.1. System Requirements (Ubuntu Linux)
+Native packages required to build Tauri v2 and the audio/MIDI subsystem (ALSA):
 - `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `pkg-config`
 - `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libwebkit2gtk-4.1-dev`
-- `libasound2-dev` (requerido por `midir` y `cpal` en Linux)
+- `libasound2-dev` (required by `midir` and `cpal` on Linux)
 
 ### 2.2. Backend: Rust (Tauri v2)
 - **Framework:** `tauri = "2"` (feature `protocol-asset`), `tauri-plugin-fs`, `tauri-plugin-dialog`
-- **Serialización:** `serde`, `serde_json`, `uuid` (features: `v4`), `chrono`, `base64` (imágenes pegadas en las notas)
-- **MIDI Input/Output:** `midir = "0.10"` (lectura de puertos ALSA MIDI en hilo dedicado)
-- **MIDI Parsing y Slicing:** `midly = "0.5"` (lectura, manipulación de ticks/tempos y escritura SMF)
-- **Audio y Sintetizador:**
-  - `cpal = "0.15"` (salida de audio de baja latencia hacia ALSA/PipeWire)
-  - `rustysynth = "1.3"` (sintetizador SoundFont `.sf2` puro en Rust, sin dependencias en C)
-- **Base de Datos:** `rusqlite = { version = "0.31", features = ["bundled"] }`
+- **Serialization:** `serde`, `serde_json`, `uuid` (features: `v4`), `chrono`, `base64` (images pasted into the notes)
+- **MIDI Input/Output:** `midir = "0.10"` (reading ALSA MIDI ports on a dedicated thread)
+- **MIDI Parsing and Slicing:** `midly = "0.5"` (reading, tick/tempo handling and SMF writing)
+- **Audio and Synthesizer:**
+  - `cpal = "0.15"` (low-latency audio output to ALSA/PipeWire)
+  - `rustysynth = "1.3"` (pure-Rust `.sf2` SoundFont synthesizer, no C dependencies)
+- **Database:** `rusqlite = { version = "0.31", features = ["bundled"] }`
 
 ### 2.3. Frontend: Angular (v18+ Standalone)
-- **Arquitectura:** Componentes *Standalone*, gestión de estado reactiva con **Angular Signals**, comunicación mediante `@tauri-apps/api/core` (`invoke`) y `@tauri-apps/api/event` (`listen`).
-- **Estilos:** TailwindCSS (modo oscuro por defecto, estética de estudio musical/DAW).
-- **Markdown:** Renderizado con `marked` + soporte de interceptación del evento `paste` y `drop` para guardar imágenes localmente vía Tauri IPC y reemplazarlas con rutas locales resolubles.
-- **Visualización de Línea de Tiempo:** Componente personalizado en HTML5 `<canvas>` + superposición DOM para pins de comentarios, popups flotantes y selectores de rango de recorte (handles de inicio/fin).
+- **Architecture:** *Standalone* components, reactive state management with **Angular Signals**, communication through `@tauri-apps/api/core` (`invoke`) and `@tauri-apps/api/event` (`listen`).
+- **Styles:** TailwindCSS (dark mode by default, music studio/DAW look).
+- **Markdown:** Rendered with `marked`, plus interception of the `paste` and `drop` events to save images locally through Tauri IPC and replace them with resolvable local paths.
+- **Timeline Display:** Custom HTML5 `<canvas>` component + DOM overlay for comment pins, floating popups and slice range selectors (start/end handles).
 
 ---
 
-## 3. Modelo de Base de Datos (SQLite)
+## 3. Database Model (SQLite)
 
-Estructura de una bóveda (`<Bóveda>` es la carpeta elegida por el usuario):
-- `<Bóveda>/.piano-tracker/vault.json` (marcador de bóveda) y `.piano-tracker/lock` (equipo y pid mientras está abierta)
-- `<Bóveda>/piano_tracker.sqlite` (base de datos, en `journal_mode = DELETE`: un único fichero en reposo)
-- `<Bóveda>/midi/raw/` (pistas brutas de sesión)
-- `<Bóveda>/midi/fragments/` (fragmentos recortados)
-- `<Bóveda>/media/` (imágenes de notas Markdown)
+Layout of a vault (`<Vault>` is the folder chosen by the user):
+- `<Vault>/.piano-tracker/vault.json` (vault marker) and `.piano-tracker/lock` (host and pid while it is open)
+- `<Vault>/piano_tracker.sqlite` (database, in `journal_mode = DELETE`: a single file at rest)
+- `<Vault>/midi/raw/` (session raw takes)
+- `<Vault>/midi/fragments/` (sliced fragments)
+- `<Vault>/media/` (images in the Markdown notes)
 
-Fuera de la bóveda:
-- `~/.config/piano-tracker/config.json` (bóveda actual, recientes y SoundFont elegido)
-- `~/.local/share/piano-tracker/assets/default_piano.sf2` (piano sintético generado, regenerable)
+Outside the vault:
+- `~/.config/piano-tracker/config.json` (current vault, recent ones, chosen SoundFont and language)
+- `~/.local/share/piano-tracker/assets/default_piano.sf2` (generated synthetic piano, can be regenerated)
 
-Las columnas de rutas (`raw_midi_path`, `file_path`, `local_path`) y las imágenes del Markdown guardan rutas **relativas a la bóveda** (`midi/raw/…`, `media/…`). La API las devuelve absolutas.
+The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
-### 3.1. Esquema SQL Completo (versión 2)
+### 3.1. Full SQL Schema (version 2)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -115,67 +115,67 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 ```
 
-La versión 1 incluía la cola `sync_queue` y las columnas `sync_status` y `drive_file_id` de Google Drive. La migración a la versión 2 las elimina, borra los ajustes `google_*` y `drive_*`, y convierte las rutas absolutas antiguas en relativas (también en `markdown_notes`).
+Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and `drive_file_id` columns. The migration to version 2 drops them, deletes the `google_*` and `drive_*` settings, and turns the old absolute paths into relative ones (in `markdown_notes` too).
 
 ---
 
-## 4. Especificación de Motores en Rust
+## 4. Rust Engine Specification
 
-### 4.1. Motor de Captura MIDI (`midi_recorder.rs`)
-- Lista puertos de entrada usando `midir::MidiInput`.
-- Al iniciar grabación:
-  - Abre conexión con el puerto seleccionado.
-  - Registra `Instant::now()` como referencia $t_0$ (o reanuda acumulando el offset si ya existe una pista bruta en la sesión).
-  - Cada mensaje MIDI entrante (`NoteOn`, `NoteOff`, `ControlChange`) se almacena en memoria con su timestamp en microsegundos junto con el BPM activo.
-  - Si `live_synth_enabled == true`, reenvía el mensaje inmediatamente al hilo del sintetizador `rustysynth`.
-- Al detener grabación:
-  - Inyecta `NoteOff` para cualquier nota abierta y `CC 64 = 0` (Sustain Off).
-  - Escribe un archivo Standard MIDI File (SMF formato 0, resolución 480 ticks por negra) usando `midly`, inyectando el meta-evento `Tempo` correspondiente al BPM de la sesión.
+### 4.1. MIDI Capture Engine (`midi_recorder.rs`)
+- Lists input ports using `midir::MidiInput`.
+- When recording starts:
+  - Opens a connection to the selected port.
+  - Records `Instant::now()` as the $t_0$ reference (or resumes, accumulating the offset, if the session already has a raw take).
+  - Every incoming MIDI message (`NoteOn`, `NoteOff`, `ControlChange`) is stored in memory with its timestamp in microseconds, together with the active BPM.
+  - If `live_synth_enabled == true`, the message is forwarded immediately to the `rustysynth` synthesizer thread.
+- When recording stops:
+  - Injects `NoteOff` for any open note and `CC 64 = 0` (Sustain Off).
+  - Writes a Standard MIDI File (SMF format 0, resolution 480 ticks per quarter note) using `midly`, injecting the `Tempo` meta event matching the session's BPM.
 
-### 4.2. Motor de Recorte y Análisis MIDI (`midi_slicer.rs`)
-1. **Análisis de Densidad (`analyze_midi_activity`):**
-   - Lee el archivo `.mid`, convierte los deltas de ticks a milisegundos reales según el tempo.
-   - Divide la duración total en segmentos (hasta 200 bloques) y devuelve `Vec<ActivityBlock { start_ms, end_ms, note_count, velocity_avg }>`.
-2. **Extracción y Recorte Destructivo (`extract_fragment_and_trim`):**
-   - Recibe `source_path`, `start_ms`, `end_ms`, `output_fragment_path`.
-   - **Creación del Fragmento ($[start\_ms, end\_ms]$):**
-     - Rastrea el estado del pedal de sustain (`CC 64`) inmediatamente anterior a `start_ms`. Si estaba pisado, inyecta `CC 64` en $t = 0$ del nuevo fragmento.
-     - Copia todos los eventos dentro de $[start\_ms, end\_ms]$ desplazando sus tiempos a $t' = t - start\_ms$.
-     - Al llegar a `end_ms`, cierra todas las notas activas con `NoteOff` y pone `CC 64 = 0`.
-     - Guarda en `output_fragment_path`.
-   - **Recorte Destructivo en Pista Bruta:**
-     - Elimina del archivo maestro `source_path` los eventos en $[start\_ms, end\_ms]$.
-     - Asegura que las notas que empezaron antes de `start_ms` reciban `NoteOff` en `start_ms`.
-     - Desplaza todos los eventos con $t > end\_ms$ restando $(end\_ms - start\_ms)$.
-     - Sobrescribe `source_path` de forma atómica y actualiza `raw_duration_ms` en la tabla `sessions`.
+### 4.2. MIDI Slicing and Analysis Engine (`midi_slicer.rs`)
+1. **Density Analysis (`analyze_midi_activity`):**
+   - Reads the `.mid` file and converts the tick deltas to real milliseconds according to the tempo.
+   - Splits the total duration into segments (up to 200 blocks) and returns `Vec<ActivityBlock { start_ms, end_ms, note_count, velocity_avg }>`.
+2. **Extraction and Destructive Slicing (`extract_fragment_and_trim`):**
+   - Takes `source_path`, `start_ms`, `end_ms`, `output_fragment_path`.
+   - **Creating the Fragment ($[start\_ms, end\_ms]$):**
+     - Tracks the state of the sustain pedal (`CC 64`) right before `start_ms`. If it was pressed, it injects `CC 64` at $t = 0$ of the new fragment.
+     - Copies every event within $[start\_ms, end\_ms]$, shifting their times to $t' = t - start\_ms$.
+     - On reaching `end_ms`, closes every active note with `NoteOff` and sets `CC 64 = 0`.
+     - Saves to `output_fragment_path`.
+   - **Destructive Slicing of the Raw Take:**
+     - Removes the events in $[start\_ms, end\_ms]$ from the master file `source_path`.
+     - Makes sure notes that started before `start_ms` receive a `NoteOff` at `start_ms`.
+     - Shifts every event with $t > end\_ms$ by subtracting $(end\_ms - start\_ms)$.
+     - Atomically overwrites `source_path` and updates `raw_duration_ms` in the `sessions` table.
 
-### 4.3. Motor de Audio, Sintetizador y Metrónomo (`audio_engine.rs`)
-- Ejecuta un flujo de salida `cpal::Stream` constante (ej. $44100\text{ Hz}$ estéreo).
-- Carga el archivo SoundFont `.sf2` en `rustysynth::Synthesizer`. Si no existe un `.sf2` en `~/.local/share/piano-tracker/assets/`, el sistema genera o descarga automáticamente un SoundFont compacto de piano en el arranque.
-- **Metrónomo Integrado:** Generador de onda sinusoidal con envolvente exponencial corta ($880\text{ Hz}$ para el primer pulso del compás, $440\text{ Hz}$ para los demás) sincronizado por muestras de audio según el BPM activo.
-- **Reproductor MIDI Interno:**
-  - Lee los eventos del `.mid` seleccionado, avanza el reloj en función de los frames de audio consumidos por `cpal`, alimenta `rustysynth` y emite cada $50\text{ ms}$ un evento Tauri `playback-progress` con `{ file_path, current_ms, duration_ms, is_playing }`.
-  - Soporta `play`, `pause`, `stop` y `seek(ms)` (enviando `reset_all_controllers` y `note_off_all` al hacer seek).
+### 4.3. Audio Engine, Synthesizer and Metronome (`audio_engine.rs`)
+- Runs a constant `cpal::Stream` output (e.g. $44100\text{ Hz}$ stereo).
+- Loads the `.sf2` SoundFont file into `rustysynth::Synthesizer`. If there is no `.sf2` in `~/.local/share/piano-tracker/assets/`, the system automatically generates or downloads a compact piano SoundFont on startup.
+- **Built-in Metronome:** Sine wave generator with a short exponential envelope ($880\text{ Hz}$ for the first beat of the bar, $440\text{ Hz}$ for the rest), synchronized by audio samples to the active BPM.
+- **Built-in MIDI Player:**
+  - Reads the events of the selected `.mid`, advances the clock according to the audio frames consumed by `cpal`, feeds `rustysynth` and emits a Tauri `playback-progress` event every $50\text{ ms}$ with `{ file_path, current_ms, duration_ms, is_playing }`.
+  - Supports `play`, `pause`, `stop` and `seek(ms)` (sending `reset_all_controllers` and `note_off_all` on seek).
 
-### 4.4. Bóvedas (`vault.rs`)
-- **Crear:** en una carpeta nueva o vacía; crea la estructura y el marcador `.piano-tracker/vault.json`.
-- **Abrir:** acepta una carpeta con el marcador o con `piano_tracker.sqlite` (la carpeta de datos de la versión anterior). Aplica migraciones y escribe `.piano-tracker/lock` con `{ host, pid, opened_at }`.
-- **Bloqueo:** si al abrir hay un lock de otro equipo, o de otro proceso vivo en este, se pide confirmación antes de abrir. El lock se borra al cerrar la bóveda o la app. Abrir la misma base de datos en dos equipos a la vez acaba en copias en conflicto del servicio de sincronización.
-- **Copias en conflicto:** al abrir se avisa si hay ficheros `piano_tracker*conflict*.sqlite` (Dropbox, Syncthing).
-- **Importar datos antiguos:** mueve `piano_tracker.sqlite`, `midi/` y `media/` desde `~/.local/share/piano-tracker` a una bóveda nueva, tras volcar el WAL al fichero principal.
-- **Asset protocol:** al abrir una bóveda se añade su carpeta al alcance del asset protocol para servir las imágenes de las notas.
+### 4.4. Vaults (`vault.rs`)
+- **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
+- **Open:** accepts a folder with the marker or with `piano_tracker.sqlite` (the previous version's data folder). Applies migrations and writes `.piano-tracker/lock` with `{ host, pid, opened_at }`.
+- **Locking:** if, when opening, there is a lock from another computer, or from another live process on this one, the user is asked to confirm before opening. The lock is deleted when the vault or the app is closed. Opening the same database on two computers at once ends up in conflicting copies from the sync service.
+- **Conflicting copies:** on opening, the user is warned if there are `piano_tracker*conflict*.sqlite` files (Dropbox, Syncthing).
+- **Importing old data:** moves `piano_tracker.sqlite`, `midi/` and `media/` from `~/.local/share/piano-tracker` into a new vault, after flushing the WAL into the main file.
+- **Asset protocol:** when a vault is opened, its folder is added to the asset protocol scope so the images in the notes can be served.
 
 ---
 
-## 5. Contrato IPC (Comandos Tauri)
+## 5. IPC Contract (Tauri Commands)
 
-### Dispositivos MIDI y Grabación
+### MIDI Devices and Recording
 - `list_midi_ports() -> Result<Vec<MidiPortInfo>, String>`
 - `start_recording(session_id: String, port_id: String, bpm: u32, metronome_on: bool, live_synth_on: bool) -> Result<(), String>`
 - `update_live_recording_settings(bpm: u32, metronome_on: bool, live_synth_on: bool) -> Result<(), String>`
 - `stop_recording(session_id: String) -> Result<SessionDto, String>`
 
-### Recorte y Reproducción
+### Slicing and Playback
 - `get_midi_activity(file_path: String) -> Result<MidiActivityDto, String>`
 - `extract_midi_fragment(req: ExtractFragmentReq) -> Result<FragmentCreatedResponse, String>`
 - `discard_midi_range(session_id: String, start_ms: u64, end_ms: u64) -> Result<SessionDto, String>`
@@ -184,22 +184,22 @@ La versión 1 incluía la cola `sync_queue` y las columnas `sync_status` y `driv
 - `seek_midi_playback(ms: u64) -> Result<(), String>`
 - `stop_midi_playback() -> Result<(), String>`
 
-### Sesiones, Fragmentos y Comentarios
+### Sessions, Fragments and Comments
 - `get_sessions() -> Result<Vec<SessionSummaryDto>, String>`
 - `get_session_detail(session_id: String) -> Result<SessionDetailDto, String>`
 - `create_session(title: String, bpm: u32) -> Result<SessionDetailDto, String>`
 - `update_session(session_id: String, title: String, bpm: u32, markdown_notes: String) -> Result<(), String>`
 - `delete_session(session_id: String) -> Result<(), String>`
-- `save_session_image(session_id: String, file_name: String, base64_data: String) -> Result<String, String>` (devuelve la ruta relativa a la bóveda, `media/…`)
+- `save_session_image(session_id: String, file_name: String, base64_data: String) -> Result<String, String>` (returns the path relative to the vault, `media/…`)
 - `update_fragment_meta(fragment_id: String, title: String, explanation: String) -> Result<(), String>`
 - `delete_fragment(fragment_id: String) -> Result<(), String>`
 - `add_timeline_comment(fragment_id: String, timestamp_ms: u64, content: String) -> Result<TimelineCommentDto, String>`
 - `delete_timeline_comment(comment_id: String) -> Result<(), String>`
 
-### Bóveda
+### Vault
 - `get_vault_info() -> Result<VaultInfo, String>`
 - `create_vault(path: String) -> Result<VaultInfo, String>`
-- `open_vault(path: String, force: bool) -> Result<VaultOpenResult, String>` (`opened = false` + `lock_warning` si parece abierta en otro equipo)
+- `open_vault(path: String, force: bool) -> Result<VaultOpenResult, String>` (`opened = false` + `lock_warning` if it seems open on another computer)
 - `import_legacy_data(path: String) -> Result<VaultInfo, String>`
 - `close_vault() -> Result<VaultInfo, String>`
 - `forget_recent_vault(path: String) -> Result<VaultInfo, String>`
@@ -209,36 +209,36 @@ La versión 1 incluía la cola `sync_queue` y las columnas `sync_status` y `driv
 - `get_soundfont_info() -> Result<SoundfontInfo, String>`
 - `set_soundfont(path: String) -> Result<SoundfontInfo, String>`
 
-### Idioma
+### Language
 - `get_language() -> Result<LanguageInfo, String>`
-- `set_language(language: Option<String>) -> Result<LanguageInfo, String>` (`None` = el del sistema)
+- `set_language(language: Option<String>) -> Result<LanguageInfo, String>` (`None` = the system language)
 
 ---
 
-## 6. Diseño de Interfaz de Usuario (Angular UI/UX)
+## 6. User Interface Design (Angular UI/UX)
 
-1. **Barra Lateral Izquierda (Navegación y Estado):**
-   - Botón "+ Nueva Sesión de Práctica".
-   - Lista cronológica de sesiones.
-   - Selector rápido de puerto USB-MIDI y botón de Ajustes (con el nombre de la bóveda abierta) en el pie de la barra.
-   - Sin bóveda abierta, la app muestra una pantalla de bienvenida: crear bóveda (nombre + ubicación), abrir una existente, recientes e importación de los datos de la versión anterior.
-2. **Cabecera de Sesión y Panel de Grabación / Metrónomo:**
-   - Título editable de la sesión y fecha.
-   - Controles de Metrónomo: Selector numérico/slider de BPM ($40 - 240$), botón de activar claqueta, switch de monitoreo de sintetizador en vivo, y botón principal **Grabar / Detener** con cronómetro en vivo.
-3. **Zona de Pista Bruta y Recortador (Slicer):**
-   - Visible cuando la sesión tiene una grabación maestra (`raw_midi_path`).
-   - Línea de tiempo interactiva con bloques visuales de actividad MIDI.
-   - Controles de selección de rango (Inicio `mm:ss` - Fin `mm:ss`) arrastrables en el canvas.
-   - Botones de acción sobre el rango seleccionado:
-     - **"Extraer como Fragmento"** (abre modal/formulario rápido para título y explicación inicial, crea el fragmento y recorta la pista maestra).
-     - **"Descartar Selección"** (elimina silencios o tomas fallidas de la pista maestra).
-4. **Lista de Fragmentos de la Sesión + Comentarios en Línea de Tiempo:**
-   - Tarjetas expandibles por cada fragmento extraído.
-   - Cada tarjeta incluye:
-     - Título, BPM, duración y texto explicativo general del fragmento.
-     - **Reproductor de Línea de Tiempo con Marcadores (Pins):** Muestra la barra de progreso y marcadores en los segundos exactos donde hay comentarios. Al pasar el ratón por un pin o cuando la reproducción pasa por ese segundo, aparece un **popup flotante** sobre la línea de tiempo con el comentario.
-     - **Formulario rápido "+ Añadir comentario en el segundo actual (`mm:ss`)"**.
-     - **Panel lateral derecho dentro de la tarjeta:** Lista ordenada cronológicamente con todos los comentarios del fragmento. Hacer clic en cualquier comentario salta (`seek`) automáticamente a ese instante.
-5. **Editor de Notas de la Sesión (Markdown + Imágenes):**
-   - Pestaña o panel dividido (Edición / Vista Previa / Split) para escribir apuntes generales de la sesión en Markdown.
-   - Soporta pegar imágenes del portapapeles (`Ctrl+V`) o arrastrarlas; las guarda en `media/` dentro de la bóveda, las registra en `session_media`, inserta su ruta relativa en el Markdown y las renderiza en la vista previa.
+1. **Left Sidebar (Navigation and Status):**
+   - "+ New Practice Session" button.
+   - Chronological list of sessions.
+   - Quick USB-MIDI port selector and Settings button (with the name of the open vault) in the sidebar footer.
+   - Without an open vault, the app shows a welcome screen: create a vault (name + location), open an existing one, recent ones and import of the previous version's data.
+2. **Session Header and Recording / Metronome Panel:**
+   - Editable session title and date.
+   - Metronome controls: numeric/slider BPM selector ($40 - 240$), metronome toggle, live synthesizer monitoring switch, and the main **Record / Stop** button with a live timer.
+3. **Raw Take and Slicer Area:**
+   - Visible when the session has a master recording (`raw_midi_path`).
+   - Interactive timeline with visual MIDI activity blocks.
+   - Range selection controls (Start `mm:ss` - End `mm:ss`) that can be dragged on the canvas.
+   - Action buttons for the selected range:
+     - **"Extract as Fragment"** (opens a quick modal/form for the title and initial explanation, creates the fragment and slices the master track).
+     - **"Discard Selection"** (removes silences or failed takes from the master track).
+4. **Session Fragment List + Timeline Comments:**
+   - Expandable cards for each extracted fragment.
+   - Each card includes:
+     - Title, BPM, duration and the fragment's general explanation text.
+     - **Timeline Player with Markers (Pins):** Shows the progress bar and markers at the exact seconds where there are comments. When hovering over a pin, or when playback passes that second, a **floating popup** with the comment appears over the timeline.
+     - **Quick form "+ Add comment at the current second (`mm:ss`)"**.
+     - **Right side panel inside the card:** Chronologically sorted list of all the fragment's comments. Clicking any comment automatically jumps (`seek`) to that instant.
+5. **Session Notes Editor (Markdown + Images):**
+   - Tab or split panel (Edit / Preview / Split) to write general session notes in Markdown.
+   - Supports pasting images from the clipboard (`Ctrl+V`) or dragging them in; saves them in `media/` inside the vault, registers them in `session_media`, inserts their relative path into the Markdown and renders them in the preview.

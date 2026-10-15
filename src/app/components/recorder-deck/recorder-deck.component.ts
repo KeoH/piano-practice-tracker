@@ -7,7 +7,7 @@ import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { IconComponent } from '../icon/icon.component';
 
-/** Panel de grabación: botón grabar/detener con cronómetro, entrada MIDI, tempo, claqueta y monitor. */
+/** Recording panel: record/stop button with timer, MIDI input, tempo, metronome and monitoring. */
 @Component({
   selector: 'app-recorder-deck',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -40,7 +40,7 @@ export class RecorderDeckComponent {
   private bpmSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    // Al cambiar de sesión sincroniza el BPM con el guardado en ella
+    // When the session changes, sync the BPM with the one saved in it
     let lastId: string | null = null;
     effect(() => {
       const s = this.session();

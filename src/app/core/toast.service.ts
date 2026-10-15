@@ -17,7 +17,7 @@ export class ToastService {
 
   show(message: string, kind: ToastKind = 'info', timeoutMs = 4000): void {
     const id = this.nextId++;
-    // Evita duplicados idénticos consecutivos
+    // Avoids identical consecutive duplicates
     const list = this._toasts();
     if (list.length && list[list.length - 1].message === message) return;
     this._toasts.set([...list.slice(-4), { id, kind, message }]);

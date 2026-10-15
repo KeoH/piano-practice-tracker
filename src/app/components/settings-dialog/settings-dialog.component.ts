@@ -7,7 +7,7 @@ import { IconComponent } from '../icon/icon.component';
 import { LanguageSelectComponent } from '../language-select/language-select.component';
 import { SoundfontSettingsComponent } from '../soundfont-settings/soundfont-settings.component';
 
-/** Modal de ajustes en tres secciones: general (idioma), sonido (SoundFont) y bóveda (dónde se guardan los datos). */
+/** Settings modal with three sections: general (language), sound (SoundFont) and vault (where the data is stored). */
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,

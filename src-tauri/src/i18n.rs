@@ -1,24 +1,24 @@
-//! Traducción de los mensajes que el backend muestra al usuario (errores y avisos).
+//! Translation of the messages the backend shows to the user (errors and warnings).
 //!
-//! Comparte los ficheros de idioma con el frontend (`src/locales/<código>.json`), que se incrustan
-//! al compilar; Rust solo usa las claves `backend.*`. Los textos admiten `{nombre}` como hueco.
-//! Los logs, comentarios y tests siguen en español: no son para el usuario.
+//! It shares the language files with the frontend (`src/locales/<code>.json`), which are embedded
+//! at compile time; Rust only uses the `backend.*` keys. Texts accept `{name}` placeholders.
+//! Logs are not translated: they are not meant for the user.
 //!
-//! Para añadir un idioma basta con su JSON y una línea en [`LOCALES`].
+//! Adding a language only takes its JSON file and one line in [`LOCALES`].
 //!
-//! No importa `tauri::`, para poder testearlo sin app.
+//! It does not import `tauri::`, so it can be tested without the app.
 
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{LazyLock, RwLock};
 
-/// Idiomas disponibles: código ISO 639-1 y contenido del JSON. El primero es el de reserva.
+/// Available languages: ISO 639-1 code and JSON content. The first one is the fallback.
 const LOCALES: &[(&str, &str)] = &[
     ("en", include_str!("../../src/locales/en.json")),
     ("es", include_str!("../../src/locales/es.json")),
 ];
 
-/// Idioma de reserva si falta una clave o no se reconoce el del sistema.
+/// Fallback language when a key is missing or the system language is not recognized.
 pub const FALLBACK: &str = "en";
 
 static CATALOGS: LazyLock<HashMap<&'static str, HashMap<String, String>>> = LazyLock::new(|| {
@@ -26,7 +26,7 @@ static CATALOGS: LazyLock<HashMap<&'static str, HashMap<String, String>>> = Lazy
         .iter()
         .map(|(code, json)| {
             let value: serde_json::Value =
-                serde_json::from_str(json).unwrap_or_else(|e| panic!("locales/{code}.json no es JSON válido: {e}"));
+                serde_json::from_str(json).unwrap_or_else(|e| panic!("locales/{code}.json is not valid JSON: {e}"));
             let mut flat = HashMap::new();
             flatten("", &value, &mut flat);
             (*code, flat)
@@ -51,30 +51,30 @@ fn flatten(prefix: &str, value: &serde_json::Value, out: &mut HashMap<String, St
     }
 }
 
-/// Códigos de los idiomas disponibles.
+/// Codes of the available languages.
 pub fn supported() -> impl Iterator<Item = &'static str> {
     LOCALES.iter().map(|(code, _)| *code)
 }
 
-/// Convierte una etiqueta de idioma (`es`, `es-ES`, `es_ES.UTF-8`) en un idioma disponible.
+/// Turns a language tag (`es`, `es-ES`, `es_ES.UTF-8`) into an available language.
 pub fn normalize(tag: &str) -> Option<&'static str> {
     let lang = tag.split(['_', '-', '.', '@']).next()?.trim().to_ascii_lowercase();
     supported().find(|code| *code == lang)
 }
 
-/// Idioma del sistema según las variables de entorno de locale, o el de reserva.
+/// System language according to the locale environment variables, or the fallback.
 pub fn system_language() -> &'static str {
     system_language_from(|name| std::env::var(name).ok())
 }
 
 fn system_language_from(var: impl Fn(&str) -> Option<String>) -> &'static str {
-    // `LANGUAGE` es una lista por preferencia (`es:en`); las demás, un único locale.
+    // `LANGUAGE` is a preference list (`es:en`); the others hold a single locale.
     let mut tags: Vec<String> = var("LANGUAGE").map(|l| l.split(':').map(str::to_string).collect()).unwrap_or_default();
     tags.extend(["LC_ALL", "LC_MESSAGES", "LANG"].iter().filter_map(|n| var(n)));
     tags.iter().filter(|t| !t.is_empty()).find_map(|t| normalize(t)).unwrap_or(FALLBACK)
 }
 
-/// Idioma efectivo: la preferencia guardada si es válida; si no (o si es automática), el del sistema.
+/// Effective language: the saved preference if valid; otherwise (or if automatic), the system one.
 pub fn resolve(preference: Option<&str>) -> &'static str {
     preference.and_then(normalize).unwrap_or_else(system_language)
 }
@@ -88,8 +88,8 @@ pub fn current() -> &'static str {
     *CURRENT.read().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Traduce `key` al idioma `lang` sustituyendo los huecos `{nombre}`. Si falta la clave se usa
-/// el idioma de reserva y, en último caso, la propia clave.
+/// Translates `key` into `lang`, replacing the `{name}` placeholders. If the key is missing the
+/// fallback language is used and, as a last resort, the key itself.
 pub fn tr_in(lang: &str, key: &str, args: &[(&str, String)]) -> String {
     let template = [lang, FALLBACK]
         .iter()
@@ -99,7 +99,7 @@ pub fn tr_in(lang: &str, key: &str, args: &[(&str, String)]) -> String {
     interpolate(template, args)
 }
 
-/// Traduce `key` al idioma actual. Normalmente se usa a través de [`t!`](crate::t).
+/// Translates `key` into the current language. Normally used through [`t!`](crate::t).
 pub fn tr(key: &str, args: &[(&str, String)]) -> String {
     tr_in(current(), key, args)
 }
@@ -129,13 +129,13 @@ fn interpolate(template: &str, args: &[(&str, String)]) -> String {
     out
 }
 
-/// Convierte cualquier `Display` en argumento de [`tr`].
+/// Turns any `Display` into an argument for [`tr`].
 pub fn arg(value: impl Display) -> String {
     value.to_string()
 }
 
-/// `t!("backend.clave")` o `t!("backend.clave", path = dir.display(), e = e)`: traduce al idioma
-/// actual y devuelve un `String`.
+/// `t!("backend.key")` or `t!("backend.key", path = dir.display(), e = e)`: translates into the
+/// current language and returns a `String`.
 #[macro_export]
 macro_rules! t {
     ($key:expr) => {
@@ -151,7 +151,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    // Los tests usan `tr_in` y nunca cambian el idioma global: se ejecutan en paralelo.
+    // Tests use `tr_in` and never change the global language: they run in parallel.
 
     fn placeholders(s: &str) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
@@ -171,18 +171,18 @@ mod tests {
         for (code, catalog) in CATALOGS.iter() {
             let missing: Vec<_> = reference.keys().filter(|k| !catalog.contains_key(*k)).collect();
             let extra: Vec<_> = catalog.keys().filter(|k| !reference.contains_key(*k)).collect();
-            assert!(missing.is_empty() && extra.is_empty(), "{code}: faltan {missing:?}, sobran {extra:?}");
+            assert!(missing.is_empty() && extra.is_empty(), "{code}: missing {missing:?}, extra {extra:?}");
             for (key, text) in reference {
-                assert_eq!(placeholders(text), placeholders(&catalog[key]), "{code}: huecos distintos en «{key}»");
+                assert_eq!(placeholders(text), placeholders(&catalog[key]), "{code}: different placeholders in \"{key}\"");
             }
         }
     }
 
     #[test]
     fn translates_with_placeholders_and_fallbacks() {
-        assert_eq!(interpolate("No existe {path}: {e}", &[("path", "/x".into()), ("e", "boom".into())]), "No existe /x: boom");
-        assert_eq!(interpolate("deja {otro} y {sin cerrar", &[]), "deja {otro} y {sin cerrar");
-        assert_eq!(tr_in("es", "no.existe", &[]), "no.existe");
+        assert_eq!(interpolate("Missing {path}: {e}", &[("path", "/x".into()), ("e", "boom".into())]), "Missing /x: boom");
+        assert_eq!(interpolate("keeps {other} and {unclosed", &[]), "keeps {other} and {unclosed");
+        assert_eq!(tr_in("es", "does.not.exist", &[]), "does.not.exist");
         assert_eq!(tr_in("xx", "backend.noVault", &[]), tr_in("en", "backend.noVault", &[]));
         assert_ne!(tr_in("es", "backend.noVault", &[]), tr_in("en", "backend.noVault", &[]));
     }

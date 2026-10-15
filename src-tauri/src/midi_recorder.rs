@@ -1,12 +1,12 @@
-//! Motor de captura MIDI (sección 4.1 de la especificación).
+//! MIDI capture engine (section 4.1 of the specification).
 //!
-//! - Enumera puertos de entrada con `midir` (ALSA en Linux). Si ALSA no está
-//!   disponible solo se ofrece el simulador interno, que siempre aparece el último.
-//! - Graba mensajes NoteOn/NoteOff/ControlChange/PitchBend con marca de tiempo en µs
-//!   relativa a `Instant` t0 (más el desplazamiento de la pista bruta si se reanuda).
-//! - Cada mensaje aceptado se reenvía a `sink` (el agente principal lo conecta al
-//!   sintetizador en vivo, que decide si suena o no).
-//! - Al parar cierra notas abiertas y el pedal, y escribe SMF formato 0 (480 TPQ).
+//! - Lists input ports with `midir` (ALSA on Linux). If ALSA is not available, only the
+//!   built-in simulator is offered; it always comes last.
+//! - Records NoteOn/NoteOff/ControlChange/PitchBend messages with a µs timestamp relative to the
+//!   `Instant` t0 (plus the raw take's offset when resuming).
+//! - Every accepted message is forwarded to `sink` (the app wires it to the live synthesizer,
+//!   which decides whether it sounds).
+//! - On stop it closes open notes and the pedal, and writes SMF format 0 (480 TPQ).
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
@@ -27,15 +27,15 @@ pub const SIMULATOR_PORT_NAME: &str = "MIDI simulator (no keyboard)";
 const MIDIR_PREFIX: &str = "midir:";
 const CLIENT_NAME: &str = "piano-tracker";
 
-/// Destino de los mensajes MIDI capturados (monitorización en vivo).
+/// Destination of the captured MIDI messages (live monitoring).
 pub type MidiSink = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Lista los puertos de entrada MIDI. Nunca falla: si ALSA no está disponible devuelve
-/// solo el simulador, que siempre aparece en último lugar.
+/// Lists the MIDI input ports. It never fails: if ALSA is not available it returns only the
+/// simulator, which always comes last.
 pub fn list_ports() -> Vec<MidiPortInfo> {
     let mut ports: Vec<MidiPortInfo> = Vec::new();
     match midir::MidiInput::new(CLIENT_NAME) {
@@ -44,22 +44,22 @@ pub fn list_ports() -> Vec<MidiPortInfo> {
                 match input.port_name(&port) {
                     Ok(name) => {
                         if name.starts_with(CLIENT_NAME) {
-                            continue; // nuestros propios puertos
+                            continue; // our own ports
                         }
                         let is_virtual = name.contains("Through");
                         ports.push(MidiPortInfo { id: format!("{MIDIR_PREFIX}{name}"), name, is_virtual });
                     }
-                    Err(e) => log::warn!("midi_recorder: no se pudo leer el nombre de un puerto: {e}"),
+                    Err(e) => log::warn!("midi_recorder: could not read a port name: {e}"),
                 }
             }
         }
-        Err(e) => log::warn!("midi_recorder: MIDI del sistema no disponible ({e}); solo simulador"),
+        Err(e) => log::warn!("midi_recorder: system MIDI not available ({e}); simulator only"),
     }
     ports.push(MidiPortInfo { id: SIMULATOR_PORT_ID.to_string(), name: SIMULATOR_PORT_NAME.to_string(), is_virtual: true });
     ports
 }
 
-/// Estado compartido entre el hilo de captura y el grabador.
+/// State shared between the capture thread and the recorder.
 struct RecShared {
     t0: Instant,
     offset_us: u64,
@@ -72,16 +72,16 @@ impl RecShared {
         self.offset_us + self.t0.elapsed().as_micros() as u64
     }
 
-    /// Camino común para mensajes reales y del simulador.
+    /// Common path for real and simulator messages.
     fn handle_message(&self, bytes: &[u8]) {
         let Some(&status) = bytes.first() else { return };
-        // Filtra mensajes de sistema (clock 0xF8, active sensing 0xFE, sysex 0xF0...) y bytes de datos sueltos.
+        // Filters out system messages (clock 0xF8, active sensing 0xFE, sysex 0xF0...) and stray data bytes.
         if !(0x80..0xF0).contains(&status) {
             return;
         }
         let needed = match status & 0xF0 {
             0x80 | 0x90 | 0xB0 | 0xE0 => 3,
-            _ => return, // aftertouch / program change no se graban
+            _ => return, // aftertouch / program change are not recorded
         };
         if bytes.len() < needed {
             return;
@@ -106,7 +106,7 @@ struct ActiveRecording {
     _source: Source,
 }
 
-/// Grabador MIDI. Seguro para compartir entre hilos (estado gestionado de Tauri).
+/// MIDI recorder. Safe to share between threads (Tauri managed state).
 pub struct MidiRecorder {
     active: Mutex<Option<ActiveRecording>>,
     bpm: Arc<AtomicU32>,
@@ -123,8 +123,8 @@ impl MidiRecorder {
         MidiRecorder { active: Mutex::new(None), bpm: Arc::new(AtomicU32::new(120)) }
     }
 
-    /// Inicia la grabación desde `port_id` (`"simulator"` o `"midir:<nombre>"`).
-    /// Si `resume_from` existe, sus eventos se conservan y los nuevos se desplazan por su duración.
+    /// Starts recording from `port_id` (`"simulator"` or `"midir:<name>"`).
+    /// If `resume_from` exists, its events are kept and the new ones are shifted by its duration.
     pub fn start(&self, port_id: &str, bpm: u32, resume_from: Option<&Path>, sink: MidiSink) -> Result<(), String> {
         let mut active = lock(&self.active);
         if active.is_some() {
@@ -174,7 +174,7 @@ impl MidiRecorder {
         };
 
         *active = Some(ActiveRecording { shared, base_events, stop_tx, thread: Some(thread), _source: source });
-        log::info!("midi_recorder: grabación iniciada en {port_id} a {bpm} BPM (offset {offset_ms} ms)");
+        log::info!("midi_recorder: recording started on {port_id} at {bpm} BPM (offset {offset_ms} ms)");
         Ok(())
     }
 
@@ -190,26 +190,26 @@ impl MidiRecorder {
         lock(&self.active).is_some()
     }
 
-    /// Tiempo transcurrido de la toma actual (sin el desplazamiento de reanudación).
+    /// Elapsed time of the current take (without the resume offset).
     pub fn elapsed_ms(&self) -> u64 {
         lock(&self.active).as_ref().map(|a| a.shared.t0.elapsed().as_millis() as u64).unwrap_or(0)
     }
 
-    /// Detiene la grabación, cierra notas/pedal en el instante de stop, escribe el SMF
-    /// (BPM activo) y devuelve la duración total en ms.
+    /// Stops recording, closes notes/pedal at the stop instant, writes the SMF (active BPM) and
+    /// returns the total duration in ms.
     pub fn stop(&self, output_path: &Path) -> Result<u64, String> {
         let mut rec = lock(&self.active).take().ok_or_else(|| t!("backend.recorder.notRunning"))?;
         let _ = rec.stop_tx.send(());
         if let Some(t) = rec.thread.take() {
             if t.join().is_err() {
-                log::error!("midi_recorder: el hilo de captura terminó con pánico");
+                log::error!("midi_recorder: the capture thread panicked");
             }
         }
         let shared = rec.shared;
         let mut events = std::mem::take(&mut *lock(&shared.events));
         let stop_us = shared.now_us().max(events.iter().map(|e| e.time_us).max().unwrap_or(0));
 
-        // Cierre de notas abiertas y pedal en el instante de stop.
+        // Close open notes and the pedal at the stop instant.
         let mut open: Vec<(u8, u8)> = Vec::new();
         let mut channels: BTreeSet<u8> = BTreeSet::new();
         for ev in &events {
@@ -239,7 +239,7 @@ impl MidiRecorder {
         let bpm = self.bpm.load(Ordering::SeqCst);
         write_smf(output_path, &all, bpm)?;
         let duration = midi_duration_ms(output_path)?;
-        log::info!("midi_recorder: grabación guardada en {} ({duration} ms)", output_path.display());
+        log::info!("midi_recorder: recording saved to {} ({duration} ms)", output_path.display());
         Ok(duration)
     }
 }
@@ -255,7 +255,7 @@ impl Drop for MidiRecorder {
     }
 }
 
-/// Hilo propietario de la conexión `midir` (la conexión vive y se cierra en este hilo).
+/// Thread that owns the `midir` connection (the connection lives and is closed on this thread).
 fn run_midir_connection(
     wanted: String,
     shared: Arc<RecShared>,
@@ -273,7 +273,7 @@ fn run_midir_connection(
     let ports = input.ports();
     let names: Vec<(usize, String)> =
         ports.iter().enumerate().filter_map(|(i, p)| input.port_name(p).ok().map(|n| (i, n))).collect();
-    // Coincidencia exacta; si no, ignorando el sufijo "cliente:puerto" de ALSA (puede cambiar).
+    // Exact match; otherwise, ignoring ALSA's "client:port" suffix (it can change).
     let strip = |s: &str| s.rsplit_once(' ').map(|(a, _)| a.to_string()).unwrap_or_else(|| s.to_string());
     let idx = names
         .iter()
@@ -289,7 +289,7 @@ fn run_midir_connection(
     match conn {
         Ok(conn) => {
             let _ = ready_tx.send(Ok(()));
-            let _ = stop_rx.recv(); // espera stop (o que se suelte el emisor)
+            let _ = stop_rx.recv(); // waits for stop (or for the sender to be dropped)
             conn.close();
         }
         Err(e) => {
@@ -299,7 +299,7 @@ fn run_midir_connection(
 }
 
 // ---------------------------------------------------------------------------
-// Simulador
+// Simulator
 // ---------------------------------------------------------------------------
 
 struct Rng(u64);
@@ -317,8 +317,8 @@ impl Rng {
     }
 }
 
-/// Genera un compás: lista de (offset_us, mensaje). Progresión I-vi-IV-V en Do mayor:
-/// bajo sostenido + arpegio en corcheas + pedal que se suelta y re-pisa al cambiar de acorde.
+/// Generates one bar: list of (offset_us, message). I-vi-IV-V progression in C major: sustained
+/// bass + eighth-note arpeggio + pedal released and pressed again on each chord change.
 fn simulator_bar(bar: u64, bpm: u32, rng: &mut Rng) -> (Vec<(u64, Vec<u8>)>, u64) {
     const CHORDS: [[u8; 4]; 4] = [[48, 60, 64, 67], [45, 57, 60, 64], [41, 57, 60, 65], [43, 55, 59, 62]];
     let beat_us = 60_000_000 / bpm.clamp(20, 400) as u64;
@@ -356,7 +356,7 @@ fn run_simulator(shared: Arc<RecShared>, bpm: Arc<AtomicU32>, stop_rx: mpsc::Rec
     let mut bar_start_us = 0u64;
     let mut bar: u64 = 0;
     let mut open: HashMap<u8, u32> = HashMap::new();
-    // Espera hasta `target_us` (relativo al inicio del simulador). Devuelve false si hay que parar.
+    // Waits until `target_us` (relative to the simulator start). Returns false if it must stop.
     let wait_until = |target_us: u64| -> bool {
         loop {
             let now = start.elapsed().as_micros() as u64;
@@ -371,7 +371,7 @@ fn run_simulator(shared: Arc<RecShared>, bpm: Arc<AtomicU32>, stop_rx: mpsc::Rec
     };
     'outer: loop {
         let current_bpm = bpm.load(Ordering::SeqCst);
-        // Silencio ocasional de 1–2 s (nunca en los primeros compases).
+        // Occasional 1–2 s silence (never in the first bars).
         if bar >= 3 && bar % 6 == 5 && rng.range(0, 1) == 1 {
             let pause = rng.range(1_000_000, 2_000_000) as u64;
             bar_start_us += pause;
@@ -397,7 +397,7 @@ fn run_simulator(shared: Arc<RecShared>, bpm: Arc<AtomicU32>, stop_rx: mpsc::Rec
         bar_start_us += bar_len;
         bar += 1;
     }
-    // Las notas que sigan abiertas las cierra `MidiRecorder::stop` en el instante de parada.
+    // Notes still open are closed by `MidiRecorder::stop` at the stop instant.
 }
 
 #[cfg(test)]
@@ -414,13 +414,13 @@ mod tests {
                 *open.entry((ch, k)).or_default() += 1;
             } else if let Some((ch, k)) = as_note_off(&e.bytes) {
                 let c = open.entry((ch, k)).or_default();
-                assert!(*c > 0, "NoteOff huérfano");
+                assert!(*c > 0, "orphan NoteOff");
                 *c -= 1;
             } else if let Some((ch, v)) = as_sustain(&e.bytes) {
                 pedal.insert(ch, v);
             }
         }
-        assert!(open.values().all(|c| *c == 0), "notas colgadas: {open:?}");
+        assert!(open.values().all(|c| *c == 0), "hanging notes: {open:?}");
         assert!(pedal.values().all(|v| *v < 64));
     }
 
@@ -441,7 +441,7 @@ mod tests {
     #[test]
     fn list_ports_always_includes_simulator_last() {
         let ports = list_ports();
-        let last = ports.last().expect("al menos el simulador");
+        let last = ports.last().expect("at least the simulator");
         assert_eq!(last.id, SIMULATOR_PORT_ID);
         assert_eq!(last.name, SIMULATOR_PORT_NAME);
         assert!(last.is_virtual);
@@ -457,23 +457,23 @@ mod tests {
         assert!(!rec.is_recording());
         rec.start(SIMULATOR_PORT_ID, 240, None, Arc::clone(&sink)).unwrap();
         assert!(rec.is_recording());
-        assert!(rec.start(SIMULATOR_PORT_ID, 240, None, Arc::clone(&sink)).is_err(), "no puede grabar dos veces");
+        assert!(rec.start(SIMULATOR_PORT_ID, 240, None, Arc::clone(&sink)).is_err(), "cannot record twice");
         std::thread::sleep(Duration::from_millis(1200));
         assert!(rec.elapsed_ms() >= 1000);
         let dur = rec.stop(&out).unwrap();
         assert!(!rec.is_recording());
         assert_eq!(rec.elapsed_ms(), 0);
         assert!(out.is_file());
-        assert!((1150..2500).contains(&dur), "duración {dur}");
-        assert!(count.load(Ordering::SeqCst) > 0, "el sink debe recibir mensajes");
+        assert!((1150..2500).contains(&dur), "duration {dur}");
+        assert!(count.load(Ordering::SeqCst) > 0, "the sink must receive messages");
         let (evs, d) = read_timed_events(&out).unwrap();
         assert_eq!(d, dur);
         assert!(evs.iter().any(|e| as_note_on(&e.bytes).is_some()));
         assert!(evs.iter().any(|e| as_sustain(&e.bytes).is_some()));
         assert_clean(&evs);
-        assert!(rec.stop(&out).is_err(), "stop sin grabación es error");
+        assert!(rec.stop(&out).is_err(), "stop without a recording is an error");
 
-        // Reanudación: la segunda toma se desplaza por la duración de la primera.
+        // Resuming: the second take is shifted by the duration of the first.
         rec.start(SIMULATOR_PORT_ID, 240, Some(&out), sink).unwrap();
         std::thread::sleep(Duration::from_millis(600));
         let dur2 = rec.stop(&out).unwrap();
@@ -482,7 +482,7 @@ mod tests {
         assert_clean(&evs2);
         let n_first = evs.len();
         assert!(evs2.len() > n_first);
-        // Los eventos de la primera toma se conservan y los nuevos empiezan tras `dur`.
+        // The first take's events are kept and the new ones start after `dur`.
         let new_note_ons: Vec<_> =
             evs2.iter().filter(|e| e.time_us > dur * 1000 + 1500 && as_note_on(&e.bytes).is_some()).collect();
         assert!(!new_note_ons.is_empty());
@@ -504,8 +504,8 @@ mod tests {
         shared.handle_message(&[0xF8]);
         shared.handle_message(&[0xFE]);
         shared.handle_message(&[0xF0, 0x7E, 0x7F, 0xF7]);
-        shared.handle_message(&[0x90, 60]); // incompleto
-        shared.handle_message(&[0xC0, 1]); // program change: no se graba
+        shared.handle_message(&[0x90, 60]); // incomplete
+        shared.handle_message(&[0xC0, 1]); // program change: not recorded
         shared.handle_message(&[0x90, 60, 100]);
         shared.handle_message(&[0xB0, 64, 127]);
         shared.handle_message(&[0xE0, 0, 64]);

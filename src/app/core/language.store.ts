@@ -6,13 +6,13 @@ import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 import { VaultStore } from './vault.store';
 
-/** Clave de `localStorage` para la preferencia cuando no hay backend (navegador normal). */
+/** `localStorage` key for the preference when there is no backend (regular browser). */
 const STORAGE_KEY = 'piano-tracker.language';
 
 /**
- * Idioma de la interfaz: la preferencia del usuario (o automático) y el idioma del sistema. En la
- * app de escritorio la preferencia se guarda en la configuración del equipo y el backend traduce
- * también sus mensajes; sin Tauri se guarda en `localStorage`.
+ * UI language: the user's preference (or automatic) and the system language. In the desktop app
+ * the preference is stored in the machine configuration and the backend translates its messages
+ * too; without Tauri it is stored in `localStorage`.
  */
 @Injectable({ providedIn: 'root' })
 export class LanguageStore {
@@ -21,7 +21,7 @@ export class LanguageStore {
   private readonly toast = inject(ToastService);
   private readonly vault = inject(VaultStore);
 
-  /** `null` = automático (el del sistema). */
+  /** `null` = automatic (the system language). */
   readonly preference = signal<LangCode | null>(null);
   readonly system = signal<LangCode>(browserLanguage());
 
@@ -34,7 +34,7 @@ export class LanguageStore {
     try {
       this.apply(await this.api.getLanguage());
     } catch (err) {
-      console.warn('No se pudo leer el idioma:', err);
+      console.warn('Could not read the language:', err);
     }
   }
 
@@ -73,6 +73,6 @@ function writeStored(value: string | null): void {
     if (value) localStorage.setItem(STORAGE_KEY, value);
     else localStorage.removeItem(STORAGE_KEY);
   } catch {
-    // Sin almacenamiento la preferencia dura hasta cerrar la pestaña.
+    // Without storage the preference lasts until the tab is closed.
   }
 }

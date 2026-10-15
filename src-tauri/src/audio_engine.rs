@@ -1,15 +1,15 @@
-//! Motor de audio: sintetizador SoundFont (`rustysynth`), secuenciador MIDI interno,
-//! metrónomo y salida `cpal` (sección 4.3 de la especificación).
+//! Audio engine: SoundFont synthesizer (`rustysynth`), internal MIDI sequencer, metronome and
+//! `cpal` output (section 4.3 of the specification).
 //!
-//! - Un hilo dedicado crea y mantiene vivo el `cpal::Stream` (que no es `Send`).
-//! - El estado compartido (`Arc<Mutex<AudioState>>`) contiene sintetizador, secuenciador,
-//!   metrónomo y flags; el callback de audio lo bloquea brevemente y renderiza por bloques de 64 frames.
-//! - Si no hay dispositivo de salida (o falla), un hilo de "reloj nulo" hace avanzar el motor en
-//!   tiempo real descartando las muestras, para que reproducción y progreso funcionen igual.
-//! - Un hilo de progreso llama al `ProgressEmitter` cada 50 ms mientras se reproduce y una vez
-//!   más al pausar/parar/buscar/terminar.
-//! - Nunca hace `panic!`: cualquier fallo de audio o del SF2 se registra y degrada a salida nula
-//!   o a sintetizador vacío (el metrónomo y el reloj siguen funcionando).
+//! - A dedicated thread creates and keeps alive the `cpal::Stream` (which is not `Send`).
+//! - The shared state (`Arc<Mutex<AudioState>>`) holds the synthesizer, sequencer, metronome and
+//!   flags; the audio callback locks it briefly and renders in blocks of 64 frames.
+//! - If there is no output device (or it fails), a "null clock" thread advances the engine in
+//!   real time discarding the samples, so playback and progress work the same way.
+//! - A progress thread calls the `ProgressEmitter` every 50 ms while playing, and once more on
+//!   pause/stop/seek/end.
+//! - It never panics: any audio or SF2 failure is logged and degrades to null output or to an
+//!   empty synthesizer (the metronome and the clock keep working).
 
 use std::f32::consts::PI;
 use std::io::Cursor;
@@ -28,7 +28,7 @@ use crate::models::PlaybackProgress;
 pub type ProgressEmitter = Arc<dyn Fn(PlaybackProgress) + Send + Sync>;
 
 const PREFERRED_SAMPLE_RATE: u32 = 44_100;
-/// Tamaño de bloque pedido a la tarjeta (~5 ms a 48 kHz): baja latencia para el monitoreo en vivo.
+/// Block size requested from the sound card (~5 ms at 48 kHz): low latency for live monitoring.
 const TARGET_BUFFER_FRAMES: u32 = 256;
 const BLOCK_FRAMES: usize = 64;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
@@ -42,7 +42,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 // ---------------------------------------------------------------------------
-// Estado
+// State
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
@@ -58,7 +58,7 @@ struct Sequencer {
 struct Metronome {
     enabled: bool,
     bpm: u32,
-    /// Frames transcurridos desde que se (re)activó.
+    /// Frames elapsed since it was (re)enabled.
     pos: u64,
 }
 
@@ -67,13 +67,13 @@ impl Metronome {
         let spb = sr * 60.0 / self.bpm.clamp(20, 400) as f32;
         let p = self.pos as f64;
         let beat = (p / spb as f64).floor();
-        let offset = (p - beat * spb as f64) as f32 / sr; // segundos dentro del pulso
+        let offset = (p - beat * spb as f64) as f32 / sr; // seconds into the beat
         self.pos += 1;
         if offset >= CLICK_SECS {
             return 0.0;
         }
         let freq = if (beat as u64) % 4 == 0 { 880.0 } else { 440.0 };
-        // Envolvente exponencial corta con un leve fundido final para evitar clics.
+        // Short exponential envelope with a slight final fade to avoid clicks.
         let tail = ((CLICK_SECS - offset) / 0.005).min(1.0);
         (2.0 * PI * freq * offset).sin() * (-offset / CLICK_DECAY_SECS).exp() * tail
     }
@@ -86,7 +86,7 @@ struct AudioState {
     seq: Sequencer,
     metronome: Metronome,
     live_synth: bool,
-    /// Pide al hilo de progreso una emisión extra (pausa/parada/fin/seek).
+    /// Asks the progress thread for an extra emission (pause/stop/end/seek).
     emit_pending: bool,
     left: Vec<f32>,
     right: Vec<f32>,
@@ -103,7 +103,7 @@ fn new_synth(sf: &Arc<SoundFont>, sample_rate: u32) -> Option<Synthesizer> {
             Some(s)
         }
         Err(e) => {
-            log::error!("audio_engine: no se pudo crear el sintetizador a {sample_rate} Hz: {e}");
+            log::error!("audio_engine: could not create the synthesizer at {sample_rate} Hz: {e}");
             None
         }
     }
@@ -113,14 +113,14 @@ fn load_sound_font(path: &Path) -> Option<Arc<SoundFont>> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) => {
-            log::error!("audio_engine: no se pudo leer el SoundFont {}: {e}", path.display());
+            log::error!("audio_engine: could not read the SoundFont {}: {e}", path.display());
             return None;
         }
     };
     match SoundFont::new(&mut Cursor::new(bytes)) {
         Ok(sf) => Some(Arc::new(sf)),
         Err(e) => {
-            log::error!("audio_engine: SoundFont inválido {}: {e}", path.display());
+            log::error!("audio_engine: invalid SoundFont {}: {e}", path.display());
             None
         }
     }
@@ -142,7 +142,7 @@ impl AudioState {
         }
     }
 
-    /// Recrea el sintetizador para la frecuencia de muestreo real del dispositivo.
+    /// Recreates the synthesizer for the device's actual sample rate.
     fn set_sample_rate(&mut self, sample_rate: u32) {
         if sample_rate == self.sample_rate {
             return;
@@ -176,7 +176,7 @@ impl AudioState {
         synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1, d2);
     }
 
-    /// Silencio inmediato + reset de controladores (All Sound Off / Reset All Controllers / All Notes Off).
+    /// Immediate silence + controller reset (All Sound Off / Reset All Controllers / All Notes Off).
     fn reset_synth(&mut self) {
         if let Some(s) = self.synth.as_mut() {
             for ch in 0..16 {
@@ -186,7 +186,7 @@ impl AudioState {
             }
             s.note_off_all(true);
             s.reset_all_controllers();
-            // Vacía voces y colas de reverb/chorus para un silencio realmente inmediato.
+            // Clears voices and reverb/chorus tails for truly immediate silence.
             s.reset();
             for ch in 0..16 {
                 s.process_midi_message(ch, 0xC0, 0, 0);
@@ -194,7 +194,7 @@ impl AudioState {
         }
     }
 
-    /// Posiciona el secuenciador en `ms` aplicando el estado de controladores previo (pedal, programa, pitch bend).
+    /// Positions the sequencer at `ms`, applying the preceding controller state (pedal, program, pitch bend).
     fn position_at(&mut self, ms: u64) {
         let target_us = ms.saturating_mul(1000).min(self.seq.duration_us);
         self.reset_synth();
@@ -220,7 +220,7 @@ impl AudioState {
         }
     }
 
-    /// Renderiza `out.len() / 2` frames estéreo intercalados.
+    /// Renders `out.len() / 2` interleaved stereo frames.
     fn render_interleaved(&mut self, out: &mut [f32]) {
         let frames = out.len() / 2;
         let sr = self.sample_rate as f32;
@@ -270,16 +270,16 @@ impl AudioState {
 }
 
 // ---------------------------------------------------------------------------
-// Motor
+// Engine
 // ---------------------------------------------------------------------------
 
-/// Motor de audio. `Send + Sync`: se puede guardar en el estado gestionado de Tauri.
+/// Audio engine. `Send + Sync`: it can be stored in Tauri's managed state.
 pub struct AudioEngine {
     state: Arc<Mutex<AudioState>>,
     output_available: Arc<AtomicBool>,
-    /// Frames que pide la tarjeta en cada callback (0 si no hay salida): determina la latencia.
+    /// Frames the sound card requests per callback (0 without output): it determines the latency.
     callback_frames: Arc<AtomicU32>,
-    /// Latencia de salida medida en el último callback (µs entre generar y sonar).
+    /// Output latency measured in the last callback (µs between rendering and playing).
     output_latency_us: Arc<AtomicU32>,
     shutdown: Arc<AtomicBool>,
     audio_stop: Mutex<Option<Sender<()>>>,
@@ -287,8 +287,8 @@ pub struct AudioEngine {
 }
 
 impl AudioEngine {
-    /// Crea el motor con salida `cpal`. Nunca falla: sin dispositivo o sin SF2 válido entra en
-    /// modo "salida nula" (reloj en tiempo real) y/o sintetizador vacío.
+    /// Creates the engine with `cpal` output. It never fails: without a device or a valid SF2 it
+    /// falls back to "null output" mode (real-time clock) and/or an empty synthesizer.
     pub fn new(sf2_path: &Path, emitter: ProgressEmitter) -> Self {
         let engine = Self::build(sf2_path, emitter);
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
@@ -307,17 +307,17 @@ impl AudioEngine {
                 lock(&engine.threads).push(handle);
                 *lock(&engine.audio_stop) = Some(stop_tx);
                 match ready_rx.recv_timeout(Duration::from_secs(5)) {
-                    Ok(true) => log::info!("audio_engine: salida de audio activa"),
-                    Ok(false) => log::warn!("audio_engine: sin dispositivo de audio; modo salida nula"),
-                    Err(_) => log::warn!("audio_engine: el dispositivo de audio tarda en responder"),
+                    Ok(true) => log::info!("audio_engine: audio output active"),
+                    Ok(false) => log::warn!("audio_engine: no audio device; null output mode"),
+                    Err(_) => log::warn!("audio_engine: the audio device is slow to respond"),
                 }
             }
-            Err(e) => log::error!("audio_engine: no se pudo crear el hilo de audio: {e}"),
+            Err(e) => log::error!("audio_engine: could not create the audio thread: {e}"),
         }
         engine
     }
 
-    /// Motor sin hilo de audio ni reloj (tests/diagnóstico): el tiempo solo avanza con `render_offline`.
+    /// Engine without an audio thread or clock (tests/diagnostics): time only advances with `render_offline`.
     pub fn new_headless(sf2_path: &Path, emitter: ProgressEmitter) -> Self {
         Self::build(sf2_path, emitter)
     }
@@ -340,7 +340,7 @@ impl AudioEngine {
             .spawn(move || progress_thread(state, emitter, shutdown));
         match spawn {
             Ok(h) => lock(&engine.threads).push(h),
-            Err(e) => log::error!("audio_engine: no se pudo crear el hilo de progreso: {e}"),
+            Err(e) => log::error!("audio_engine: could not create the progress thread: {e}"),
         }
         engine
     }
@@ -349,17 +349,17 @@ impl AudioEngine {
         self.output_available.load(Ordering::SeqCst)
     }
 
-    /// Frames por callback de la salida real (0 si aún no hay audio o no hay dispositivo).
+    /// Frames per callback of the real output (0 if there is no audio yet or no device).
     pub fn callback_frames(&self) -> u32 {
         self.callback_frames.load(Ordering::Relaxed)
     }
 
-    /// Latencia de salida (generación → altavoz) del último callback, en microsegundos.
+    /// Output latency (rendering → speaker) of the last callback, in microseconds.
     pub fn output_latency_us(&self) -> u32 {
         self.output_latency_us.load(Ordering::Relaxed)
     }
 
-    /// `true` si el SoundFont se cargó y el sintetizador está operativo.
+    /// `true` if the SoundFont loaded and the synthesizer is working.
     pub fn synth_available(&self) -> bool {
         lock(&self.state).synth.is_some()
     }
@@ -368,8 +368,8 @@ impl AudioEngine {
         lock(&self.state).sample_rate
     }
 
-    /// Sustituye el SoundFont en caliente. La lectura (lenta para ficheros grandes) se hace fuera
-    /// del lock; después se recrea el sintetizador y se re-posiciona la reproducción en curso.
+    /// Swaps the SoundFont while running. Reading it (slow for large files) happens outside the
+    /// lock; then the synthesizer is recreated and the current playback is repositioned.
     pub fn load_soundfont(&self, path: &Path) -> Result<(), String> {
         let sf = load_sound_font(path).ok_or_else(|| t!("backend.soundfont.loadFailed", path = path.display()))?;
         let mut st = lock(&self.state);
@@ -381,7 +381,7 @@ impl AudioEngine {
             let pos = st.pos_ms();
             st.position_at(pos);
         }
-        log::info!("audio_engine: SoundFont activo {}", path.display());
+        log::info!("audio_engine: active SoundFont {}", path.display());
         Ok(())
     }
 
@@ -397,8 +397,8 @@ impl AudioEngine {
         lock(&self.state).progress()
     }
 
-    /// Reproduce `path` desde `start_ms`. Si es el mismo fichero en pausa y `start_ms` coincide
-    /// con la posición actual, simplemente reanuda.
+    /// Plays `path` from `start_ms`. If it is the same paused file and `start_ms` matches the
+    /// current position, it just resumes.
     pub fn play_file(&self, path: &Path, start_ms: u64) -> Result<(), String> {
         let path_str = path.to_string_lossy().into_owned();
         {
@@ -442,7 +442,7 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Reposiciona (note_off_all + reset de controladores) manteniendo el estado play/pause.
+    /// Repositions (note_off_all + controller reset) keeping the play/pause state.
     pub fn seek(&self, ms: u64) -> Result<(), String> {
         let mut st = lock(&self.state);
         if st.seq.file_path.is_none() {
@@ -453,7 +453,7 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Posición 0, `is_playing = false` y silencio inmediato.
+    /// Position 0, `is_playing = false` and immediate silence.
     pub fn stop(&self) -> Result<(), String> {
         let mut st = lock(&self.state);
         st.seq.is_playing = false;
@@ -464,8 +464,8 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Activa/desactiva el metrónomo (independiente de la reproducción). Al activarlo o cambiar
-    /// el BPM el primer pulso (acentuado, 880 Hz) suena inmediatamente.
+    /// Turns the metronome on/off (independent of playback). When it is enabled or the BPM changes,
+    /// the first beat (accented, 880 Hz) sounds immediately.
     pub fn set_metronome(&self, enabled: bool, bpm: u32) {
         let mut st = lock(&self.state);
         let bpm = bpm.clamp(20, 400);
@@ -490,7 +490,7 @@ impl AudioEngine {
         lock(&self.state).live_synth
     }
 
-    /// Envía un mensaje MIDI en vivo al sintetizador (no-op si la monitorización está desactivada).
+    /// Sends a live MIDI message to the synthesizer (no-op if monitoring is disabled).
     pub fn send_live_midi(&self, bytes: &[u8]) {
         let mut st = lock(&self.state);
         if st.live_synth {
@@ -498,8 +498,8 @@ impl AudioEngine {
         }
     }
 
-    /// SOLO tests/diagnóstico: avanza el motor `frames` frames sin dispositivo y devuelve las
-    /// muestras estéreo intercaladas (`frames * 2` valores).
+    /// Tests/diagnostics ONLY: advances the engine by `frames` frames without a device and returns
+    /// the interleaved stereo samples (`frames * 2` values).
     pub fn render_offline(&self, frames: usize) -> Vec<f32> {
         let mut out = vec![0.0f32; frames * 2];
         lock(&self.state).render_interleaved(&mut out);
@@ -520,7 +520,7 @@ impl Drop for AudioEngine {
 }
 
 // ---------------------------------------------------------------------------
-// Hilos
+// Threads
 // ---------------------------------------------------------------------------
 
 fn progress_thread(state: Arc<Mutex<AudioState>>, emitter: ProgressEmitter, shutdown: Arc<AtomicBool>) {
@@ -541,7 +541,7 @@ fn progress_thread(state: Arc<Mutex<AudioState>>, emitter: ProgressEmitter, shut
     }
 }
 
-/// Avanza el motor en tiempo real descartando las muestras (sin dispositivo de salida).
+/// Advances the engine in real time discarding the samples (no output device).
 fn run_null_clock(state: &Arc<Mutex<AudioState>>, stop_rx: &mpsc::Receiver<()>) {
     let start = Instant::now();
     let mut rendered: u64 = 0;
@@ -554,7 +554,7 @@ fn run_null_clock(state: &Arc<Mutex<AudioState>>, stop_rx: &mpsc::Receiver<()>) 
         let mut st = lock(state);
         let sr = st.sample_rate as u64;
         let target = (start.elapsed().as_micros() as u64).saturating_mul(sr) / 1_000_000;
-        // Si nos quedamos muy atrás (p. ej. suspensión), no intentamos recuperar más de 1 s.
+        // If we fall far behind (e.g. after suspend), don't try to catch up more than 1 s.
         if target > rendered + sr {
             rendered = target - sr;
         }
@@ -566,7 +566,7 @@ fn run_null_clock(state: &Arc<Mutex<AudioState>>, stop_rx: &mpsc::Receiver<()>) 
     }
 }
 
-/// Medidas que el callback de audio publica para diagnóstico.
+/// Measurements the audio callback publishes for diagnostics.
 #[derive(Clone)]
 struct OutputMeters {
     frames: Arc<AtomicU32>,
@@ -593,7 +593,7 @@ fn audio_thread(
                     }
                     Err(RecvTimeoutError::Timeout) => {
                         if failed.load(Ordering::SeqCst) {
-                            log::error!("audio_engine: el dispositivo de audio falló; cambio a salida nula");
+                            log::error!("audio_engine: the audio device failed; switching to null output");
                             drop(stream);
                             available.store(false, Ordering::SeqCst);
                             run_null_clock(&state, &stop_rx);
@@ -604,7 +604,7 @@ fn audio_thread(
             }
         }
         Err(e) => {
-            log::warn!("audio_engine: salida de audio no disponible: {e}");
+            log::warn!("audio_engine: audio output not available: {e}");
             available.store(false, Ordering::SeqCst);
             let _ = ready_tx.send(false);
             run_null_clock(&state, &stop_rx);
@@ -617,7 +617,7 @@ fn choose_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, S
     use cpal::SampleFormat;
     let supported = |f: SampleFormat| matches!(f, SampleFormat::F32 | SampleFormat::I16 | SampleFormat::U16 | SampleFormat::I32);
     let default = device.default_output_config().ok();
-    // Frecuencia nativa del dispositivo (p. ej. 48 kHz en PipeWire): evita el remuestreo, que añade latencia.
+    // Device's native rate (e.g. 48 kHz on PipeWire): avoids resampling, which adds latency.
     let rate = default.as_ref().map(|d| d.sample_rate().0).unwrap_or(PREFERRED_SAMPLE_RATE);
     if let Ok(configs) = device.supported_output_configs() {
         let mut candidates: Vec<cpal::SupportedStreamConfigRange> = configs
@@ -628,21 +628,21 @@ fn choose_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, S
                     && c.max_sample_rate().0 >= rate
             })
             .collect();
-        // Preferencia: estéreo, luego f32.
+        // Preference: stereo, then f32.
         candidates.sort_by_key(|c| (c.channels() != 2, c.sample_format() != SampleFormat::F32, c.channels()));
         if let Some(c) = candidates.into_iter().next() {
             return Ok(c.with_sample_rate(cpal::SampleRate(rate)));
         }
     }
-    let def = default.ok_or_else(|| "sin configuración de salida".to_string())?;
+    let def = default.ok_or_else(|| "no output configuration".to_string())?;
     if supported(def.sample_format()) {
         Ok(def)
     } else {
-        Err(format!("formato de muestra no soportado: {:?}", def.sample_format()))
+        Err(format!("unsupported sample format: {:?}", def.sample_format()))
     }
 }
 
-/// Búfer fijo pequeño dentro del rango que admite el dispositivo (`None` = usar el de por defecto).
+/// Small fixed buffer within the range the device supports (`None` = use the default one).
 fn low_latency_buffer(supported: &cpal::SupportedStreamConfig) -> Option<cpal::BufferSize> {
     match supported.buffer_size() {
         cpal::SupportedBufferSize::Range { min, max } if *min <= *max => {
@@ -662,13 +662,13 @@ fn open_output_stream(
     use cpal::SampleFormat;
 
     let host = cpal::default_host();
-    let device = host.default_output_device().ok_or_else(|| "no hay dispositivo de salida".to_string())?;
+    let device = host.default_output_device().ok_or_else(|| "no output device".to_string())?;
     let supported = choose_config(&device)?;
     let format = supported.sample_format();
     let config: cpal::StreamConfig = supported.config();
     let sr = config.sample_rate.0;
     if !(16_000..=192_000).contains(&sr) {
-        return Err(format!("frecuencia de muestreo no soportada: {sr} Hz"));
+        return Err(format!("unsupported sample rate: {sr} Hz"));
     }
     lock(state).set_sample_rate(sr);
     let channels = config.channels as usize;
@@ -677,15 +677,15 @@ fn open_output_stream(
         SampleFormat::I16 => build_stream::<i16>(&device, config, channels, state, failed, frames),
         SampleFormat::U16 => build_stream::<u16>(&device, config, channels, state, failed, frames),
         SampleFormat::I32 => build_stream::<i32>(&device, config, channels, state, failed, frames),
-        other => Err(format!("formato de muestra no soportado: {other:?}")),
+        other => Err(format!("unsupported sample format: {other:?}")),
     };
-    // Primero un búfer pequeño (baja latencia); si el dispositivo lo rechaza, el de por defecto.
+    // First a small buffer (low latency); if the device rejects it, the default one.
     let low_latency = low_latency_buffer(&supported).and_then(|buffer_size| {
         let cfg = cpal::StreamConfig { buffer_size, ..config.clone() };
         match build(&cfg) {
             Ok(stream) => Some(stream),
             Err(e) => {
-                log::warn!("audio_engine: búfer de baja latencia rechazado ({e}); uso el de por defecto");
+                log::warn!("audio_engine: low-latency buffer rejected ({e}); using the default one");
                 None
             }
         }
@@ -694,8 +694,8 @@ fn open_output_stream(
         Some(stream) => stream,
         None => build(&config)?,
     };
-    stream.play().map_err(|e| format!("no se pudo iniciar el stream: {e}"))?;
-    log::info!("audio_engine: salida {} Hz, {channels} canales, {format:?}", sr);
+    stream.play().map_err(|e| format!("could not start the stream: {e}"))?;
+    log::info!("audio_engine: output {} Hz, {channels} channels, {format:?}", sr);
     Ok(stream)
 }
 
@@ -748,14 +748,14 @@ where
                 }
             },
             move |err| {
-                log::error!("audio_engine: error del stream de audio: {err}");
+                log::error!("audio_engine: audio stream error: {err}");
                 if matches!(err, cpal::StreamError::DeviceNotAvailable) {
                     failed_cb.store(true, Ordering::SeqCst);
                 }
             },
             None,
         )
-        .map_err(|e| format!("no se pudo crear el stream de salida: {e}"))
+        .map_err(|e| format!("could not create the output stream: {e}"))
 }
 
 #[cfg(test)]
@@ -782,7 +782,7 @@ mod tests {
         (Arc::new(move |p| v2.lock().unwrap().push(p)), v)
     }
 
-    /// Fichero de 2 s: acordes cada 250 ms con pedal.
+    /// 2 s file: chords every 250 ms with pedal.
     fn test_midi(dir: &Path) -> PathBuf {
         let p = dir.join("test.mid");
         let mut evs = vec![TimedMidiEvent::new(0, vec![0xB0, 64, 127])];
@@ -830,11 +830,11 @@ mod tests {
         let pos = eng.position_ms();
         assert!((495..=505).contains(&pos), "pos={pos}");
 
-        // Seek manteniendo reproducción.
+        // Seek while keeping playback.
         eng.seek(1_500).unwrap();
         assert_eq!(eng.position_ms(), 1_500);
         assert!(eng.is_playing());
-        // Llega al final: se detiene en la duración.
+        // Reaches the end: stops at the duration.
         eng.render_offline(44_100);
         assert!(!eng.is_playing());
         assert_eq!(eng.position_ms(), 2_000);
@@ -842,15 +842,15 @@ mod tests {
         assert_eq!(p.duration_ms, 2_000);
         assert!(!p.is_playing);
 
-        // Stop: posición 0 y silencio inmediato.
+        // Stop: position 0 and immediate silence.
         eng.play_file(&mid, 0).unwrap();
         eng.render_offline(4_410);
         eng.stop().unwrap();
         assert!(!eng.is_playing());
         assert_eq!(eng.position_ms(), 0);
         let after = eng.render_offline(4_410);
-        assert!(peak(&after[2_000..]) < 0.05, "peak tras stop {}", peak(&after[2_000..]));
-        assert_eq!(eng.position_ms(), 0, "parado no avanza");
+        assert!(peak(&after[2_000..]) < 0.05, "peak after stop {}", peak(&after[2_000..]));
+        assert_eq!(eng.position_ms(), 0, "does not advance while stopped");
     }
 
     #[test]
@@ -866,11 +866,11 @@ mod tests {
         let pos = eng.position_ms();
         assert!((345..=355).contains(&pos), "{pos}");
         eng.render_offline(4_410);
-        assert_eq!(eng.position_ms(), pos, "en pausa no avanza");
+        assert_eq!(eng.position_ms(), pos, "does not advance while paused");
         eng.seek(1_000).unwrap();
-        assert!(!eng.is_playing(), "seek mantiene la pausa");
+        assert!(!eng.is_playing(), "seek keeps the pause");
         assert_eq!(eng.position_ms(), 1_000);
-        // Reanudar: mismo fichero y misma posición.
+        // Resume: same file and same position.
         eng.play_file(&mid, 1_000).unwrap();
         assert!(eng.is_playing());
         assert_eq!(eng.position_ms(), 1_000);
@@ -889,11 +889,11 @@ mod tests {
         eng.set_metronome(true, 120);
         let out = eng.render_offline(44_100);
         let left: Vec<f32> = out.iter().step_by(2).copied().collect();
-        // Clicks en 0 y 0.5 s (120 BPM), silencio entre ellos.
+        // Clicks at 0 and 0.5 s (120 BPM), silence in between.
         assert!(peak(&left[..2_205]) > 0.1);
         assert!(peak(&left[22_050..22_050 + 2_205]) > 0.1);
         assert!(peak(&left[3_000..21_000]) < 1e-3);
-        // 880 Hz en el primer pulso, 440 Hz en el segundo: cruces por cero en 40 ms.
+        // 880 Hz on the first beat, 440 Hz on the second: zero crossings in 40 ms.
         let crossings = |s: &[f32]| s.windows(2).filter(|w| (w[0] <= 0.0) != (w[1] <= 0.0)).count();
         let c1 = crossings(&left[..1_764]);
         let c2 = crossings(&left[22_050..22_050 + 1_764]);
@@ -945,7 +945,7 @@ mod tests {
         assert_eq!(last.current_ms, 0);
     }
 
-    /// Prueba manual con el dispositivo real (o salida nula si no hay): `cargo test -- --ignored`.
+    /// Manual test with the real device (or null output if there is none): `cargo test -- --ignored`.
     #[test]
     #[ignore]
     fn real_device_smoke() {
@@ -957,12 +957,12 @@ mod tests {
         eng.play_file(&mid, 0).unwrap();
         std::thread::sleep(Duration::from_millis(600));
         let pos = eng.position_ms();
-        assert!(pos >= 300, "el reloj (real o nulo) debe avanzar: {pos}");
+        assert!(pos >= 300, "the clock (real or null) must advance: {pos}");
         assert!(!got.lock().unwrap().is_empty());
         eng.stop().unwrap();
     }
 
-    /// Diagnóstico de latencia con el dispositivo real: `cargo test --lib -- --ignored --nocapture output_latency`.
+    /// Latency diagnostics with the real device: `cargo test --lib -- --ignored --nocapture output_latency`.
     #[test]
     #[ignore]
     fn output_latency_report() {
@@ -973,7 +973,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(ms).saturating_sub(t0.elapsed()));
             let (frames, sr) = (eng.callback_frames(), eng.sample_rate());
             println!(
-                "t={ms:>5} ms  sample_rate={sr} frames/callback={frames:>5}  latencia salida={:>6.1} ms",
+                "t={ms:>5} ms  sample_rate={sr} frames/callback={frames:>5}  output latency={:>6.1} ms",
                 eng.output_latency_us() as f64 / 1000.0
             );
         }
@@ -989,7 +989,7 @@ mod tests {
         eng.play_file(&mid, 0).unwrap();
         let out = eng.render_offline(22_050);
         assert!(peak(&out) < 1e-6);
-        assert!(eng.position_ms() >= 495, "el secuenciador avanza aunque no haya synth");
+        assert!(eng.position_ms() >= 495, "the sequencer advances even without a synth");
         eng.set_metronome(true, 100);
         assert!(peak(&eng.render_offline(4_410)) > 0.1);
     }

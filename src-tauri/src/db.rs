@@ -1,13 +1,13 @@
-//! Persistencia en SQLite dentro de la bóveda.
+//! SQLite persistence inside the vault.
 //!
-//! - Esquema versionado con `PRAGMA user_version`.
-//!   - v1: esquema original de SPECIFICATIONS.md §3.1 (con columnas y cola de Google Drive).
-//!   - v2: sin sincronización con Drive y con rutas relativas a la bóveda.
-//! - Las rutas de ficheros (`raw_midi_path`, `file_path`, `local_path`) se guardan **relativas a
-//!   la raíz de la bóveda** y la API pública las devuelve absolutas. Así la bóveda se puede mover
-//!   o sincronizar entre equipos (Dropbox, Syncthing…) sin romper referencias.
-//! - `journal_mode = DELETE`: en reposo la base de datos es un único fichero, sin `-wal`/`-shm`,
-//!   lo que evita que un servicio de sincronización suba un estado a medias.
+//! - Schema versioned with `PRAGMA user_version`.
+//!   - v1: original schema from SPECIFICATIONS.md §3.1 (with Google Drive columns and queue).
+//!   - v2: no Drive sync, and paths relative to the vault.
+//! - File paths (`raw_midi_path`, `file_path`, `local_path`) are stored **relative to the vault
+//!   root** and the public API returns them absolute. That way the vault can be moved or synced
+//!   between computers (Dropbox, Syncthing…) without breaking references.
+//! - `journal_mode = DELETE`: at rest the database is a single file, with no `-wal`/`-shm`,
+//!   which keeps a sync service from uploading a half-written state.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -89,7 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_media_session ON session_media(session_id);
 CREATE INDEX IF NOT EXISTS idx_sync_queue_entity ON sync_queue(entity_type, entity_id);
 "#;
 
-/// v2: fuera Google Drive (cola, estados e ids remotos). Las rutas se reescriben aparte.
+/// v2: Google Drive removed (queue, statuses and remote ids). Paths are rewritten separately.
 const MIGRATION_V2: &str = r#"
 DROP INDEX IF EXISTS idx_sync_queue_entity;
 DROP TABLE IF EXISTS sync_queue;
@@ -101,7 +101,7 @@ ALTER TABLE session_media DROP COLUMN sync_status;
 DELETE FROM app_settings WHERE key LIKE 'google\_%' ESCAPE '\' OR key LIKE 'drive\_%' ESCAPE '\';
 "#;
 
-/// Subrutas de la bóveda que identifican cada tipo de fichero al convertir rutas antiguas.
+/// Vault sub-paths that identify each file type when converting old paths.
 const RAW_MARKER: &str = "/midi/raw/";
 const FRAGMENT_MARKER: &str = "/midi/fragments/";
 const MEDIA_MARKER: &str = "/media/";
@@ -184,7 +184,7 @@ fn map_media(r: &Row) -> rusqlite::Result<SessionMediaDto> {
 }
 
 // ---------------------------------------------------------------------------
-// Funciones internas sobre una conexión (permiten componerlas en transacciones)
+// Internal functions over a connection (so they can be composed in transactions)
 // ---------------------------------------------------------------------------
 
 fn fetch_session(conn: &Connection, session_id: &str) -> Result<SessionDto, String> {
@@ -261,8 +261,8 @@ fn backup_in(conn: &Connection, dest: &Path) -> Result<(), String> {
     })
 }
 
-/// Convierte una ruta absoluta de la versión anterior en relativa a la bóveda buscando la
-/// subruta que identifica su tipo (`/midi/raw/`, …). Devuelve `(relativa, base_antigua)`.
+/// Converts an absolute path from the previous version into one relative to the vault, looking
+/// for the sub-path that identifies its type (`/midi/raw/`, …). Returns `(relative, old_base)`.
 fn legacy_to_relative(path: &str, marker: &str) -> Option<(String, String)> {
     if !path.starts_with('/') {
         return None;
@@ -271,8 +271,8 @@ fn legacy_to_relative(path: &str, marker: &str) -> Option<(String, String)> {
     Some((path[idx + 1..].to_string(), path[..idx].to_string()))
 }
 
-/// Paso de datos de la migración v2: rutas absolutas → relativas, también en el Markdown.
-/// `extra_bases` son directorios donde pudieron vivir los datos (la raíz actual de la bóveda).
+/// Data step of the v2 migration: absolute → relative paths, in the Markdown too.
+/// `extra_bases` are directories where the data may have lived (the vault's current root).
 fn rewrite_paths_to_relative(conn: &Connection, extra_bases: &[String]) -> Result<(), String> {
     let mut bases: BTreeSet<String> = extra_bases.iter().filter(|b| b.len() > 1).cloned().collect();
     for (table, col, marker) in [
@@ -296,8 +296,8 @@ fn rewrite_paths_to_relative(conn: &Connection, extra_bases: &[String]) -> Resul
         }
     }
 
-    // Las imágenes del Markdown llevaban la ruta absoluta: se quita el prefijo de la base.
-    // Primero las bases más largas, por si una contiene a otra.
+    // Markdown images carried the absolute path: the base prefix is stripped.
+    // Longest bases first, in case one contains another.
     let mut prefixes: Vec<String> = bases.into_iter().map(|b| format!("{}/", b.trim_end_matches('/'))).collect();
     prefixes.sort_by_key(|p| std::cmp::Reverse(p.len()));
     let notes: Vec<(String, String)> = {
@@ -319,19 +319,19 @@ fn rewrite_paths_to_relative(conn: &Connection, extra_bases: &[String]) -> Resul
 }
 
 // ---------------------------------------------------------------------------
-// API pública
+// Public API
 // ---------------------------------------------------------------------------
 
-/// Base de datos SQLite compartible entre hilos (`Arc<Database>`).
+/// SQLite database shareable between threads (`Arc<Database>`).
 pub struct Database {
     conn: Mutex<Connection>,
-    /// Raíz de la bóveda: las rutas relativas guardadas se resuelven contra ella.
+    /// Vault root: stored relative paths are resolved against it.
     root: PathBuf,
 }
 
 impl Database {
-    /// Abre (o crea) el fichero, activa claves foráneas, fija `journal_mode = DELETE` y aplica
-    /// migraciones. `root` es la raíz de la bóveda.
+    /// Opens (or creates) the file, enables foreign keys, sets `journal_mode = DELETE` and applies
+    /// migrations. `root` is the vault root.
     pub fn open(path: &Path, root: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -341,17 +341,17 @@ impl Database {
         }
         let conn = Connection::open(path)
             .map_err(|e| t!("backend.db.openFailed", path = path.display(), e = e))?;
-        // Si venía en WAL (versión anterior), este cambio hace checkpoint y borra -wal/-shm.
+        // If it was in WAL mode (previous version), this change checkpoints and removes -wal/-shm.
         let mode: String = conn
             .query_row("PRAGMA journal_mode = DELETE", [], |r| r.get(0))
             .map_err(|e| t!("backend.db.prepareFailed", path = path.display(), e = e))?;
         if !mode.eq_ignore_ascii_case("delete") {
-            log::warn!("La base de datos sigue en modo de diario '{mode}'");
+            log::warn!("The database is still in journal mode '{mode}'");
         }
         Self::init(conn, root)
     }
 
-    /// Base de datos en memoria (tests). Las rutas relativas se resuelven contra `root`.
+    /// In-memory database (tests). Relative paths are resolved against `root`.
     pub fn open_in_memory(root: &Path) -> Result<Self, String> {
         let conn = Connection::open_in_memory().map_err(db_err)?;
         Self::init(conn, root)
@@ -398,12 +398,12 @@ impl Database {
         &self.root
     }
 
-    /// Ruta a guardar: relativa a la bóveda si está dentro de ella; si no, tal cual.
+    /// Path to store: relative to the vault if it is inside it; otherwise unchanged.
     fn store_path(&self, path: &str) -> String {
         relative_to(&self.root, Path::new(path)).unwrap_or_else(|| path.to_string())
     }
 
-    /// Ruta absoluta para una ruta guardada.
+    /// Absolute path for a stored path.
     fn load_path(&self, stored: String) -> String {
         if stored.is_empty() || Path::new(&stored).is_absolute() {
             stored
@@ -427,7 +427,7 @@ impl Database {
         m
     }
 
-    // ----------------------------- Sesiones -----------------------------
+    // ----------------------------- Sessions -----------------------------
 
     pub fn create_session(&self, title: &str, bpm: u32) -> Result<SessionDto, String> {
         let conn = self.lock()?;
@@ -547,7 +547,7 @@ impl Database {
         fetch_session(&conn, session_id).map(|s| self.fix_session(s))
     }
 
-    /// Borra la sesión en cascada y devuelve las rutas absolutas a eliminar por el llamador.
+    /// Deletes the session in cascade and returns the absolute paths for the caller to delete.
     pub fn delete_session(&self, session_id: &str) -> Result<Vec<String>, String> {
         let mut conn = self.lock()?;
         let tx = conn.transaction().map_err(db_err)?;
@@ -569,7 +569,7 @@ impl Database {
         Ok(paths.into_iter().map(|p| self.load_path(p)).collect())
     }
 
-    // ----------------------------- Fragmentos -----------------------------
+    // ----------------------------- Fragments -----------------------------
 
     #[allow(clippy::too_many_arguments)]
     pub fn insert_fragment(
@@ -632,7 +632,7 @@ impl Database {
         tx.commit().map_err(db_err)
     }
 
-    /// Borra el fragmento y devuelve su ruta absoluta para que el llamador borre el fichero.
+    /// Deletes the fragment and returns its absolute path so the caller can delete the file.
     pub fn delete_fragment(&self, fragment_id: &str) -> Result<String, String> {
         let mut conn = self.lock()?;
         let tx = conn.transaction().map_err(db_err)?;
@@ -643,7 +643,7 @@ impl Database {
         Ok(self.load_path(frag.file_path))
     }
 
-    // ----------------------------- Comentarios -----------------------------
+    // ----------------------------- Comments -----------------------------
 
     pub fn add_timeline_comment(&self, fragment_id: &str, timestamp_ms: u64, content: &str) -> Result<TimelineCommentDto, String> {
         let mut conn = self.lock()?;
@@ -702,7 +702,7 @@ impl Database {
         Ok(SessionMediaDto { id, session_id: session_id.to_string(), local_path: local_path.to_string() })
     }
 
-    // ----------------------------- Ajustes -----------------------------
+    // ----------------------------- Settings -----------------------------
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
         let conn = self.lock()?;
@@ -728,9 +728,9 @@ impl Database {
         Ok(())
     }
 
-    // ----------------------------- Copias -----------------------------
+    // ----------------------------- Backups -----------------------------
 
-    /// Copia consistente de la base de datos (`VACUUM INTO` a temporal + rename atómico).
+    /// Consistent copy of the database (`VACUUM INTO` a temporary file + atomic rename).
     pub fn backup_to(&self, dest: &Path) -> Result<(), String> {
         let conn = self.lock()?;
         backup_in(&conn, dest)
@@ -741,7 +741,7 @@ impl Database {
 mod tests {
     use super::*;
 
-    const ROOT: &str = "/boveda";
+    const ROOT: &str = "/vault";
 
     fn db() -> Database {
         Database::open_in_memory(Path::new(ROOT)).unwrap()
@@ -754,27 +754,27 @@ mod tests {
     #[test]
     fn create_and_list_sessions() {
         let db = db();
-        let a = db.create_session("Escalas", 90).unwrap();
+        let a = db.create_session("Scales", 90).unwrap();
         let b = db.create_session("Chopin", 60).unwrap();
         assert_eq!(a.session_date, today());
         assert_eq!(a.bpm, 90);
         assert!(a.raw_midi_path.is_none());
         assert!(chrono::DateTime::parse_from_rfc3339(&a.updated_at).is_ok());
 
-        db.insert_fragment("f1", &a.id, "Frag", "", "/boveda/midi/fragments/f1.mid", 90, 1000).unwrap();
+        db.insert_fragment("f1", &a.id, "Frag", "", "/vault/midi/fragments/f1.mid", 90, 1000).unwrap();
         let list = db.list_sessions().unwrap();
         assert_eq!(list.len(), 2);
-        // `a` se actualizó (fragmento) después de crear `b`.
+        // `a` was updated (fragment) after `b` was created.
         assert_eq!(list[0].id, a.id);
         assert_eq!(list[0].fragment_count, 1);
         assert_eq!(list[1].id, b.id);
         assert_eq!(list[1].fragment_count, 0);
 
-        db.update_session(&b.id, "Chopin op. 28", 72, "# Notas").unwrap();
+        db.update_session(&b.id, "Chopin op. 28", 72, "# Notes").unwrap();
         let got = db.get_session(&b.id).unwrap();
         assert_eq!(got.title, "Chopin op. 28");
         assert_eq!(got.bpm, 72);
-        assert_eq!(got.markdown_notes, "# Notas");
+        assert_eq!(got.markdown_notes, "# Notes");
         assert!(db.get_session("nope").is_err());
         assert!(db.update_session("nope", "x", 1, "").is_err());
     }
@@ -783,44 +783,44 @@ mod tests {
     fn paths_are_stored_relative_and_returned_absolute() {
         let db = db();
         let s = db.create_session("S", 120).unwrap();
-        let updated = db.set_session_raw_midi(&s.id, "/boveda/midi/raw/raw.mid", 5000).unwrap();
-        assert_eq!(updated.raw_midi_path.as_deref(), Some("/boveda/midi/raw/raw.mid"));
+        let updated = db.set_session_raw_midi(&s.id, "/vault/midi/raw/raw.mid", 5000).unwrap();
+        assert_eq!(updated.raw_midi_path.as_deref(), Some("/vault/midi/raw/raw.mid"));
         assert_eq!(updated.raw_duration_ms, 5000);
         assert_eq!(stored(&db, "SELECT raw_midi_path FROM sessions"), "midi/raw/raw.mid");
 
-        let f = db.insert_fragment("f1", &s.id, "Uno", "", "/boveda/midi/fragments/f1.mid", 100, 1).unwrap();
-        assert_eq!(f.file_path, "/boveda/midi/fragments/f1.mid");
+        let f = db.insert_fragment("f1", &s.id, "One", "", "/vault/midi/fragments/f1.mid", 100, 1).unwrap();
+        assert_eq!(f.file_path, "/vault/midi/fragments/f1.mid");
         assert_eq!(stored(&db, "SELECT file_path FROM midi_fragments"), "midi/fragments/f1.mid");
 
-        let m = db.insert_media(&s.id, "/boveda/media/a.png").unwrap();
-        assert_eq!(m.local_path, "/boveda/media/a.png");
+        let m = db.insert_media(&s.id, "/vault/media/a.png").unwrap();
+        assert_eq!(m.local_path, "/vault/media/a.png");
         assert_eq!(stored(&db, "SELECT local_path FROM session_media"), "media/a.png");
 
         let d = db.get_session_detail(&s.id).unwrap();
-        assert_eq!(d.session.raw_midi_path.as_deref(), Some("/boveda/midi/raw/raw.mid"));
-        assert_eq!(d.fragments[0].file_path, "/boveda/midi/fragments/f1.mid");
-        assert_eq!(d.media[0].local_path, "/boveda/media/a.png");
+        assert_eq!(d.session.raw_midi_path.as_deref(), Some("/vault/midi/raw/raw.mid"));
+        assert_eq!(d.fragments[0].file_path, "/vault/midi/fragments/f1.mid");
+        assert_eq!(d.media[0].local_path, "/vault/media/a.png");
 
-        // Una ruta fuera de la bóveda se conserva tal cual.
-        db.set_session_raw_midi(&s.id, "/otra/raw.mid", 1).unwrap();
-        assert_eq!(db.get_session(&s.id).unwrap().raw_midi_path.as_deref(), Some("/otra/raw.mid"));
+        // A path outside the vault is kept as is.
+        db.set_session_raw_midi(&s.id, "/other/raw.mid", 1).unwrap();
+        assert_eq!(db.get_session(&s.id).unwrap().raw_midi_path.as_deref(), Some("/other/raw.mid"));
     }
 
     #[test]
     fn fragments_comments_and_cascade_delete() {
         let db = db();
         let s = db.create_session("S", 100).unwrap();
-        db.set_session_raw_midi(&s.id, "/boveda/midi/raw/raw.mid", 10_000).unwrap();
-        let f1 = db.insert_fragment("f1", &s.id, "Uno", "exp", "/boveda/midi/fragments/f1.mid", 100, 2000).unwrap();
-        let f2 = db.insert_fragment("f2", &s.id, "Dos", "", "/boveda/midi/fragments/f2.mid", 100, 3000).unwrap();
+        db.set_session_raw_midi(&s.id, "/vault/midi/raw/raw.mid", 10_000).unwrap();
+        let f1 = db.insert_fragment("f1", &s.id, "One", "exp", "/vault/midi/fragments/f1.mid", 100, 2000).unwrap();
+        let f2 = db.insert_fragment("f2", &s.id, "Two", "", "/vault/midi/fragments/f2.mid", 100, 3000).unwrap();
         assert_eq!(f1.order_index, 0);
         assert_eq!(f2.order_index, 1);
         assert!(db.insert_fragment("fx", "nope", "x", "", "/x.mid", 1, 1).is_err());
 
-        let c2 = db.add_timeline_comment("f1", 1500, "tarde").unwrap();
-        let c1 = db.add_timeline_comment("f1", 200, "pronto").unwrap();
+        let c2 = db.add_timeline_comment("f1", 1500, "late").unwrap();
+        let c1 = db.add_timeline_comment("f1", 200, "early").unwrap();
         assert!(db.add_timeline_comment("nope", 1, "x").is_err());
-        db.insert_media(&s.id, "/boveda/media/img.png").unwrap();
+        db.insert_media(&s.id, "/vault/media/img.png").unwrap();
 
         let detail = db.get_session_detail(&s.id).unwrap();
         assert_eq!(detail.fragments.len(), 2);
@@ -831,9 +831,9 @@ mod tests {
         assert_eq!(detail.media.len(), 1);
         assert_eq!(db.get_fragment("f1").unwrap().comments.len(), 2);
 
-        db.update_fragment_meta("f2", "Dos bis", "nueva").unwrap();
+        db.update_fragment_meta("f2", "Two bis", "new").unwrap();
         let f2b = db.get_fragment("f2").unwrap();
-        assert_eq!((f2b.title.as_str(), f2b.explanation.as_str()), ("Dos bis", "nueva"));
+        assert_eq!((f2b.title.as_str(), f2b.explanation.as_str()), ("Two bis", "new"));
 
         db.delete_timeline_comment(&c2.id).unwrap();
         assert_eq!(db.get_fragment("f1").unwrap().comments.len(), 1);
@@ -844,10 +844,10 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                "/boveda/media/img.png",
-                "/boveda/midi/fragments/f1.mid",
-                "/boveda/midi/fragments/f2.mid",
-                "/boveda/midi/raw/raw.mid"
+                "/vault/media/img.png",
+                "/vault/midi/fragments/f1.mid",
+                "/vault/midi/fragments/f2.mid",
+                "/vault/midi/raw/raw.mid"
             ]
         );
         assert!(db.get_session(&s.id).is_err());
@@ -855,7 +855,7 @@ mod tests {
         let conn = db.lock().unwrap();
         for table in ["midi_fragments", "timeline_comments", "session_media"] {
             let n: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap();
-            assert_eq!(n, 0, "{table} debería quedar vacía");
+            assert_eq!(n, 0, "{table} should be empty");
         }
     }
 
@@ -863,8 +863,8 @@ mod tests {
     fn delete_fragment_returns_absolute_path() {
         let db = db();
         let s = db.create_session("S", 100).unwrap();
-        db.insert_fragment("f2", &s.id, "Dos", "", "/boveda/midi/fragments/f2.mid", 100, 3000).unwrap();
-        assert_eq!(db.delete_fragment("f2").unwrap(), "/boveda/midi/fragments/f2.mid");
+        db.insert_fragment("f2", &s.id, "Two", "", "/vault/midi/fragments/f2.mid", 100, 3000).unwrap();
+        assert_eq!(db.delete_fragment("f2").unwrap(), "/vault/midi/fragments/f2.mid");
         assert!(db.delete_fragment("f2").is_err());
     }
 
@@ -880,14 +880,14 @@ mod tests {
         db.delete_setting("k").unwrap();
     }
 
-    /// Crea una base de datos v1 (versión con Google Drive) con rutas absolutas en WAL.
+    /// Creates a v1 database (the Google Drive version) with absolute paths, in WAL mode.
     fn create_v1(path: &Path, old_base: &str) {
         let conn = Connection::open(path).unwrap();
         conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get::<_, String>(0)).unwrap();
         conn.execute_batch(MIGRATION_V1).unwrap();
         conn.execute_batch("PRAGMA user_version = 1;").unwrap();
         let md = format!(
-            "Hola\n![foto]({old_base}/media/abc_foto.png)\n![otra](<{old_base}/media/con espacio.png>)\n![web](https://x.org/a.png)"
+            "Hello\n![photo]({old_base}/media/abc_photo.png)\n![other](<{old_base}/media/with space.png>)\n![web](https://x.org/a.png)"
         );
         conn.execute(
             "INSERT INTO sessions (id, title, session_date, bpm, raw_midi_path, raw_duration_ms, markdown_notes, \
@@ -903,7 +903,7 @@ mod tests {
         .unwrap();
         conn.execute(
             "INSERT INTO session_media (id, session_id, local_path, drive_file_id) VALUES ('m1', 's1', ?1, 'drive-m1')",
-            params![format!("{old_base}/media/abc_foto.png")],
+            params![format!("{old_base}/media/abc_photo.png")],
         )
         .unwrap();
         conn.execute(
@@ -911,7 +911,7 @@ mod tests {
             [],
         )
         .unwrap();
-        for (k, v) in [("google_refresh_token", "t"), ("drive_file_id:DB_SNAPSHOT", "d"), ("drive_folder_root", "r"), ("otro", "v")] {
+        for (k, v) in [("google_refresh_token", "t"), ("drive_file_id:DB_SNAPSHOT", "d"), ("drive_folder_root", "r"), ("other", "v")] {
             conn.execute("INSERT INTO app_settings (key, value) VALUES (?1, ?2)", params![k, v]).unwrap();
         }
     }
@@ -919,7 +919,7 @@ mod tests {
     #[test]
     fn migrates_v1_to_relative_paths_without_drive() {
         let dir = tempfile::tempdir().unwrap();
-        let vault = dir.path().join("Bóveda");
+        let vault = dir.path().join("Café vault");
         std::fs::create_dir_all(&vault).unwrap();
         let db_path = vault.join("piano_tracker.sqlite");
         let old_base = "/home/alguien/.local/share/piano-tracker";
@@ -930,10 +930,10 @@ mod tests {
         let d = db.get_session_detail("s1").unwrap();
         assert_eq!(d.session.raw_midi_path, Some(format!("{v}/midi/raw/raw_session_s1.mid")));
         assert_eq!(d.fragments[0].file_path, format!("{v}/midi/fragments/frag_f1.mid"));
-        assert_eq!(d.media[0].local_path, format!("{v}/media/abc_foto.png"));
+        assert_eq!(d.media[0].local_path, format!("{v}/media/abc_photo.png"));
         assert_eq!(
             d.session.markdown_notes,
-            "Hola\n![foto](media/abc_foto.png)\n![otra](<media/con espacio.png>)\n![web](https://x.org/a.png)"
+            "Hello\n![photo](media/abc_photo.png)\n![other](<media/with space.png>)\n![web](https://x.org/a.png)"
         );
         assert_eq!(stored(&db, "SELECT file_path FROM midi_fragments"), "midi/fragments/frag_f1.mid");
 
@@ -946,14 +946,14 @@ mod tests {
             let n: i64 = conn
                 .query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{col}'"), [], |r| r.get(0))
                 .unwrap();
-            assert_eq!(n, 0, "{table}.{col} debería haberse eliminado");
+            assert_eq!(n, 0, "{table}.{col} should have been removed");
         }
         let keys: Vec<String> = {
             let mut stmt = conn.prepare("SELECT key FROM app_settings").unwrap();
             let rows = stmt.query_map([], |r| r.get(0)).unwrap();
             rows.collect::<rusqlite::Result<Vec<_>>>().unwrap()
         };
-        assert_eq!(keys, vec!["otro".to_string()]);
+        assert_eq!(keys, vec!["other".to_string()]);
         let mode: String = conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "delete");
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
@@ -963,7 +963,7 @@ mod tests {
         assert!(!vault.join("piano_tracker.sqlite-wal").exists());
         assert!(!vault.join("piano_tracker.sqlite-shm").exists());
 
-        // Reabrir es idempotente.
+        // Reopening is idempotent.
         let db = Database::open(&db_path, &vault).unwrap();
         assert_eq!(db.list_sessions().unwrap().len(), 1);
     }
@@ -974,23 +974,23 @@ mod tests {
         let db_path = dir.path().join("sub").join("piano_tracker.sqlite");
         {
             let db = Database::open(&db_path, dir.path()).unwrap();
-            let s = db.create_session("Persistente", 80).unwrap();
-            db.insert_fragment("f1", &s.id, "Uno", "", "/data/f1.mid", 80, 1000).unwrap();
+            let s = db.create_session("Persistent", 80).unwrap();
+            db.insert_fragment("f1", &s.id, "One", "", "/data/f1.mid", 80, 1000).unwrap();
             let backup = dir.path().join("piano_tracker_backup.sqlite");
             db.backup_to(&backup).unwrap();
-            // Segunda copia sobre la existente (rename atómico).
+            // Second copy over the existing one (atomic rename).
             db.backup_to(&backup).unwrap();
             assert!(!dir.path().join("piano_tracker_backup.sqlite.tmp").exists());
 
             let copy = Connection::open(&backup).unwrap();
             let title: String = copy.query_row("SELECT title FROM sessions", [], |r| r.get(0)).unwrap();
-            assert_eq!(title, "Persistente");
+            assert_eq!(title, "Persistent");
             let n: i64 = copy.query_row("SELECT COUNT(*) FROM midi_fragments", [], |r| r.get(0)).unwrap();
             assert_eq!(n, 1);
             let v: i64 = copy.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
             assert_eq!(v, SCHEMA_VERSION);
         }
-        // Reapertura: migraciones idempotentes y datos conservados.
+        // Reopening: idempotent migrations and data kept.
         let db = Database::open(&db_path, dir.path()).unwrap();
         assert_eq!(db.list_sessions().unwrap().len(), 1);
     }

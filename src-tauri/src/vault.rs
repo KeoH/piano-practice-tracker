@@ -1,15 +1,15 @@
-//! Bóvedas: carpetas elegidas por el usuario donde viven todos los datos (base de datos, MIDI e
-//! imágenes), al estilo de Obsidian. El usuario decide dónde ponerlas (p. ej. dentro de la
-//! carpeta de Dropbox) y la app no sincroniza nada por su cuenta.
+//! Vaults: folders chosen by the user where all the data lives (database, MIDI and images),
+//! Obsidian-style. The user decides where to put them (e.g. inside the Dropbox folder) and the
+//! app does not sync anything on its own.
 //!
-//! - La configuración del equipo (bóveda actual, recientes, SoundFont) va fuera de la bóveda,
-//!   en [`AppConfig`].
-//! - Mientras una bóveda está abierta hay un fichero `.piano-tracker/lock` con el equipo y el pid.
-//!   Si al abrirla hay un lock de otro equipo (o de otro proceso vivo en este), se pide
-//!   confirmación: abrir la misma base de datos en dos equipos a la vez acaba en copias en
-//!   conflicto del servicio de sincronización.
+//! - The machine's configuration (current vault, recent ones, SoundFont) lives outside the
+//!   vault, in [`AppConfig`].
+//! - While a vault is open there is a `.piano-tracker/lock` file with the host and the pid.
+//!   If, when opening it, there is a lock from another computer (or from another live process on
+//!   this one), the user is asked to confirm: opening the same database on two computers at once
+//!   ends up in conflicting copies from the sync service.
 //!
-//! No importa `tauri::`, para poder testearlo sin app.
+//! It does not import `tauri::`, so it can be tested without the app.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -22,33 +22,33 @@ use crate::db::Database;
 use crate::models::{RecentVault, VaultInfo};
 use crate::paths::{AppDirs, AppPaths, DB_FILE_NAME, VAULT_MARKER_DIR};
 
-/// Máximo de bóvedas recientes recordadas.
+/// Maximum number of recent vaults remembered.
 const MAX_RECENT: usize = 10;
-/// Formato del marcador `vault.json`.
+/// Format of the `vault.json` marker.
 const VAULT_FORMAT: u32 = 1;
 
 // ---------------------------------------------------------------------------
-// Configuración del equipo
+// Machine configuration
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
     pub current_vault: Option<String>,
-    /// Más recientes primero.
+    /// Most recent first.
     pub recent_vaults: Vec<String>,
-    /// SoundFont elegido en Ajustes (depende del equipo, por eso no va en la bóveda).
+    /// SoundFont chosen in Settings (machine-dependent, so it does not go in the vault).
     pub soundfont_path: Option<String>,
-    /// Idioma de la interfaz (`"en"`, `"es"`…); `None` sigue al del sistema.
+    /// UI language (`"en"`, `"es"`…); `None` follows the system language.
     pub language: Option<String>,
 }
 
 impl AppConfig {
-    /// Lee la configuración; si falta o está dañada, devuelve la de por defecto.
+    /// Reads the configuration; if it is missing or corrupt, returns the default one.
     pub fn load(path: &Path) -> Self {
         match std::fs::read_to_string(path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-                log::warn!("Configuración no válida en {}: {e}; se usa la de por defecto", path.display());
+                log::warn!("Invalid configuration in {}: {e}; using the default one", path.display());
                 AppConfig::default()
             }),
             Err(_) => AppConfig::default(),
@@ -60,7 +60,7 @@ impl AppConfig {
         write_atomic(path, text.as_bytes())
     }
 
-    /// Marca `path` como bóveda actual y la pone la primera de las recientes.
+    /// Marks `path` as the current vault and puts it first among the recent ones.
     pub fn set_current(&mut self, path: &str) {
         self.current_vault = Some(path.to_string());
         self.recent_vaults.retain(|p| p != path);
@@ -84,10 +84,10 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Bóveda abierta
+// Open vault
 // ---------------------------------------------------------------------------
 
-/// Bóveda abierta: rutas y base de datos. Al soltarse libera el lock.
+/// Open vault: paths and database. Releases the lock when dropped.
 pub struct Vault {
     pub paths: AppPaths,
     pub db: Arc<Database>,
@@ -98,12 +98,12 @@ impl Vault {
         folder_name(&self.paths.base)
     }
 
-    /// Borra el lock si es de este proceso.
+    /// Deletes the lock if it belongs to this process.
     pub fn release_lock(&self) {
         let lock = self.paths.lock_file();
         if read_lock(&lock).is_some_and(|l| l.host == hostname() && l.pid == std::process::id()) {
             if let Err(e) = std::fs::remove_file(&lock) {
-                log::warn!("No se pudo borrar {}: {e}", lock.display());
+                log::warn!("Could not delete {}: {e}", lock.display());
             }
         }
     }
@@ -115,10 +115,10 @@ impl Drop for Vault {
     }
 }
 
-/// Resultado de intentar abrir una bóveda.
+/// Result of trying to open a vault.
 pub enum OpenOutcome {
     Opened(Vault),
-    /// Parece abierta en otro sitio; el texto explica dónde. Se puede reintentar con `force`.
+    /// It seems to be open somewhere else; the text explains where. It can be retried with `force`.
     Locked(String),
 }
 
@@ -141,7 +141,7 @@ fn hostname() -> String {
         .find_map(|p| std::fs::read_to_string(p).ok())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "este equipo".to_string())
+        .unwrap_or_else(|| "this computer".to_string())
 }
 
 fn pid_alive(pid: u32) -> bool {
@@ -158,13 +158,13 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-/// Ruta canónica si existe (evita duplicados en recientes por `/` finales o `..`).
+/// Canonical path if it exists (avoids duplicates in the recent list due to trailing `/` or `..`).
 pub fn normalize(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-/// La carpeta es una bóveda: tiene el marcador o, como la carpeta de la versión anterior,
-/// directamente la base de datos.
+/// The folder is a vault: it has the marker or, like the previous version's folder, the
+/// database itself.
 pub fn is_vault(dir: &Path) -> bool {
     dir.join(VAULT_MARKER_DIR).is_dir() || dir.join(DB_FILE_NAME).is_file()
 }
@@ -174,7 +174,7 @@ fn is_empty_dir(dir: &Path) -> Result<bool, String> {
     Ok(entries.next().is_none())
 }
 
-/// Comprueba que `dir` sirve para una bóveda nueva: no existe o está vacía.
+/// Checks that `dir` can hold a new vault: it does not exist or it is empty.
 fn check_new_vault_dir(dir: &Path) -> Result<(), String> {
     if !dir.is_absolute() {
         return Err(t!("backend.vault.pathNotAbsolute"));
@@ -203,7 +203,7 @@ fn write_marker_if_missing(paths: &AppPaths) -> Result<(), String> {
     write_atomic(&file, text.as_bytes())
 }
 
-/// Crea la estructura de una bóveda nueva en `dir` (que no debe existir o estar vacía).
+/// Creates the structure of a new vault in `dir` (which must not exist or must be empty).
 pub fn create_vault(dir: &Path) -> Result<(), String> {
     check_new_vault_dir(dir)?;
     let paths = AppPaths::from_base(dir);
@@ -211,14 +211,14 @@ pub fn create_vault(dir: &Path) -> Result<(), String> {
     write_marker_if_missing(&paths)
 }
 
-/// Mensaje de aviso si la bóveda tiene un lock de otro equipo o de otro proceso vivo.
+/// Warning message if the vault has a lock from another computer or another live process.
 fn foreign_lock_message(paths: &AppPaths) -> Option<String> {
     let lock = read_lock(&paths.lock_file())?;
     let me = hostname();
     if lock.host == me && (lock.pid == std::process::id() || !pid_alive(lock.pid)) {
         return None;
     }
-    // El formato viene de la traducción: si estuviese mal escrito, `to_string` entraría en pánico.
+    // The format comes from the translation: if it were malformed, `to_string` would panic.
     let date_format = t!("backend.vault.lockDateFormat");
     let when = DateTime::parse_from_rfc3339(&lock.opened_at)
         .ok()
@@ -235,8 +235,8 @@ fn foreign_lock_message(paths: &AppPaths) -> Option<String> {
     Some(t!("backend.vault.lockWarning", place = place, when = when))
 }
 
-/// Comprueba que `dir` es una bóveda que se puede abrir. Devuelve el aviso de lock ajeno
-/// (si lo hay y no se fuerza) sin modificar nada.
+/// Checks that `dir` is a vault that can be opened. Returns the foreign-lock warning (if there
+/// is one and it is not forced) without changing anything.
 pub fn precheck(dir: &Path, force: bool) -> Result<Option<String>, String> {
     if !dir.is_dir() {
         return Err(t!("backend.vault.missing", path = dir.display()));
@@ -247,8 +247,8 @@ pub fn precheck(dir: &Path, force: bool) -> Result<Option<String>, String> {
     Ok(if force { None } else { foreign_lock_message(&AppPaths::from_base(dir)) })
 }
 
-/// Abre la bóveda de `dir`: valida, comprueba el lock, lo escribe y abre la base de datos
-/// (aplicando migraciones). Con `force` ignora un lock ajeno.
+/// Opens the vault in `dir`: validates it, checks the lock, writes it and opens the database
+/// (applying migrations). With `force` it ignores a foreign lock.
 pub fn open_vault(dir: &Path, force: bool) -> Result<OpenOutcome, String> {
     if let Some(msg) = precheck(dir, force)? {
         return Ok(OpenOutcome::Locked(msg));
@@ -272,7 +272,7 @@ pub fn open_vault(dir: &Path, force: bool) -> Result<OpenOutcome, String> {
     Ok(OpenOutcome::Opened(Vault { db: Arc::new(db), paths }))
 }
 
-/// Copias en conflicto de la base de datos creadas por servicios de sincronización
+/// Conflicting copies of the database created by sync services
 /// (Dropbox: `piano_tracker (… conflicted copy …).sqlite`; Syncthing: `….sync-conflict-….sqlite`).
 pub fn conflict_copies(paths: &AppPaths) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(&paths.base) else { return Vec::new() };
@@ -288,7 +288,7 @@ pub fn conflict_copies(paths: &AppPaths) -> Vec<String> {
     out
 }
 
-/// Información para el frontend.
+/// Information for the frontend.
 pub fn vault_info(config: &AppConfig, current: Option<&Vault>, dirs: &AppDirs) -> VaultInfo {
     let recent = config
         .recent_vaults
@@ -321,10 +321,10 @@ pub fn vault_info(config: &AppConfig, current: Option<&Vault>, dirs: &AppDirs) -
 }
 
 // ---------------------------------------------------------------------------
-// Importar los datos de la versión anterior
+// Importing the previous version's data
 // ---------------------------------------------------------------------------
 
-/// Mueve un fichero o carpeta; si `rename` falla (p. ej. entre discos), copia y borra.
+/// Moves a file or folder; if `rename` fails (e.g. across disks), copies and deletes.
 fn move_path(from: &Path, to: &Path) -> Result<(), String> {
     if std::fs::rename(from, to).is_ok() {
         return Ok(());
@@ -350,8 +350,8 @@ fn copy_recursive(from: &Path, to: &Path) -> Result<(), String> {
     }
 }
 
-/// Crea una bóveda en `dest` moviendo a ella la base de datos, los MIDI y las imágenes de la
-/// carpeta de la versión anterior. Las rutas absolutas se convierten al abrirla (migración v2).
+/// Creates a vault in `dest` by moving into it the database, the MIDI files and the images from
+/// the previous version's folder. Absolute paths are converted when it is opened (v2 migration).
 pub fn import_legacy(legacy_dir: &Path, dest: &Path) -> Result<(), String> {
     let legacy_db = legacy_dir.join(DB_FILE_NAME);
     if !legacy_db.is_file() {
@@ -361,7 +361,7 @@ pub fn import_legacy(legacy_dir: &Path, dest: &Path) -> Result<(), String> {
         return Err(t!("backend.legacy.destInside"));
     }
     check_new_vault_dir(dest)?;
-    // Vuelca el WAL antiguo en el fichero principal para mover un único fichero coherente.
+    // Flushes the old WAL into the main file so a single consistent file is moved.
     {
         let conn = rusqlite::Connection::open(&legacy_db)
             .map_err(|e| t!("backend.io.open", path = legacy_db.display(), e = e))?;
@@ -388,7 +388,7 @@ mod tests {
     fn opened(outcome: OpenOutcome) -> Vault {
         match outcome {
             OpenOutcome::Opened(v) => v,
-            OpenOutcome::Locked(msg) => panic!("bloqueada: {msg}"),
+            OpenOutcome::Locked(msg) => panic!("locked: {msg}"),
         }
     }
 
@@ -416,30 +416,30 @@ mod tests {
     #[test]
     fn create_requires_empty_folder_and_opens() {
         let dir = tempfile::tempdir().unwrap();
-        let v = dir.path().join("Mi bóveda");
+        let v = dir.path().join("Café vault");
         create_vault(&v).unwrap();
         assert!(v.join(".piano-tracker/vault.json").is_file());
         assert!(v.join("midi/raw").is_dir() && v.join("midi/fragments").is_dir() && v.join("media").is_dir());
         assert!(create_vault(&v).unwrap_err().contains("already a vault"));
 
-        let busy = dir.path().join("ocupada");
+        let busy = dir.path().join("busy");
         std::fs::create_dir_all(&busy).unwrap();
         std::fs::write(busy.join("x.txt"), b"x").unwrap();
         assert!(create_vault(&busy).unwrap_err().contains("is not empty"));
-        assert!(create_vault(Path::new("relativa")).is_err());
+        assert!(create_vault(Path::new("relative")).is_err());
 
         let vault = opened(open_vault(&v, false).unwrap());
         assert!(v.join("piano_tracker.sqlite").is_file());
         assert!(v.join(".piano-tracker/lock").is_file());
-        assert_eq!(vault.name(), "Mi bóveda");
-        // Reabrir desde el mismo proceso no se considera un lock ajeno.
+        assert_eq!(vault.name(), "Café vault");
+        // Reopening from the same process is not considered a foreign lock.
         assert!(matches!(open_vault(&v, false).unwrap(), OpenOutcome::Opened(_)));
     }
 
     #[test]
     fn not_a_vault_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let err = |d: &Path| open_vault(d, false).err().expect("debería fallar");
+        let err = |d: &Path| open_vault(d, false).err().expect("should fail");
         assert!(err(dir.path()).contains("is not a Piano Tracker vault"));
         assert!(err(&dir.path().join("nope")).contains("does not exist"));
     }
@@ -450,18 +450,18 @@ mod tests {
         let v = dir.path().join("b");
         create_vault(&v).unwrap();
         let paths = AppPaths::from_base(&v);
-        let other = LockInfo { host: "otro-equipo".into(), pid: 1, opened_at: "2026-10-15T08:00:00Z".into() };
+        let other = LockInfo { host: "other-computer".into(), pid: 1, opened_at: "2026-10-15T08:00:00Z".into() };
         std::fs::write(paths.lock_file(), serde_json::to_string(&other).unwrap()).unwrap();
         match open_vault(&v, false).unwrap() {
-            OpenOutcome::Locked(msg) => assert!(msg.contains("otro-equipo"), "{msg}"),
-            OpenOutcome::Opened(_) => panic!("debería pedir confirmación"),
+            OpenOutcome::Locked(msg) => assert!(msg.contains("other-computer"), "{msg}"),
+            OpenOutcome::Opened(_) => panic!("should ask for confirmation"),
         }
         let vault = opened(open_vault(&v, true).unwrap());
         assert_eq!(read_lock(&paths.lock_file()).unwrap().pid, std::process::id());
         drop(vault);
         assert!(!paths.lock_file().exists());
 
-        // Lock huérfano de este mismo equipo (pid muerto): se ignora.
+        // Orphan lock from this same computer (dead pid): ignored.
         let stale = LockInfo { host: hostname(), pid: u32::MAX - 1, opened_at: "x".into() };
         std::fs::write(paths.lock_file(), serde_json::to_string(&stale).unwrap()).unwrap();
         assert!(matches!(open_vault(&v, false).unwrap(), OpenOutcome::Opened(_)));
@@ -472,7 +472,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let v = dir.path().join("b");
         create_vault(&v).unwrap();
-        std::fs::write(v.join("piano_tracker (portátil's conflicted copy 2026-10-15).sqlite"), b"").unwrap();
+        std::fs::write(v.join("piano_tracker (laptop's conflicted copy 2026-10-15).sqlite"), b"").unwrap();
         std::fs::write(v.join("piano_tracker.sync-conflict-20261015-101010-ABC.sqlite"), b"").unwrap();
         std::fs::write(v.join("piano_tracker_backup.sqlite"), b"").unwrap();
         let vault = opened(open_vault(&v, false).unwrap());
@@ -481,7 +481,7 @@ mod tests {
         let dirs = AppDirs::new(dir.path().join("data"), dir.path().join("conf"));
         let mut config = AppConfig::default();
         config.set_current(&v.to_string_lossy());
-        config.recent_vaults.push("/no/existe".into());
+        config.recent_vaults.push("/does/not/exist".into());
         let info = vault_info(&config, Some(&vault), &dirs);
         assert_eq!(info.current.as_deref(), Some(v.to_string_lossy().as_ref()));
         assert_eq!(info.name.as_deref(), Some("b"));
@@ -496,18 +496,18 @@ mod tests {
         let legacy = dir.path().join("data");
         let old = AppPaths::from_base(&legacy);
         old.ensure_dirs().unwrap();
-        // Base de datos "antigua": ficheros con rutas absolutas bajo la carpeta de datos.
+        // "Old" database: files with absolute paths under the data folder.
         {
-            let db = Database::open(&old.db_file, Path::new("/otra-raiz")).unwrap();
-            let s = db.create_session("Vieja", 90).unwrap();
+            let db = Database::open(&old.db_file, Path::new("/other-root")).unwrap();
+            let s = db.create_session("Old", 90).unwrap();
             let raw = old.raw_session_file(&s.id);
             std::fs::write(&raw, b"raw").unwrap();
             db.set_session_raw_midi(&s.id, &raw.to_string_lossy(), 10).unwrap();
             let img = old.media_dir.join("a.png");
             std::fs::write(&img, b"img").unwrap();
             db.insert_media(&s.id, &img.to_string_lossy()).unwrap();
-            db.update_session(&s.id, "Vieja", 90, &format!("![a]({})", img.display())).unwrap();
-            // Simula el esquema v1: rutas absolutas y versión 1 (la migración v2 las reescribe).
+            db.update_session(&s.id, "Old", 90, &format!("![a]({})", img.display())).unwrap();
+            // Simulates the v1 schema: absolute paths and version 1 (the v2 migration rewrites them).
             let conn = rusqlite::Connection::open(&old.db_file).unwrap();
             conn.execute_batch("PRAGMA user_version = 1; ALTER TABLE sessions ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'PENDING'; \
                  ALTER TABLE midi_fragments ADD COLUMN drive_file_id TEXT; ALTER TABLE midi_fragments ADD COLUMN sync_status TEXT; \
@@ -519,7 +519,7 @@ mod tests {
         assert!(dirs.legacy_db().is_some());
 
         let dest = dir.path().join("Dropbox").join("PianoTracker");
-        assert!(import_legacy(&legacy, &legacy.join("dentro")).is_err());
+        assert!(import_legacy(&legacy, &legacy.join("inside")).is_err());
         import_legacy(&legacy, &dest).unwrap();
         assert!(dirs.legacy_db().is_none());
         assert!(!legacy.join("midi").exists() && !legacy.join("media").exists());

@@ -19,11 +19,11 @@ function safeHref(href: string): string | null {
 }
 
 /**
- * Crea un renderizador Markdown seguro:
- * - El HTML crudo (bloques y etiquetas en línea) se escapa en lugar de inyectarse.
- * - Las imágenes locales se reescriben con `resolveLocal` (asset protocol): rutas relativas a la
- *   bóveda (`media/…`, como las inserta el editor) y absolutas (`/…`, notas antiguas).
- * - Se bloquean enlaces `javascript:`.
+ * Creates a safe Markdown renderer:
+ * - Raw HTML (blocks and inline tags) is escaped instead of injected.
+ * - Local images are rewritten with `resolveLocal` (asset protocol): paths relative to the vault
+ *   (`media/…`, as the editor inserts them) and absolute ones (`/…`, old notes).
+ * - `javascript:` links are blocked.
  */
 export function createMarkdownRenderer(resolveLocal: (path: string) => string): (md: string) => string {
   const marked = new Marked({
@@ -58,7 +58,7 @@ export function createMarkdownRenderer(resolveLocal: (path: string) => string): 
   };
 }
 
-/** Ruta de fichero local: absoluta (`/…`) o relativa sin esquema (`media/x.png`). */
+/** Local file path: absolute (`/…`) or relative without a scheme (`media/x.png`). */
 function isLocalPath(src: string): boolean {
   if (!src || src.startsWith('//') || src.startsWith('#')) return false;
   return src.startsWith('/') || !/^[a-z][a-z0-9+.-]*:/i.test(src);
@@ -72,7 +72,7 @@ function decodeSafe(s: string): string {
   }
 }
 
-/** Destino de enlace Markdown para una ruta (entre `<…>` si contiene espacios o paréntesis). */
+/** Markdown link destination for a path (inside `<…>` if it contains spaces or parentheses). */
 export function markdownDestination(path: string): string {
   return /[\s()<>]/.test(path) ? `<${path.replace(/[<>]/g, encodeURIComponent)}>` : path;
 }
