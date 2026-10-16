@@ -1,6 +1,6 @@
 [package]
 name = "piano-tracker"
-version = "0.1.0"
+version = "0.2.0"
 description = "Piano Practice Tracker: MIDI recording, destructive slicing, timeline comments and local data vaults"
 authors = ["keoh"]
 license = ""
