@@ -12,6 +12,8 @@ import {
 } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs, parseTime } from '../../core/format';
+import { I18nService } from '../../core/i18n/i18n.service';
+import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { MidiActivityDto, SessionDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { RecordingStore } from '../../core/recording.store';
@@ -19,6 +21,7 @@ import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
+import { RichTextComponent } from '../rich-text/rich-text.component';
 import { TimelineCanvasComponent, type TimeRange } from '../timeline-canvas/timeline-canvas.component';
 
 type DragMode = 'start' | 'end' | 'move' | 'create';
@@ -39,7 +42,7 @@ const DRAG_THRESHOLD_PX = 4;
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent],
+  imports: [IconComponent, TimelineCanvasComponent, RichTextComponent, TranslatePipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -52,6 +55,7 @@ export class MidiSlicerComponent {
   private readonly rec = inject(RecordingStore);
   private readonly toast = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
+  private readonly i18n = inject(I18nService);
 
   protected readonly formatMs = formatMs;
 
@@ -106,7 +110,7 @@ export class MidiSlicerComponent {
       const sel = this.selection();
       if (sel && sel.end > a.duration_ms) this.selection.set(null);
     } catch (err) {
-      this.toast.error(err, 'No se pudo analizar la pista bruta');
+      this.toast.error(err, this.i18n.t('slicer.errors.analyze'));
     } finally {
       this.loading.set(false);
     }
@@ -219,7 +223,7 @@ export class MidiSlicerComponent {
   protected onTimeInput(el: HTMLInputElement, which: 'start' | 'end'): void {
     const ms = parseTime(el.value);
     if (ms === null) {
-      this.toast.warning('Formato de tiempo no válido (usa mm:ss o mm:ss.d)');
+      this.toast.warning(this.i18n.t('slicer.invalidTime'));
     } else if (which === 'start') {
       this.setStart(ms);
     } else {
@@ -265,10 +269,10 @@ export class MidiSlicerComponent {
   // ---- Acciones destructivas ----
   protected openExtract(): void {
     if (!this.validSelection()) {
-      this.toast.warning('Selecciona un rango válido (inicio < fin)');
+      this.toast.warning(this.i18n.t('slicer.invalidRange'));
       return;
     }
-    this.extractTitle.set(`Fragmento ${this.fragmentCount() + 1}`);
+    this.extractTitle.set(this.i18n.t('slicer.defaultFragmentTitle', { n: this.fragmentCount() + 1 }));
     this.extractExplanation.set('');
     this.extractOpen.set(true);
   }
@@ -278,7 +282,7 @@ export class MidiSlicerComponent {
     const title = this.extractTitle().trim();
     if (!sel || !this.validSelection()) return;
     if (!title) {
-      this.toast.warning('El fragmento necesita un título');
+      this.toast.warning(this.i18n.t('slicer.titleRequired'));
       return;
     }
     this.working.set(true);
@@ -296,9 +300,11 @@ export class MidiSlicerComponent {
       this.store.applySession(res.session);
       await this.store.reloadDetail();
       void this.store.refreshList();
-      this.toast.success(`Fragmento «${res.fragment.title}» creado (${formatMs(res.fragment.duration_ms)})`);
+      this.toast.success(
+        this.i18n.t('slicer.extracted', { title: res.fragment.title, duration: formatMs(res.fragment.duration_ms) }),
+      );
     } catch (err) {
-      this.toast.error(err, 'No se pudo extraer el fragmento');
+      this.toast.error(err, this.i18n.t('slicer.errors.extract'));
     } finally {
       this.working.set(false);
     }
@@ -307,13 +313,17 @@ export class MidiSlicerComponent {
   protected async discard(): Promise<void> {
     const sel = this.selection();
     if (!sel || !this.validSelection()) {
-      this.toast.warning('Selecciona un rango válido (inicio < fin)');
+      this.toast.warning(this.i18n.t('slicer.invalidRange'));
       return;
     }
     const ok = await this.confirm.ask({
-      title: 'Descartar selección',
-      message: `Se eliminará de la pista bruta el tramo ${formatMs(sel.start, true)} – ${formatMs(sel.end, true)} (${formatMs(sel.end - sel.start, true)}).\nLos eventos posteriores se desplazarán para cerrar el hueco.`,
-      confirmLabel: 'Descartar tramo',
+      title: this.i18n.t('slicer.discardTitle'),
+      message: this.i18n.t('slicer.discardMessage', {
+        start: formatMs(sel.start, true),
+        end: formatMs(sel.end, true),
+        duration: formatMs(sel.end - sel.start, true),
+      }),
+      confirmLabel: this.i18n.t('slicer.discardConfirm'),
     });
     if (!ok) return;
     this.working.set(true);
@@ -324,9 +334,9 @@ export class MidiSlicerComponent {
       this.store.applySession(s);
       await this.store.reloadDetail();
       void this.store.refreshList();
-      this.toast.success('Tramo descartado');
+      this.toast.success(this.i18n.t('slicer.discarded'));
     } catch (err) {
-      this.toast.error(err, 'No se pudo descartar el tramo');
+      this.toast.error(err, this.i18n.t('slicer.errors.discard'));
     } finally {
       this.working.set(false);
     }

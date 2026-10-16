@@ -1,0 +1,450 @@
+{
+  "app": {
+    "notTauri": "Tauri backend not available (running in a regular browser).",
+    "browseOnly": "You can browse the interface, but actions will not run.",
+    "hide": "Hide"
+  },
+  "vault": {
+    "lockTitle": "This vault seems to be in use",
+    "openAnyway": "Open anyway",
+    "pickOpenTitle": "Open a Piano Tracker vault",
+    "created": "Vault created",
+    "imported": "Data imported into the vault",
+    "stopRecordingFirst": "Stop recording before switching vaults",
+    "errors": {
+      "read": "Could not read the vault",
+      "open": "Could not open the vault",
+      "create": "Could not create the vault",
+      "import": "Could not import the data",
+      "close": "Could not close the vault",
+      "forget": "Could not remove it from the list",
+      "reveal": "Could not open the folder",
+      "picker": "Could not open the folder picker"
+    }
+  },
+  "session": {
+    "defaultTitle": "Practice {date}",
+    "created": "Session created",
+    "deleted": "Session deleted",
+    "errors": {
+      "loadList": "Could not load the sessions",
+      "load": "Could not load the session",
+      "create": "Could not create the session",
+      "delete": "Could not delete the session",
+      "save": "Could not save the session"
+    },
+    "tabs": {
+      "label": "Session sections",
+      "record": "Record & trim",
+      "fragments": "Fragments",
+      "notes": "Notes"
+    },
+    "noRawTake": "No raw recording yet. Press **Record** and play: afterwards you can keep the best passages as fragments.",
+    "fragmentCount_one": "{n} fragment",
+    "fragmentCount_other": "{n} fragments",
+    "fragmentsTotal": "in total. Open one to listen to it and leave comments at the exact second.",
+    "noFragments": "No fragments yet. In **Record & trim**, select a passage of the raw recording and press **Extract fragment**.",
+    "goToRawTake": "Go to the raw recording",
+    "loading": "Loading session…"
+  },
+  "recorder": {
+    "saved": "Recording saved",
+    "errors": {
+      "listPorts": "Could not list the MIDI ports",
+      "applySettings": "Could not apply the settings",
+      "start": "Could not start recording",
+      "stop": "Could not stop recording"
+    },
+    "simulatorPort": "MIDI simulator (no keyboard)",
+    "label": "Recording",
+    "record": "Record",
+    "stop": "Stop recording",
+    "status": {
+      "recording": "Recording",
+      "otherSession": "Recording in another session",
+      "ready": "Ready to record"
+    },
+    "hint": {
+      "appending": "Being added to the end of the raw recording, from {time}",
+      "willAppend": "What you play is added to the end of the raw recording ({time})",
+      "first": "What you play will become this session’s raw recording"
+    },
+    "port": {
+      "choose": "Choose an input",
+      "virtual": "Generates test notes"
+    },
+    "tempo": "Tempo",
+    "tempoDown": "Decrease tempo",
+    "tempoUp": "Increase tempo",
+    "tempoSlider": "Tempo in BPM (slider)",
+    "metronome": "Metronome",
+    "metronomeHint": "Clicks at the chosen tempo",
+    "liveSynth": "Hear while I play",
+    "liveSynthHint": "Sound from the app’s piano"
+  },
+  "playback": {
+    "errors": {
+      "play": "Could not play",
+      "pause": "Could not pause",
+      "seek": "Could not seek",
+      "stop": "Could not stop"
+    }
+  },
+  "settings": {
+    "sound": {
+      "pickTitle": "Choose a piano SoundFont",
+      "tab": "Sound",
+      "title": "Piano sound",
+      "intro": "The SoundFont you hear during playback and while you play.",
+      "builtinName": "Built-in synthetic piano",
+      "fallback": "Fallback",
+      "custom": "File you chose",
+      "pick": "Choose another .sf2 file…",
+      "loading": "Loading SoundFont…",
+      "noSf3": ".sf3 files are not supported.",
+      "onlyBuiltinTitle": "Only have the synthetic piano?",
+      "onlyBuiltinText": "Install a SoundFont with real samples and restart the app:",
+      "bluetooth": "With Bluetooth headphones or speakers the sound arrives about 200 ms late. To play while listening to the app, use a cable.",
+      "changed": "Sound changed to {name}",
+      "builtinDescription": "Built into the app. Always available, less realistic",
+      "systemSamples": "Real samples · installed on the system",
+      "samples": "Real samples",
+      "errors": {
+        "read": "Could not read the sound settings",
+        "load": "Could not load the SoundFont",
+        "picker": "Could not open the file picker"
+      }
+    },
+    "general": {
+      "languageError": "Could not change the language",
+      "tab": "General",
+      "language": "Language",
+      "auto": "Automatic (system: {lang})",
+      "languageHint": "The language of the app. Automatic follows your system language and falls back to English if it is not available."
+    },
+    "title": "Settings",
+    "close": "Close settings",
+    "sections": "Settings sections",
+    "noBackend": "The desktop backend is not available in this browser; settings cannot be saved.",
+    "vault": {
+      "tab": "Vault",
+      "intro": "The folder where everything is stored: the database, the MIDI recordings and the images in your notes.",
+      "reveal": "Show folder",
+      "openOther": "Open another vault…",
+      "close": "Close vault",
+      "stopRecording": "Stop recording to switch vaults.",
+      "recent": "Recent",
+      "unavailable": "Not available · {path}",
+      "open": "Open",
+      "forget": "Remove from recent",
+      "syncTitle": "Backups and multiple computers",
+      "syncText": "The app does not upload anything to the internet. If you put the vault inside a synced folder (Dropbox, Syncthing, Nextcloud…), that service will make the copy. Close the app on one computer and wait for it to finish syncing before opening it on another: the database does not support changes in two places at once."
+    }
+  },
+  "common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "loading": "Loading…",
+    "untitled": "Untitled",
+    "optional": "(optional)"
+  },
+  "toasts": {
+    "dismiss": "Dismiss notification"
+  },
+  "dates": {
+    "thisWeek": "This week",
+    "lastWeek": "Last week",
+    "noDate": "No date"
+  },
+  "sidebar": {
+    "tagline": "Practice journal",
+    "newSession": "New session",
+    "searchLabel": "Search sessions by title",
+    "searchPlaceholder": "Search sessions",
+    "listLabel": "Practice sessions",
+    "recording": "Recording",
+    "rawDuration": "Length of the raw recording",
+    "fragmentCount_zero": "no fragments",
+    "fragmentCount_one": "{n} fragment",
+    "fragmentCount_other": "{n} fragments",
+    "noMatches": "No sessions match your search.",
+    "empty": "No sessions yet.",
+    "midiInput": "MIDI input",
+    "noPorts": "No ports",
+    "rescanPorts": "Look for keyboards again",
+    "noVault": "No vault",
+    "stopToSwitch": "Stop recording before switching sessions",
+    "stopToCreate": "Stop recording before creating another session",
+    "port": {
+      "notFound": "Choose another input to record",
+      "none": "Connect a USB keyboard",
+      "virtual": "Test notes, no keyboard",
+      "connected": "Keyboard connected"
+    }
+  },
+  "header": {
+    "saving": "Saving…",
+    "saved": "Saved",
+    "stopToDelete": "Stop recording before deleting the session",
+    "deleteTitle": "Delete session",
+    "deleteMenu": "Delete session…",
+    "deleteMessage": "“{title}” will be deleted along with its raw recording, fragments, comments and images.\nThis cannot be undone.",
+    "titleLabel": "Session title",
+    "rename": "Rename session",
+    "recording": "Recording",
+    "stop": "Stop",
+    "rawTake": "Raw recording",
+    "fragmentCount_zero": "No fragments",
+    "fragmentCount_one": "{n} fragment",
+    "fragmentCount_other": "{n} fragments",
+    "moreActions": "More session actions",
+    "actions": "Session actions"
+  },
+  "home": {
+    "title": "What are you practicing today?",
+    "subtitle": "Record with your USB keyboard, keep the passages that matter and write down what you want to improve.",
+    "continue": "Continue with “{title}”",
+    "noMidiInput": "No MIDI input",
+    "vaultName": "Vault {name}",
+    "steps": {
+      "record": {
+        "title": "Record",
+        "text": "Press Record and play. You can stop and carry on: each take is added to the end of the raw recording."
+      },
+      "trim": {
+        "title": "Trim",
+        "text": "Select a passage on the recording and save it as a fragment. Discard whatever you don’t need."
+      },
+      "annotate": {
+        "title": "Annotate",
+        "text": "Leave comments at the exact second of each fragment, and notes with images."
+      }
+    }
+  },
+  "player": {
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "position": "Current position"
+  },
+  "fragments": {
+    "titleLabel": "Title",
+    "explanationLabel": "Explanation",
+    "explanationPlaceholder": "What did you work on in this passage?",
+    "playTitle": "Play “{title}”",
+    "pauseTitle": "Pause “{title}”",
+    "duration": "Duration",
+    "comments": "Comments",
+    "commentsSr": "comments",
+    "expand": "Open fragment",
+    "collapse": "Close fragment",
+    "commentAt": "Comment at {time}: {text}",
+    "playbackPosition": "Playback position",
+    "commentAtLabel": "Comment at",
+    "commentPlaceholder": "What do you want to remember about this moment?",
+    "add": "Add",
+    "editMeta": "Edit title and explanation",
+    "explanationPlaceholder2": "General notes about the passage…",
+    "commentsOf": "Comments on {title}",
+    "goTo": "Go to {time}: {text}",
+    "playFromHere": "Play from here",
+    "deleteComment": "Delete comment",
+    "noComments": "No comments yet. Write one while you listen.",
+    "commentsHint": "Click a comment to jump to that moment.",
+    "delete": "Delete fragment",
+    "deleted": "Fragment deleted",
+    "deleteMessage_zero": "“{title}” will be deleted.\nThis cannot be undone.",
+    "deleteMessage_one": "“{title}” and its comment will be deleted.\nThis cannot be undone.",
+    "deleteMessage_other": "“{title}” and its {n} comments will be deleted.\nThis cannot be undone.",
+    "errors": {
+      "analyze": "Could not analyze the fragment",
+      "addComment": "Could not add the comment",
+      "deleteComment": "Could not delete the comment",
+      "save": "Could not save the fragment",
+      "delete": "Could not delete the fragment"
+    }
+  },
+  "slicer": {
+    "analyzing": "Analyzing…",
+    "pausedWhileRecording": "Trimming paused while you record",
+    "help": "Drag over the recording to choose a passage · click to listen from there",
+    "reanalyze": "Analyze the recording again",
+    "selectionStart": "Selection start",
+    "selectionEnd": "Selection end",
+    "playSelection": "Play the selection",
+    "start": "Start",
+    "end": "End",
+    "selectAll": "Whole recording",
+    "clearSelection": "Clear selection",
+    "discard": "Discard",
+    "extract": "Extract fragment",
+    "extracting": "Extracting…",
+    "footer": "**Extract** saves the passage as a fragment and removes it from the raw recording. **Discard** deletes it without saving it.",
+    "extractNote": "The passage is saved as a separate fragment and removed from the raw recording.",
+    "invalidTime": "Invalid time format (use mm:ss or mm:ss.d)",
+    "invalidRange": "Select a valid range (start < end)",
+    "defaultFragmentTitle": "Fragment {n}",
+    "titleRequired": "The fragment needs a title",
+    "extracted": "Fragment “{title}” created ({duration})",
+    "discardTitle": "Discard selection",
+    "discardMessage": "The section {start} – {end} ({duration}) will be removed from the raw recording.\nLater events will shift to close the gap.",
+    "discardConfirm": "Discard section",
+    "discarded": "Section discarded",
+    "errors": {
+      "analyze": "Could not analyze the raw recording",
+      "extract": "Could not extract the fragment",
+      "discard": "Could not discard the section"
+    }
+  },
+  "timeline": {
+    "noActivity": "No note activity"
+  },
+  "notes": {
+    "title": "Session notes",
+    "savingImage": "Saving image…",
+    "unsaved": "Unsaved changes",
+    "saveError": "Error while saving",
+    "insertImage": "Insert image",
+    "textareaLabel": "Notes in Markdown",
+    "modes": {
+      "label": "Editor view",
+      "edit": "Write",
+      "split": "Both",
+      "preview": "Read"
+    },
+    "placeholder": "## Today's goals\n- [ ] D major scales at 90 BPM\n- [ ] Bars 12–20, hands separately\n\nPaste screenshots of the score with Ctrl+V…",
+    "dropImage": "Drop the image to insert it",
+    "previewLabel": "Preview",
+    "empty": "Nothing to show yet. Write your goals or observations, or paste a screenshot of the score.",
+    "footerHint": "Paste or drag images straight into the text",
+    "words_one": "{n} word",
+    "words_other": "{n} words",
+    "chars_one": "{n} character",
+    "chars_other": "{n} characters",
+    "saveShortcut": "saves",
+    "imagesNeedDesktop": "Saving images requires the desktop app",
+    "imageTooLarge": "“{name}” is larger than {max} MB",
+    "errors": {
+      "save": "Could not save the notes",
+      "image": "Could not save the image"
+    }
+  },
+  "welcome": {
+    "title": "Choose where to keep your practice",
+    "intro": "A vault is a folder with everything of yours: sessions, MIDI recordings and images. If you create it inside Dropbox, Syncthing or similar, that service will take care of the backup.",
+    "legacy": {
+      "title": "You have data from the previous version",
+      "location": "It is in",
+      "text": "Importing it moves it into the new vault you choose below, with its sessions, fragments and images.",
+      "import": "Import my data into the new vault"
+    },
+    "create": {
+      "title": "Create a new vault",
+      "name": "Name",
+      "location": "Location",
+      "locationPlaceholder": "Choose a folder, for example ~/Dropbox",
+      "choose": "Choose…",
+      "willCreate": "This will create",
+      "preparing": "Preparing…",
+      "createAndImport": "Create and import",
+      "submit": "Create vault",
+      "pickTitle": "Folder to create the vault in"
+    },
+    "open": {
+      "title": "Open an existing vault",
+      "folder": "Open folder…"
+    }
+  },
+  "backend": {
+    "noVault": "No vault is open",
+    "stopRecordingToSwitchVault": "Stop recording before switching vaults",
+    "stopRecordingToImport": "Stop recording before importing",
+    "sessionIsRecording": "This session is being recorded; stop recording first",
+    "noRawTrack": "This session has no raw recording",
+    "internal": "Internal error: {e}",
+    "rangeEndBeforeStart": "The end of the range must come after its start",
+    "commentEmpty": "The comment is empty",
+    "revealFailed": "Could not open the file manager: {e}",
+    "defaults": {
+      "fragmentTitle": "Untitled fragment",
+      "sessionTitle": "Practice session"
+    },
+    "image": {
+      "invalidBase64": "Invalid base64 image: {e}",
+      "empty": "The image is empty",
+      "saveFailed": "Could not save the image: {e}",
+      "outsideVault": "The image was saved outside the vault: {path}"
+    },
+    "soundfont": {
+      "invalidFile": "Choose an existing .sf2 SoundFont file (.sf3 files are not supported)",
+      "busy": "A SoundFont is already loading; wait a few seconds",
+      "loadFailed": "Could not load the SoundFont {path}",
+      "incompatible": "The SoundFont {path} is not compatible with the synthesizer",
+      "builtinName": "Built-in synthetic piano"
+    },
+    "playback": {
+      "noFile": "No file is loaded"
+    },
+    "recorder": {
+      "alreadyRunning": "A recording is already in progress",
+      "notRunning": "No recording is in progress",
+      "otherSession": "The current recording belongs to another session",
+      "simulatorFailed": "Could not start the MIDI simulator: {e}",
+      "captureFailed": "Could not start MIDI capture: {e}",
+      "timeout": "Timed out while opening the MIDI port",
+      "midiUnavailable": "System MIDI is not available: {e}",
+      "portNotFound": "MIDI port not found: {port}",
+      "connectFailed": "Could not connect to port {port}: {e}"
+    },
+    "midi": {
+      "invalidFile": "Invalid MIDI file {path}: {e}",
+      "serializeFailed": "Could not serialize MIDI: {e}",
+      "rangeInvalid": "Invalid range: the start ({start} ms) must come before the end ({end} ms)",
+      "rangeOutside": "Invalid range: the start ({start} ms) is past the duration ({duration} ms)"
+    },
+    "io": {
+      "serializeConfig": "Could not serialize the settings: {e}",
+      "createDir": "Could not create {path}: {e}",
+      "read": "Could not read {path}: {e}",
+      "write": "Could not write {path}: {e}",
+      "save": "Could not save {path}: {e}",
+      "open": "Could not open {path}: {e}",
+      "copy": "Could not copy {from} to {to}: {e}",
+      "movedButNotRemoved": "{path} was copied but the original could not be deleted: {e}"
+    },
+    "vault": {
+      "pathNotAbsolute": "The vault path must be absolute",
+      "notAFolder": "{path} is not a folder",
+      "alreadyVault": "{path} is already a vault; open it instead of creating it",
+      "notEmpty": "The folder {path} is not empty; choose a new or empty folder",
+      "missing": "The folder {path} does not exist",
+      "notAVault": "{path} is not a Piano Tracker vault",
+      "invalidRelativePath": "Invalid path inside the vault: {path}",
+      "lockDateFormat": "%b %-d, %Y %H:%M",
+      "lockPlaceThisComputer": "another window of the app on this computer",
+      "lockPlaceOtherComputer": "the computer “{host}”",
+      "lockWarning": "This vault seems to be open in {place} since {when}. If it is used in two places at once, your sync service may create conflicting copies of the database. Close it there before continuing, or open it anyway if you know it is no longer in use.",
+      "conflictCopy": "There is a conflicting copy of the database in the vault (“{name}”). The app uses {db}; review the other copy and delete it once you no longer need it."
+    },
+    "legacy": {
+      "noData": "There is no data from the previous version in {path}",
+      "destInside": "The new vault cannot be inside the old data folder",
+      "prepareFailed": "Could not prepare {path} (is it open in another app?): {e}"
+    },
+    "db": {
+      "error": "Database error: {e}",
+      "sessionMissing": "Session '{id}' does not exist",
+      "fragmentMissing": "Fragment '{id}' does not exist",
+      "commentMissing": "Comment '{id}' does not exist",
+      "removeTemp": "Could not delete the temporary file {path}: {e}",
+      "invalidBackupPath": "Invalid backup path: {path}",
+      "backupFailed": "Could not create the backup: {e}",
+      "backupMoveFailed": "Could not move the backup to {path}: {e}",
+      "openFailed": "Could not open the database {path}: {e}",
+      "prepareFailed": "Could not prepare the database {path}: {e}",
+      "newerSchema": "The database schema version ({version}) is newer than this version of the app supports ({supported})",
+      "migrationFailed": "Could not migrate the database (v{version}): {e}",
+      "poisoned": "The database connection was locked by a previous error"
+    }
+  }
+}

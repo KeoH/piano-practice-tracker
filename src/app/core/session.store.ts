@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import type { FragmentDto, SessionDetailDto, SessionDto, SessionSummaryDto } from './models';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
+import { I18nService } from './i18n/i18n.service';
 
 /** Pestañas de la vista de sesión. */
 export type SessionTab = 'record' | 'fragments' | 'notes';
@@ -17,6 +18,7 @@ export interface SessionFieldsPatch {
 export class SessionStore {
   private readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
+  private readonly i18n = inject(I18nService);
 
   readonly sessions = signal<SessionSummaryDto[]>([]);
   readonly listLoading = signal(false);
@@ -48,13 +50,22 @@ export class SessionStore {
   private saveChain: Promise<unknown> = Promise.resolve();
   private detailRequest = 0;
 
+  /** Vacía lista y selección (al cambiar de bóveda). */
+  reset(): void {
+    this.detailRequest++;
+    this.sessions.set([]);
+    this.selectedId.set(null);
+    this.detail.set(null);
+    this.detailLoading.set(false);
+  }
+
   async refreshList(): Promise<void> {
     if (!this.api.available) return;
     this.listLoading.set(true);
     try {
       this.sessions.set(await this.api.getSessions());
     } catch (err) {
-      this.toast.error(err, 'No se pudieron cargar las sesiones');
+      this.toast.error(err, this.i18n.t('session.errors.loadList'));
     } finally {
       this.listLoading.set(false);
     }
@@ -76,7 +87,7 @@ export class SessionStore {
       const d = await this.api.getSessionDetail(id);
       if (req === this.detailRequest && this.selectedId() === id) this.detail.set(d);
     } catch (err) {
-      this.toast.error(err, 'No se pudo cargar la sesión');
+      this.toast.error(err, this.i18n.t('session.errors.load'));
     } finally {
       if (req === this.detailRequest) this.detailLoading.set(false);
     }
@@ -84,11 +95,7 @@ export class SessionStore {
 
   async create(): Promise<void> {
     const now = new Date();
-    const title = `Práctica ${now.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    })} ${now.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+    const title = this.i18n.t('session.defaultTitle', { date: this.i18n.dateTime(now) });
     try {
       const d = await this.api.createSession(title, 120);
       this.detailRequest++;
@@ -97,9 +104,9 @@ export class SessionStore {
       this.detailLoading.set(false);
       this.tab.set('record');
       await this.refreshList();
-      this.toast.success('Sesión creada');
+      this.toast.success(this.i18n.t('session.created'));
     } catch (err) {
-      this.toast.error(err, 'No se pudo crear la sesión');
+      this.toast.error(err, this.i18n.t('session.errors.create'));
     }
   }
 
@@ -112,10 +119,10 @@ export class SessionStore {
       }
       this.sessions.update((l) => l.filter((s) => s.id !== id));
       void this.refreshList();
-      this.toast.success('Sesión eliminada');
+      this.toast.success(this.i18n.t('session.deleted'));
       return true;
     } catch (err) {
-      this.toast.error(err, 'No se pudo borrar la sesión');
+      this.toast.error(err, this.i18n.t('session.errors.delete'));
       return false;
     }
   }
@@ -128,11 +135,11 @@ export class SessionStore {
     const d = this.detail();
     if (!d) return Promise.resolve(false);
     const sessionId = d.session.id;
-    const updated: SessionDto = { ...d.session, ...patch, sync_status: 'PENDING' };
+    const updated: SessionDto = { ...d.session, ...patch };
     this.detail.set({ ...d, session: updated });
     this.sessions.update((l) =>
       l.map((s) =>
-        s.id === sessionId ? { ...s, title: updated.title, bpm: updated.bpm, sync_status: 'PENDING' } : s,
+        s.id === sessionId ? { ...s, title: updated.title, bpm: updated.bpm } : s,
       ),
     );
     this.savingCount.update((n) => n + 1);
@@ -144,7 +151,7 @@ export class SessionStore {
         await this.api.updateSession(sessionId, cur.title, cur.bpm, cur.markdown_notes);
         return true;
       } catch (err) {
-        this.toast.error(err, 'No se pudo guardar la sesión');
+        this.toast.error(err, this.i18n.t('session.errors.save'));
         return false;
       } finally {
         this.savingCount.update((n) => n - 1);

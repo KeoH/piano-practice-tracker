@@ -5,6 +5,7 @@ import { PlaybackStore } from './playback.store';
 import { SessionStore } from './session.store';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
+import { I18nService } from './i18n/i18n.service';
 
 const PORT_KEY = 'piano-tracker.port';
 
@@ -16,6 +17,7 @@ export const BPM_MAX = 240;
 export class RecordingStore {
   private readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
+  private readonly i18n = inject(I18nService);
   private readonly playback = inject(PlaybackStore);
   private readonly sessions = inject(SessionStore);
 
@@ -37,13 +39,18 @@ export class RecordingStore {
     () => this.ports().find((p) => p.id === this.selectedPortId()) ?? null,
   );
 
+  /** Nombre visible de un puerto: el del simulador va traducido, el resto es el del sistema. */
+  portName(p: MidiPortInfo): string {
+    return p.id === SIMULATOR_PORT_ID ? this.i18n.t('recorder.simulatorPort') : p.name;
+  }
+
   private startedAt = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private liveTimer: ReturnType<typeof setTimeout> | null = null;
 
   async refreshPorts(): Promise<void> {
     if (!this.api.available) {
-      this.ports.set([{ id: SIMULATOR_PORT_ID, name: 'Simulador MIDI', is_virtual: true }]);
+      this.ports.set([{ id: SIMULATOR_PORT_ID, name: '', is_virtual: true }]);
       return;
     }
     this.portsLoading.set(true);
@@ -55,7 +62,7 @@ export class RecordingStore {
         if (fallback) this.selectPort(fallback.id);
       }
     } catch (err) {
-      this.toast.error(err, 'No se pudieron listar los puertos MIDI');
+      this.toast.error(err, this.i18n.t('recorder.errors.listPorts'));
     } finally {
       this.portsLoading.set(false);
     }
@@ -97,7 +104,7 @@ export class RecordingStore {
       this.liveTimer = null;
       this.api
         .updateLiveRecordingSettings(this.bpm(), this.metronomeOn(), this.liveSynthOn())
-        .catch((err) => this.toast.error(err, 'No se pudieron aplicar los ajustes'));
+        .catch((err) => this.toast.error(err, this.i18n.t('recorder.errors.applySettings')));
     };
     if (debounce) this.liveTimer = setTimeout(send, 150);
     else send();
@@ -121,7 +128,7 @@ export class RecordingStore {
       this.timer = setInterval(() => this.elapsedMs.set(performance.now() - this.startedAt), 100);
       return true;
     } catch (err) {
-      this.toast.error(err, 'No se pudo iniciar la grabación');
+      this.toast.error(err, this.i18n.t('recorder.errors.start'));
       return false;
     } finally {
       this.busy.set(false);
@@ -138,7 +145,7 @@ export class RecordingStore {
       this.recordingSessionId.set(null);
       return s;
     } catch (err) {
-      this.toast.error(err, 'No se pudo detener la grabación');
+      this.toast.error(err, this.i18n.t('recorder.errors.stop'));
       return null;
     } finally {
       this.busy.set(false);
@@ -152,7 +159,7 @@ export class RecordingStore {
     this.sessions.applySession(updated);
     await this.sessions.reloadDetail();
     void this.sessions.refreshList();
-    this.toast.success('Grabación guardada');
+    this.toast.success(this.i18n.t('recorder.saved'));
   }
 
   private clearTimer(): void {

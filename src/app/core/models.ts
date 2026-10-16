@@ -2,8 +2,6 @@
 // Los argumentos de `invoke` van en camelCase (convención Tauri v2), p. ej.
 // invoke('start_recording', { sessionId, portId, bpm, metronomeOn, liveSynthOn }).
 
-export type SyncState = 'PENDING' | 'SYNCED' | 'ERROR';
-
 export interface MidiPortInfo {
   id: string;
   name: string;
@@ -19,7 +17,6 @@ export interface SessionDto {
   raw_duration_ms: number;
   markdown_notes: string;
   updated_at: string;
-  sync_status: SyncState;
 }
 
 export interface SessionSummaryDto {
@@ -30,7 +27,6 @@ export interface SessionSummaryDto {
   raw_duration_ms: number;
   fragment_count: number;
   updated_at: string;
-  sync_status: SyncState;
 }
 
 export interface TimelineCommentDto {
@@ -50,18 +46,15 @@ export interface FragmentDto {
   bpm: number;
   duration_ms: number;
   order_index: number;
-  drive_file_id: string | null;
   created_at: string;
-  sync_status: SyncState;
   comments: TimelineCommentDto[];
 }
 
 export interface SessionMediaDto {
   id: string;
   session_id: string;
+  /** Ruta absoluta (en la base de datos se guarda relativa a la bóveda). */
   local_path: string;
-  drive_file_id: string | null;
-  sync_status: SyncState;
 }
 
 export interface SessionDetailDto {
@@ -96,17 +89,6 @@ export interface FragmentCreatedResponse {
   session: SessionDto;
 }
 
-export interface SyncStatusDto {
-  has_credentials: boolean;
-  connected: boolean;
-  online: boolean;
-  is_syncing: boolean;
-  pending_count: number;
-  error_count: number;
-  last_sync_at: string | null;
-  last_error: string | null;
-}
-
 export interface SoundfontCandidate {
   path: string;
   name: string;
@@ -120,6 +102,45 @@ export interface SoundfontInfo {
   candidates: SoundfontCandidate[];
 }
 
+export interface RecentVault {
+  path: string;
+  /** Nombre de la carpeta. */
+  name: string;
+  /** La carpeta existe y sigue siendo una bóveda. */
+  available: boolean;
+}
+
+/** Bóveda abierta (si hay), recientes y avisos. */
+export interface VaultInfo {
+  /** Raíz de la bóveda abierta (ruta absoluta), o null si no hay ninguna. */
+  current: string | null;
+  name: string | null;
+  /** Más recientes primero; incluye la abierta. */
+  recent: RecentVault[];
+  /** Carpeta con datos de la versión anterior (sin bóvedas) que se pueden importar. */
+  legacy_data_path: string | null;
+  /** Avisos sobre la bóveda abierta (p. ej. copias en conflicto de Dropbox). */
+  warnings: string[];
+}
+
+export interface VaultOpenResult {
+  info: VaultInfo;
+  /** false si no se abrió porque parece abierta en otro equipo (ver lock_warning). */
+  opened: boolean;
+  /** Mensaje para pedir confirmación antes de abrir con force = true. */
+  lock_warning: string | null;
+}
+
+/** Idioma de la interfaz. */
+export interface LanguageInfo {
+  /** Elegido por el usuario; null = automático (el del sistema). */
+  preference: string | null;
+  /** Idioma en uso. */
+  effective: string;
+  /** Idioma detectado en el sistema (o el de reserva si no está disponible). */
+  system: string;
+}
+
 /** Payload del evento `playback-progress` (cada 50 ms). */
 export interface PlaybackProgress {
   file_path: string;
@@ -130,7 +151,6 @@ export interface PlaybackProgress {
 
 /** Nombres de eventos Tauri emitidos por el backend. */
 export const EVENT_PLAYBACK_PROGRESS = 'playback-progress';
-export const EVENT_SYNC_STATUS = 'sync-status';
 
 /** Id del puerto simulador de MIDI (siempre presente en `list_midi_ports`). */
 export const SIMULATOR_PORT_ID = 'simulator';

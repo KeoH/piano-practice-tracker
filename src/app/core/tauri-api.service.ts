@@ -1,12 +1,13 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { errorMessage } from './format';
+import { I18nService } from './i18n/i18n.service';
 import {
   EVENT_PLAYBACK_PROGRESS,
-  EVENT_SYNC_STATUS,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
+  type LanguageInfo,
   type MidiActivityDto,
   type MidiPortInfo,
   type PlaybackProgress,
@@ -14,8 +15,9 @@ import {
   type SessionDto,
   type SessionSummaryDto,
   type SoundfontInfo,
-  type SyncStatusDto,
   type TimelineCommentDto,
+  type VaultInfo,
+  type VaultOpenResult,
 } from './models';
 
 /** Error controlado de IPC: `message` siempre es un string legible. */
@@ -29,9 +31,6 @@ export class IpcError extends Error {
   }
 }
 
-export const NOT_TAURI_MESSAGE =
-  'Backend Tauri no disponible (ejecutando en un navegador normal).';
-
 /**
  * Fachada tipada sobre los comandos IPC de Tauri.
  * Argumentos en camelCase (convención de Tauri v2), respuestas en snake_case (ver models.ts).
@@ -39,10 +38,11 @@ export const NOT_TAURI_MESSAGE =
  */
 @Injectable({ providedIn: 'root' })
 export class TauriApiService {
+  private readonly i18n = inject(I18nService);
   readonly available: boolean = safeIsTauri();
 
   private async call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-    if (!this.available) throw new IpcError(command, NOT_TAURI_MESSAGE);
+    if (!this.available) throw new IpcError(command, this.i18n.t('app.notTauri'));
     try {
       return await invoke<T>(command, args);
     } catch (err) {
@@ -137,7 +137,7 @@ export class TauriApiService {
     return this.call('delete_session', { sessionId });
   }
 
-  /** Devuelve la ruta ABSOLUTA del fichero guardado. `base64Data` sin prefijo `data:`. */
+  /** Devuelve la ruta del fichero guardado RELATIVA a la bóveda (`media/…`). `base64Data` sin prefijo `data:`. */
   saveSessionImage(sessionId: string, fileName: string, base64Data: string): Promise<string> {
     return this.call('save_session_image', { sessionId, fileName, base64Data });
   }
@@ -162,22 +162,59 @@ export class TauriApiService {
     return this.call('delete_timeline_comment', { commentId });
   }
 
-  // ---- Google Drive ----
-  saveGoogleCredentials(clientId: string, clientSecret: string): Promise<void> {
-    return this.call('save_google_credentials', { clientId, clientSecret });
+  // ---- Bóveda ----
+  getVaultInfo(): Promise<VaultInfo> {
+    return this.call('get_vault_info');
   }
 
-  /** Devuelve la URL de autorización OAuth (el backend intenta abrir el navegador). */
-  startGoogleAuth(): Promise<string> {
-    return this.call('start_google_auth');
+  /** Crea una bóveda en `path` (carpeta nueva o vacía) y la abre. */
+  createVault(path: string): Promise<VaultInfo> {
+    return this.call('create_vault', { path });
   }
 
-  getSyncStatus(): Promise<SyncStatusDto> {
-    return this.call('get_sync_status');
+  /** Abre una bóveda; con `force` ignora el aviso de que está abierta en otro equipo. */
+  openVault(path: string, force = false): Promise<VaultOpenResult> {
+    return this.call('open_vault', { path, force });
   }
 
-  triggerSyncNow(): Promise<SyncStatusDto> {
-    return this.call('trigger_sync_now');
+  /** Crea una bóveda en `path` moviendo a ella los datos de la versión anterior. */
+  importLegacyData(path: string): Promise<VaultInfo> {
+    return this.call('import_legacy_data', { path });
+  }
+
+  closeVault(): Promise<VaultInfo> {
+    return this.call('close_vault');
+  }
+
+  forgetRecentVault(path: string): Promise<VaultInfo> {
+    return this.call('forget_recent_vault', { path });
+  }
+
+  /** Abre la carpeta de la bóveda en el gestor de archivos. */
+  revealVault(): Promise<void> {
+    return this.call('reveal_vault');
+  }
+
+  /** Diálogo nativo para elegir una carpeta; devuelve null si se cancela. */
+  async pickFolder(title: string): Promise<string | null> {
+    if (!this.available) return null;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({ title, multiple: false, directory: true });
+      return typeof picked === 'string' ? picked : null;
+    } catch (err) {
+      throw new IpcError('dialog.open', errorMessage(err));
+    }
+  }
+
+  // ---- Idioma ----
+  getLanguage(): Promise<LanguageInfo> {
+    return this.call('get_language');
+  }
+
+  /** `null` vuelve al idioma del sistema. */
+  setLanguage(language: string | null): Promise<LanguageInfo> {
+    return this.call('set_language', { language });
   }
 
   // ---- SoundFont ----
@@ -196,7 +233,7 @@ export class TauriApiService {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const picked = await open({
-        title: 'Elegir SoundFont de piano',
+        title: this.i18n.t('settings.sound.pickTitle'),
         multiple: false,
         directory: false,
         filters: [{ name: 'SoundFont 2', extensions: ['sf2', 'SF2'] }],
@@ -210,24 +247,6 @@ export class TauriApiService {
   // ---- Eventos ----
   onPlaybackProgress(cb: (p: PlaybackProgress) => void): Promise<UnlistenFn> {
     return this.listenTo<PlaybackProgress>(EVENT_PLAYBACK_PROGRESS, cb);
-  }
-
-  onSyncStatus(cb: (s: SyncStatusDto) => void): Promise<UnlistenFn> {
-    return this.listenTo<SyncStatusDto>(EVENT_SYNC_STATUS, cb);
-  }
-
-  /** Abre una URL en el navegador del sistema (plugin-shell); en navegador usa window.open. */
-  async openExternal(url: string): Promise<void> {
-    if (!this.available) {
-      window.open(url, '_blank', 'noopener');
-      return;
-    }
-    try {
-      const { open } = await import('@tauri-apps/plugin-shell');
-      await open(url);
-    } catch (err) {
-      throw new IpcError('shell.open', errorMessage(err));
-    }
   }
 
   private async listenTo<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

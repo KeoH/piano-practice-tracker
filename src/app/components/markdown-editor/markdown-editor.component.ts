@@ -11,11 +11,15 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { I18nService } from '../../core/i18n/i18n.service';
+import type { MessageKey } from '../../core/i18n/languages';
+import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
 import { createMarkdownRenderer, markdownDestination } from '../../core/markdown';
 import type { SessionDto } from '../../core/models';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
+import { VaultStore } from '../../core/vault.store';
 import { IconComponent } from '../icon/icon.component';
 
 type EditorMode = 'edit' | 'preview' | 'split';
@@ -24,17 +28,17 @@ type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 const MODE_KEY = 'piano-tracker.md-mode';
 const SAVE_DEBOUNCE_MS = 800;
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const MODES: { id: EditorMode; label: string }[] = [
-  { id: 'edit', label: 'Escribir' },
-  { id: 'split', label: 'Ambos' },
-  { id: 'preview', label: 'Leer' },
+const MODES: { id: EditorMode; label: MessageKey }[] = [
+  { id: 'edit', label: 'notes.modes.edit' },
+  { id: 'split', label: 'notes.modes.split' },
+  { id: 'preview', label: 'notes.modes.preview' },
 ];
 
 /** Editor de notas Markdown de la sesión con autoguardado e imágenes pegadas/arrastradas. */
 @Component({
   selector: 'app-markdown-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, TranslatePipe, PluralPipe],
   templateUrl: './markdown-editor.component.html',
 })
 export class MarkdownEditorComponent {
@@ -43,6 +47,7 @@ export class MarkdownEditorComponent {
   private readonly api = inject(TauriApiService);
   private readonly store = inject(SessionStore);
   private readonly toast = inject(ToastService);
+  private readonly i18n = inject(I18nService);
 
   protected readonly modes = MODES;
   protected readonly mode = signal<EditorMode>(readMode());
@@ -52,7 +57,8 @@ export class MarkdownEditorComponent {
   protected readonly dragOver = signal(false);
 
   private readonly textarea = viewChild<ElementRef<HTMLTextAreaElement>>('ta');
-  private readonly render = createMarkdownRenderer((p) => this.api.fileSrc(p));
+  private readonly vault = inject(VaultStore);
+  private readonly render = createMarkdownRenderer((p) => this.vault.resolveAsset(p));
   protected readonly html = computed(() => this.render(this.text()));
   protected readonly stats = computed(() => {
     const t = this.text();
@@ -126,7 +132,7 @@ export class MarkdownEditorComponent {
     if (text === prev.markdown_notes) return;
     this.api
       .updateSession(prev.id, prev.title, prev.bpm, text)
-      .catch((err) => this.toast.error(err, 'No se pudieron guardar las notas'));
+      .catch((err) => this.toast.error(err, this.i18n.t('notes.errors.save')));
   }
 
   // ---- Imágenes: paste / drop ----
@@ -171,25 +177,26 @@ export class MarkdownEditorComponent {
 
   private async insertImages(files: File[], pasted: boolean): Promise<void> {
     if (!this.api.available) {
-      this.toast.warning('Guardar imágenes requiere la app de escritorio');
+      this.toast.warning(this.i18n.t('notes.imagesNeedDesktop'));
       return;
     }
     const sessionId = this.session().id;
     for (const file of files) {
       if (file.size > MAX_IMAGE_BYTES) {
-        this.toast.warning(`«${file.name}» supera 25 MB`);
+        this.toast.warning(this.i18n.t('notes.imageTooLarge', { name: file.name, max: MAX_IMAGE_BYTES / 1024 / 1024 }));
         continue;
       }
       this.uploading.update((n) => n + 1);
       try {
         const base64 = await readAsBase64(file);
         const name = imageFileName(file, pasted);
-        const absPath = await this.api.saveSessionImage(sessionId, name, base64);
+        // Ruta relativa a la bóveda (`media/…`): las notas siguen valiendo en otro equipo.
+        const relPath = await this.api.saveSessionImage(sessionId, name, base64);
         if (this.session().id !== sessionId) continue;
         const alt = name.replace(/\.[^.]+$/, '').replace(/[[\]]/g, '');
-        this.insertAtCursor(`![${alt}](${markdownDestination(absPath)})`);
+        this.insertAtCursor(`![${alt}](${markdownDestination(relPath)})`);
       } catch (err) {
-        this.toast.error(err, 'No se pudo guardar la imagen');
+        this.toast.error(err, this.i18n.t('notes.errors.image'));
       } finally {
         this.uploading.update((n) => n - 1);
       }
@@ -253,7 +260,7 @@ function readAsBase64(file: File): Promise<string> {
       const comma = result.indexOf(',');
       resolve(comma >= 0 ? result.slice(comma + 1) : result);
     };
-    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer el archivo'));
+    reader.onerror = () => reject(reader.error ?? new Error(file.name));
     reader.readAsDataURL(file);
   });
 }

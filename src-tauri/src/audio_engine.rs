@@ -371,10 +371,10 @@ impl AudioEngine {
     /// Sustituye el SoundFont en caliente. La lectura (lenta para ficheros grandes) se hace fuera
     /// del lock; después se recrea el sintetizador y se re-posiciona la reproducción en curso.
     pub fn load_soundfont(&self, path: &Path) -> Result<(), String> {
-        let sf = load_sound_font(path).ok_or_else(|| format!("No se pudo cargar el SoundFont {}", path.display()))?;
+        let sf = load_sound_font(path).ok_or_else(|| t!("backend.soundfont.loadFailed", path = path.display()))?;
         let mut st = lock(&self.state);
         let synth = new_synth(&sf, st.sample_rate)
-            .ok_or_else(|| format!("El SoundFont {} no es compatible con el sintetizador", path.display()))?;
+            .ok_or_else(|| t!("backend.soundfont.incompatible", path = path.display()))?;
         st.sound_font = Some(sf);
         st.synth = Some(synth);
         if st.seq.file_path.is_some() {
@@ -446,7 +446,7 @@ impl AudioEngine {
     pub fn seek(&self, ms: u64) -> Result<(), String> {
         let mut st = lock(&self.state);
         if st.seq.file_path.is_none() {
-            return Err("No hay ningún fichero cargado".into());
+            return Err(t!("backend.playback.noFile"));
         }
         st.position_at(ms);
         st.emit_pending = true;

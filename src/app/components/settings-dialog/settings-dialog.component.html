@@ -1,0 +1,136 @@
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" (click)="close()">
+  <div
+    class="flex h-[min(820px,90vh)] w-full max-w-[760px] flex-col overflow-hidden rounded-[18px] border border-line-strong bg-ink-800 shadow-2xl shadow-black/60"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="settings-title"
+    (click)="$event.stopPropagation()"
+    (keydown.escape)="close()"
+  >
+    <header class="flex items-center gap-3 border-b border-line py-4 pr-4 pl-7">
+      <h2 id="settings-title" class="flex-1 text-xl font-semibold text-fg-strong">{{ 'settings.title' | t }}</h2>
+      <button type="button" class="btn btn-ghost btn-icon" (click)="close()" [attr.aria-label]="'settings.close' | t">
+        <app-icon name="close" [size]="18" />
+      </button>
+    </header>
+
+    <div class="flex min-h-0 flex-1">
+      <nav class="flex w-[200px] shrink-0 flex-col gap-1 border-r border-line bg-ink-850 px-3 py-4" [attr.aria-label]="'settings.sections' | t">
+        <button
+          type="button"
+          class="flex min-h-11 items-center gap-2.5 rounded-[10px] px-3 text-left text-sm font-medium transition-colors"
+          [class]="tab() === 'general' ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+          [attr.aria-current]="tab() === 'general' ? 'page' : null"
+          (click)="tab.set('general')"
+        >
+          <app-icon name="globe" [size]="18" /> {{ 'settings.general.tab' | t }}
+        </button>
+        <button
+          type="button"
+          class="flex min-h-11 items-center gap-2.5 rounded-[10px] px-3 text-left text-sm font-medium transition-colors"
+          [class]="tab() === 'sound' ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+          [attr.aria-current]="tab() === 'sound' ? 'page' : null"
+          (click)="tab.set('sound')"
+        >
+          <app-icon name="speaker" [size]="18" /> {{ 'settings.sound.tab' | t }}
+        </button>
+        <button
+          type="button"
+          class="flex min-h-11 items-center gap-2.5 rounded-[10px] px-3 text-left text-sm font-medium transition-colors"
+          [class]="tab() === 'vault' ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+          [attr.aria-current]="tab() === 'vault' ? 'page' : null"
+          (click)="tab.set('vault')"
+        >
+          <app-icon name="folder" [size]="18" /> {{ 'settings.vault.tab' | t }}
+        </button>
+      </nav>
+
+      <div class="min-w-0 flex-1 overflow-y-auto px-7 pt-6 pb-7">
+        @if (!api.available) {
+          <p class="mb-5 rounded-[10px] border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-[13px] text-fg">
+            {{ 'settings.noBackend' | t }}
+          </p>
+        }
+
+        @if (tab() === 'general') {
+          <section class="flex flex-col gap-5" aria-labelledby="lang-h">
+            <div>
+              <h3 id="lang-h" class="mb-1.5 text-[17px] font-semibold">{{ 'settings.general.language' | t }}</h3>
+              <p class="text-sm leading-relaxed text-muted">{{ 'settings.general.languageHint' | t }}</p>
+            </div>
+            <app-language-select selectId="settings-language" fieldClass="h-11 max-w-sm" />
+          </section>
+        } @else if (tab() === 'sound') {
+          <app-soundfont-settings />
+        } @else {
+          <section class="flex flex-col gap-5.5" aria-labelledby="vault-h">
+            <div>
+              <h3 id="vault-h" class="mb-1.5 text-[17px] font-semibold">{{ 'settings.vault.tab' | t }}</h3>
+              <p class="text-sm leading-relaxed text-muted">
+                {{ 'settings.vault.intro' | t }}
+              </p>
+            </div>
+
+            @if (vault.info(); as info) {
+              <div class="flex flex-wrap items-center gap-4 rounded-[14px] border border-line bg-ink-850 p-4.5">
+                <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent">
+                  <app-icon name="folder" [size]="22" />
+                </span>
+                <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span class="truncate text-[15px] font-semibold">{{ info.name ?? ('sidebar.noVault' | t) }}</span>
+                  <span class="truncate font-mono text-xs text-muted select-all" [title]="info.current ?? ''">{{ info.current }}</span>
+                </span>
+                <button type="button" class="btn" (click)="vault.reveal()" [disabled]="!info.current">
+                  <app-icon name="external" [size]="15" /> {{ 'settings.vault.reveal' | t }}
+                </button>
+              </div>
+
+              @for (w of info.warnings; track w) {
+                <p class="-mt-2 rounded-[10px] border border-accent/30 bg-accent/10 px-3.5 py-2.5 text-[13px] leading-relaxed text-fg">{{ w }}</p>
+              }
+
+              <div class="flex flex-wrap gap-2.5">
+                <button type="button" class="btn" (click)="openOther()" [disabled]="vault.busy() || rec.isRecording()">
+                  <app-icon name="folder" [size]="15" /> {{ 'settings.vault.openOther' | t }}
+                </button>
+                <button type="button" class="btn btn-ghost" (click)="vault.close()" [disabled]="vault.busy() || rec.isRecording()">
+                  {{ 'settings.vault.close' | t }}
+                </button>
+              </div>
+              @if (rec.isRecording()) {
+                <p class="-mt-2 text-[13px] text-faint">{{ 'settings.vault.stopRecording' | t }}</p>
+              }
+
+              @if (info.recent.length > 1) {
+                <div class="flex flex-col gap-2.5">
+                  <h4 class="text-[13px] font-semibold text-fg-soft">{{ 'settings.vault.recent' | t }}</h4>
+                  <ul class="overflow-hidden rounded-xl border border-line">
+                    @for (r of info.recent; track r.path) {
+                      @if (r.path !== info.current) {
+                        <li class="flex items-center gap-3 border-t border-line px-4 py-3 first:border-t-0">
+                          <span class="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span class="truncate text-sm font-medium" [class.text-faint]="!r.available">{{ r.name }}</span>
+                            <span class="truncate font-mono text-xs text-faint" [title]="r.path">{{ r.available ? r.path : ('settings.vault.unavailable' | t: { path: r.path }) }}</span>
+                          </span>
+                          <button type="button" class="btn btn-link" (click)="openRecent(r.path)" [disabled]="!r.available || vault.busy() || rec.isRecording()">{{ 'settings.vault.open' | t }}</button>
+                          <button type="button" class="btn btn-ghost btn-icon" (click)="vault.forget(r.path)" [attr.aria-label]="'settings.vault.forget' | t" [title]="'settings.vault.forget' | t">
+                            <app-icon name="close" [size]="15" />
+                          </button>
+                        </li>
+                      }
+                    }
+                  </ul>
+                </div>
+              }
+
+              <div class="rounded-xl border border-line bg-ink-850 p-4 text-[13px] leading-relaxed text-muted">
+                <strong class="mb-1 block font-semibold text-fg">{{ 'settings.vault.syncTitle' | t }}</strong>
+                {{ 'settings.vault.syncText' | t }}
+              </div>
+            }
+          </section>
+        }
+      </div>
+    </div>
+  </div>
+</div>

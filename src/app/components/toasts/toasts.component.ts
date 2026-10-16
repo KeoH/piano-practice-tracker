@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ToastService } from '../../core/toast.service';
+import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-toasts',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, TranslatePipe],
   template: `
     <div class="pointer-events-none fixed right-4 bottom-4 z-[60] flex w-96 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite">
       @for (t of toast.toasts(); track t.id) {
@@ -16,7 +17,7 @@ import { IconComponent } from '../icon/icon.component';
         >
           <span class="dot mt-[7px] h-2 w-2" [class]="dotClass(t.kind)"></span>
           <p class="flex-1 py-px leading-normal break-words">{{ t.message }}</p>
-          <button type="button" class="btn btn-ghost btn-icon h-7 w-7" (click)="toast.dismiss(t.id)" aria-label="Cerrar aviso">
+          <button type="button" class="btn btn-ghost btn-icon h-7 w-7" (click)="toast.dismiss(t.id)" [attr.aria-label]="'toasts.dismiss' | t">
             <app-icon name="close" [size]="14" />
           </button>
         </div>
