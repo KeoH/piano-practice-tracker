@@ -1,0 +1,14 @@
+name: Set up Linux build dependencies
+description: System libraries needed to compile the Tauri app (WebKitGTK, ALSA for cpal/midir) and to bundle it.
+
+runs:
+  using: composite
+  steps:
+    - name: Install system packages
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential curl wget file patchelf pkg-config \
+          libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+          libayatana-appindicator3-dev librsvg2-dev libasound2-dev

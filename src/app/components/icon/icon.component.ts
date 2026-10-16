@@ -34,7 +34,7 @@ export type IconName =
   | 'folder'
   | 'globe';
 
-/** Iconos SVG inline (trazo 1.75, heredan `currentColor`). */
+/** Inline SVG icons (1.75 stroke, inherit `currentColor`). */
 @Component({
   selector: 'app-icon',
   changeDetection: ChangeDetectionStrategy.OnPush,

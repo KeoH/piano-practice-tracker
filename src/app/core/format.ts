@@ -1,4 +1,4 @@
-/** Formatea milisegundos como `mm:ss` (o `mm:ss.d` con `withTenths`). Soporta >= 60 min (`mmm:ss`). */
+/** Formats milliseconds as `mm:ss` (or `mm:ss.d` with `withTenths`). Supports >= 60 min (`mmm:ss`). */
 export function formatMs(ms: number, withTenths = false): string {
   const safe = Math.max(0, Math.floor(Number.isFinite(ms) ? ms : 0));
   const totalSeconds = Math.floor(safe / 1000);
@@ -11,8 +11,8 @@ export function formatMs(ms: number, withTenths = false): string {
 }
 
 /**
- * Parsea `mm:ss`, `mm:ss.d`, `h:mm:ss` o segundos sueltos a milisegundos.
- * Devuelve `null` si el texto no es válido.
+ * Parses `mm:ss`, `mm:ss.d`, `h:mm:ss` or plain seconds into milliseconds.
+ * Returns `null` if the text is not valid.
  */
 export function parseTime(text: string): number | null {
   const t = text.trim();
@@ -24,7 +24,7 @@ export function parseTime(text: string): number | null {
     const p = parts[i].trim();
     if (!/^\d+(\.\d+)?$/.test(p)) return null;
     const v = parseFloat(p);
-    // Solo el último componente admite decimales
+    // Only the last component accepts decimals
     if (i < parts.length - 1 && p.includes('.')) return null;
     total = total * 60 + v;
   }
@@ -35,7 +35,7 @@ export function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
 
-/** Extrae un mensaje legible de cualquier error (los comandos Tauri rechazan con string). */
+/** Extracts a readable message from any error (Tauri commands reject with a string). */
 export function errorMessage(err: unknown): string {
   if (typeof err === 'string') return err;
   if (err instanceof Error) return err.message;

@@ -10,9 +10,9 @@ import {
 } from './languages';
 
 /**
- * Traducciones y formato dependiente del idioma. El idioma es un signal: todo `t()` leído en una
- * plantilla o un `computed` se recalcula al cambiarlo. Quién decide el idioma (preferencia guardada
- * o el del sistema) es `LanguageStore`.
+ * Translations and language-dependent formatting. The language is a signal: every `t()` read in a
+ * template or a `computed` is recomputed when it changes. `LanguageStore` decides which language
+ * to use (saved preference or the system one).
  */
 @Injectable({ providedIn: 'root' })
 export class I18nService {
@@ -24,7 +24,7 @@ export class I18nService {
 
   private readonly _lang = signal<LangCode>(browserLanguage());
   readonly lang = this._lang.asReadonly();
-  /** Etiqueta BCP-47 para `Intl` (`en-US`, `es-ES`). */
+  /** BCP-47 tag for `Intl` (`en-US`, `es-ES`). */
   readonly locale = computed(() => LANGUAGES.find((l) => l.code === this._lang())?.locale ?? 'en-US');
   private readonly pluralRules = computed(() => new Intl.PluralRules(this.locale()));
 
@@ -38,12 +38,12 @@ export class I18nService {
     document.documentElement.lang = lang;
   }
 
-  /** Texto de `key` en el idioma actual, con los huecos `{nombre}` sustituidos por `params`. */
+  /** Text of `key` in the current language, with the `{name}` placeholders replaced by `params`. */
   t(key: MessageKey, params?: MessageParams): string {
     return this.lookup(this._lang(), key, params);
   }
 
-  /** Plural de `key` según `n` (`key_zero` si existe y n = 0; si no `key_one`, `key_other`…). `{n}` es el número. */
+  /** Plural of `key` for `n` (`key_zero` if it exists and n = 0; otherwise `key_one`, `key_other`…). `{n}` is the number. */
   plural(key: PluralKey, n: number, params?: MessageParams): string {
     const lang = this._lang();
     const catalog = this.catalogs.get(lang);
@@ -53,9 +53,9 @@ export class I18nService {
     return this.lookup(lang, chosen, { n, ...params });
   }
 
-  // ---- Fechas ----
+  // ---- Dates ----
 
-  /** Fecha larga con día de la semana: «Thursday, October 15, 2026 · 7:05 PM». */
+  /** Long date with weekday: "Thursday, October 15, 2026 · 7:05 PM". */
   longDate(iso: string | null | undefined): string {
     const d = parseDate(iso);
     if (!d) return iso ?? '';
@@ -64,26 +64,26 @@ export class I18nService {
     return `${capitalize(day)} · ${time}`;
   }
 
-  /** Fecha compacta para listas: «Thu Oct 15», «jue 15 oct». */
+  /** Compact date for lists: "Thu Oct 15", "jue 15 oct". */
   shortDate(iso: string | null | undefined): string {
     const d = parseDate(iso);
     if (!d) return iso ?? '';
     return d.toLocaleDateString(this.locale(), { weekday: 'short', day: 'numeric', month: 'short' }).replace(/[,.]/g, '');
   }
 
-  /** Fecha y hora numéricas: «10/15/2026 07:05 PM», «15/10/2026 19:05». */
+  /** Numeric date and time: "10/15/2026 07:05 PM", "15/10/2026 19:05". */
   dateTime(d: Date): string {
     const date = d.toLocaleDateString(this.locale(), { day: '2-digit', month: '2-digit', year: 'numeric' });
     const time = d.toLocaleTimeString(this.locale(), { hour: '2-digit', minute: '2-digit' });
     return `${date} ${time}`;
   }
 
-  /** Grupo de la lista lateral: «This week», «Last week» o el mes («September», «March 2025»). */
+  /** Sidebar list group: "This week", "Last week" or the month ("September", "March 2025"). */
   dateGroup(iso: string | null | undefined, now = new Date()): string {
     const d = parseDate(iso);
     if (!d) return this.t('dates.noDate');
     const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); // lunes
+    weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7)); // Monday
     if (d >= weekStart) return this.t('dates.thisWeek');
     const lastWeekStart = new Date(weekStart);
     lastWeekStart.setDate(lastWeekStart.getDate() - 7);
@@ -99,7 +99,7 @@ export class I18nService {
   }
 }
 
-/** Idioma del navegador (o el de reserva), para la primera pintura antes de preguntar al backend. */
+/** Browser language (or the fallback), for the first render before asking the backend. */
 export function browserLanguage(): LangCode {
   for (const tag of navigator.languages ?? [navigator.language]) {
     const lang = normalizeLang(tag);

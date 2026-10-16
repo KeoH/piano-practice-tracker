@@ -1,126 +1,140 @@
-# Plan de Tareas de Implementación (Piano Practice Tracker)
+# Implementation Task Plan (Piano Practice Tracker)
 
-Este documento desglosa las tareas secuenciales y paralelizables para construir el MVP completo.
+This document breaks down the sequential and parallelizable tasks needed to build the complete MVP.
 
-## Fase 1: Inicialización y Entorno del Proyecto
-- [x] **1.1. Verificación de dependencias del sistema en Ubuntu:** Comprobar que `cargo`, `node`, `npm`, `pkg-config`, `libasound2-dev` y `libwebkit2gtk-4.1-dev` están instalados.
-- [x] **1.2. Scaffolding de Angular + Tauri v2:**
-  - Inicializar el proyecto Angular (Standalone, SCSS/TailwindCSS) y configurar `@tauri-apps/cli` y `@tauri-apps/api`.
-  - Configurar `src-tauri/Cargo.toml` con todas las dependencias (`tauri`, `midir`, `midly`, `rustysynth`, `cpal`, `rusqlite`, `tokio`, `reqwest`, `serde`, `uuid`, `chrono`).
-- [x] **1.3. Generador / Provisionador de SoundFont (`.sf2`):**
-  - Crear un módulo en Rust (`sf2_builder.rs`) que verifique si existe `~/.local/share/piano-tracker/assets/default_piano.sf2` al iniciar la app y, si no existe, construya programáticamente un archivo SoundFont `.sf2` válido con muestras de ondas armónicas de piano acústico (o lo copie desde recursos empaquetados) para garantizar que `rustysynth` funcione al 100% *offline* desde el primer arranque sin depender de descargas externas que puedan fallar.
+## Phase 1: Project Setup and Environment
+- [x] **1.1. Check the system dependencies on Ubuntu:** Make sure `cargo`, `node`, `npm`, `pkg-config`, `libasound2-dev` and `libwebkit2gtk-4.1-dev` are installed.
+- [x] **1.2. Angular + Tauri v2 scaffolding:**
+  - Initialize the Angular project (Standalone, SCSS/TailwindCSS) and set up `@tauri-apps/cli` and `@tauri-apps/api`.
+  - Configure `src-tauri/Cargo.toml` with all the dependencies (`tauri`, `midir`, `midly`, `rustysynth`, `cpal`, `rusqlite`, `tokio`, `reqwest`, `serde`, `uuid`, `chrono`).
+- [x] **1.3. SoundFont (`.sf2`) generator / provisioner:**
+  - Create a Rust module (`sf2_builder.rs`) that checks on startup whether `~/.local/share/piano-tracker/assets/default_piano.sf2` exists and, if it doesn't, programmatically builds a valid `.sf2` SoundFont with harmonic acoustic piano waveform samples (or copies it from bundled resources), so that `rustysynth` works 100% *offline* from the very first launch without relying on external downloads that could fail.
 
-## Fase 2: Capa de Persistencia SQLite y Cola Offline-First
-- [x] **2.1. Inicialización de Base de Datos (`db.rs`):**
-  - Crear directorios en `~/.local/share/piano-tracker/` (`midi/raw`, `midi/fragments`, `media`, `assets`).
-  - Ejecutar las migraciones DDL para `sessions`, `midi_fragments`, `timeline_comments`, `session_media`, `sync_queue` y `app_settings`.
-- [x] **2.2. Repositorios CRUD y Encolado Automático:**
-  - Implementar funciones para gestionar sesiones, fragmentos, comentarios de línea de tiempo e imágenes.
-  - Asegurar que cada creación/modificación de archivo `.mid`, imagen o sesión inserte automáticamente una tarea en `sync_queue` y actualice `sync_status = 'PENDING'`.
-- [x] **2.3. Tests Unitarios de Base de Datos:**
-  - Escribir tests en Rust (`#[cfg(test)]`) verificando la creación de sesiones, inserción en cascada de fragmentos y comentarios, y el registro automático en `sync_queue`.
+## Phase 2: SQLite Persistence Layer and Offline-First Queue
+- [x] **2.1. Database initialization (`db.rs`):**
+  - Create the directories under `~/.local/share/piano-tracker/` (`midi/raw`, `midi/fragments`, `media`, `assets`).
+  - Run the DDL migrations for `sessions`, `midi_fragments`, `timeline_comments`, `session_media`, `sync_queue` and `app_settings`.
+- [x] **2.2. CRUD repositories and automatic queueing:**
+  - Implement functions to manage sessions, fragments, timeline comments and images.
+  - Make sure every creation/modification of a `.mid` file, image or session automatically inserts a task into `sync_queue` and sets `sync_status = 'PENDING'`.
+- [x] **2.3. Database unit tests:**
+  - Write Rust tests (`#[cfg(test)]`) covering session creation, cascading insertion of fragments and comments, and automatic registration in `sync_queue`.
 
-## Fase 3: Motor MIDI Nativo y Recorte Destructivo (Slicing)
-- [x] **3.1. Captura MIDI con `midir` (`midi_recorder.rs`):**
-  - Implementar enumeración de puertos ALSA MIDI y un puerto virtual/simulador de prueba por si no hay teclado físico conectado al testear.
-  - Implementar hilo de grabación que capture eventos con marca de tiempo relativa en microsegundos y los guarde en un archivo `.mid` válido usando `midly`.
-- [x] **3.2. Analizador de Actividad MIDI (`midi_slicer.rs`):**
-  - Implementar `analyze_midi_activity(path)` que parsee el `.mid` con `midly` y devuelva los bloques de actividad (`Vec<ActivityBlock>`) y la duración total en milisegundos.
-- [x] **3.3. Motor de Recorte Destructivo (`midi_slicer.rs`):**
-  - Implementar `extract_fragment_and_trim(source_path, start_ms, end_ms, dest_path)`:
-    - Extraer el rango al nuevo archivo `.mid` con tiempos normalizados a $0$, estado de pedal sustain (`CC 64`) preservado al inicio, y cierre limpio de notas (`NoteOff`) al final.
-    - Recortar ese mismo rango del archivo maestro `source_path` desplazando los eventos posteriores hacia atrás.
-  - Implementar `discard_range(source_path, start_ms, end_ms)` para borrar tramos no deseados del archivo bruto.
-- [x] **3.4. Tests Unitarios de Recorte MIDI:**
-  - Crear tests unitarios que generen un archivo `.mid` de prueba de 60 segundos con notas y pedal de sustain, extraigan un fragmento del segundo 10 al 25, y comprueben que el fragmento dura 15 segundos y la pista original pasa a durar 45 segundos sin notas colgadas.
+## Phase 3: Native MIDI Engine and Destructive Slicing
+- [x] **3.1. MIDI capture with `midir` (`midi_recorder.rs`):**
+  - Implement enumeration of ALSA MIDI ports and a virtual/simulator test port for when no physical keyboard is connected during testing.
+  - Implement a recording thread that captures events with a relative timestamp in microseconds and saves them to a valid `.mid` file using `midly`.
+- [x] **3.2. MIDI activity analyzer (`midi_slicer.rs`):**
+  - Implement `analyze_midi_activity(path)`, which parses the `.mid` with `midly` and returns the activity blocks (`Vec<ActivityBlock>`) and the total duration in milliseconds.
+- [x] **3.3. Destructive slicing engine (`midi_slicer.rs`):**
+  - Implement `extract_fragment_and_trim(source_path, start_ms, end_ms, dest_path)`:
+    - Extract the range into the new `.mid` file with times normalized to $0$, the sustain pedal state (`CC 64`) preserved at the start, and clean note closing (`NoteOff`) at the end.
+    - Cut that same range out of the master file `source_path`, shifting the later events back.
+  - Implement `discard_range(source_path, start_ms, end_ms)` to delete unwanted sections from the raw file.
+- [x] **3.4. MIDI slicing unit tests:**
+  - Create unit tests that generate a 60-second test `.mid` file with notes and sustain pedal, extract a fragment from second 10 to 25, and check that the fragment lasts 15 seconds and the original track now lasts 45 seconds with no hanging notes.
 
-## Fase 4: Motor de Audio, Sintetizador (`rustysynth`) y Metrónomo (`cpal`)
-- [x] **4.1. Sintetizador y Salida de Audio (`audio_engine.rs`):**
-  - Inicializar el stream de audio `cpal` en un hilo dedicado controlado por canales/estado compartido (`Arc<Mutex<AudioState>>`).
-  - Cargar el SoundFont en `rustysynth::Synthesizer`.
-- [x] **4.2. Generador de Metrónomo:**
-  - Implementar el generador de pulsos audibles según el BPM configurado (activo durante la grabación si el usuario lo habilita).
-- [x] **4.3. Secuenciador de Reproducción MIDI:**
-  - Implementar la reproducción de archivos `.mid` en `audio_engine.rs` con soporte para `play`, `pause`, `stop` y `seek(ms)`.
-  - Emitir eventos `playback-progress` hacia el frontend de Angular cada $50\text{ ms}$.
+## Phase 4: Audio Engine, Synthesizer (`rustysynth`) and Metronome (`cpal`)
+- [x] **4.1. Synthesizer and audio output (`audio_engine.rs`):**
+  - Initialize the `cpal` audio stream on a dedicated thread controlled through channels/shared state (`Arc<Mutex<AudioState>>`).
+  - Load the SoundFont into `rustysynth::Synthesizer`.
+- [x] **4.2. Metronome generator:**
+  - Implement the generator of audible clicks at the configured BPM (active during recording if the user enables it).
+- [x] **4.3. MIDI playback sequencer:**
+  - Implement playback of `.mid` files in `audio_engine.rs` with support for `play`, `pause`, `stop` and `seek(ms)`.
+  - Emit `playback-progress` events to the Angular frontend every $50\text{ ms}$.
 
-## Fase 5: Sincronización con Google Drive (OAuth2 + Worker)
-> Sustituida por las bóvedas de la Fase 10: `drive_sync.rs` y la cola `sync_queue` se eliminaron.
+## Phase 5: Google Drive Sync (OAuth2 + Worker)
+> Replaced by the vaults in Phase 10: `drive_sync.rs` and the `sync_queue` were removed.
 
-- [x] **5.1. Flujo OAuth2 Loopback (`drive_sync.rs`):**
-  - Implementar servidor local efímero en `127.0.0.1` para capturar el callback de Google OAuth2, intercambiar el código por tokens (`access_token`, `refresh_token`) y persistirlos en `app_settings`.
-- [x] **5.2. Cliente de Google Drive API v3:**
-  - Implementar resolución/creación de la estructura de carpetas visibles: `PianoTracker/`, `PianoTracker/midi/` y `PianoTracker/media/`.
-  - Implementar subida de archivos (`multipart/related`) y respaldo de `piano_tracker_backup.sqlite`.
-- [x] **5.3. Worker Asíncrono Offline-First:**
-  - Crear tarea en segundo plano (`tokio::spawn`) que procese `sync_queue` cuando haya red y credenciales configuradas, emitiendo el estado de sincronización al frontend.
+- [x] **5.1. OAuth2 loopback flow (`drive_sync.rs`):**
+  - Implement an ephemeral local server on `127.0.0.1` to capture the Google OAuth2 callback, exchange the code for tokens (`access_token`, `refresh_token`) and persist them in `app_settings`.
+- [x] **5.2. Google Drive API v3 client:**
+  - Implement resolution/creation of the visible folder structure: `PianoTracker/`, `PianoTracker/midi/` and `PianoTracker/media/`.
+  - Implement file uploads (`multipart/related`) and a backup of `piano_tracker_backup.sqlite`.
+- [x] **5.3. Asynchronous offline-first worker:**
+  - Create a background task (`tokio::spawn`) that processes `sync_queue` when there is a network connection and credentials are configured, emitting the sync status to the frontend.
 
-## Fase 6: Integración de Comandos IPC en Tauri (`lib.rs` / `main.rs`)
-- [x] **6.1. Exposición de Comandos Tauri:**
-  - Conectar todos los módulos (`db`, `midi_recorder`, `midi_slicer`, `audio_engine`, `drive_sync`) en el estado gestionado de Tauri (`tauri::State`).
-  - Registrar todos los comandos `@tauri::command` definidos en `specification.md`.
-- [x] **6.2. Verificación de Compilación Backend:**
-  - Ejecutar `cargo test` y `cargo check` dentro de `src-tauri` asegurando cero errores.
+## Phase 6: Tauri IPC Command Integration (`lib.rs` / `main.rs`)
+- [x] **6.1. Exposing the Tauri commands:**
+  - Wire all the modules (`db`, `midi_recorder`, `midi_slicer`, `audio_engine`, `drive_sync`) into Tauri's managed state (`tauri::State`).
+  - Register all the `@tauri::command`s defined in `specification.md`.
+- [x] **6.2. Backend build check:**
+  - Run `cargo test` and `cargo check` inside `src-tauri`, making sure there are zero errors.
 
-## Fase 7: Frontend Angular - Servicios, Sesiones y Editor Markdown
-- [x] **7.1. Servicios IPC y Modelos TypeScript:**
-  - Crear `TauriApiService` con tipado estricto para todos los comandos y suscripción a los eventos `playback-progress` y `sync-status`.
-- [x] **7.2. Layout Principal, Sidebar y Modal de Google Drive:**
-  - Construir la barra lateral de sesiones con filtros, estado de sincronización en la nube, selector de dispositivo MIDI (incluido modo simulador) y modal de configuración de Google Drive.
-- [x] **7.3. Cabecera de Grabación y Metrónomo:**
-  - Construir el panel de control de grabación con selector de BPM, toggle de metrónomo, toggle de monitoreo en vivo y botón de grabación con indicador de tiempo en vivo.
-- [x] **7.4. Editor Markdown con Soporte de Imágenes:**
-  - Construir el editor de notas de la sesión con vista dividida/previa, interceptando el pegado (`paste`) y arrastrado (`drop`) de imágenes para guardarlas localmente mediante `save_session_image` y renderizarlas en el Markdown.
+## Phase 7: Angular Frontend - Services, Sessions and Markdown Editor
+- [x] **7.1. IPC services and TypeScript models:**
+  - Create `TauriApiService` with strict typing for all commands and subscriptions to the `playback-progress` and `sync-status` events.
+- [x] **7.2. Main layout, sidebar and Google Drive modal:**
+  - Build the session sidebar with filters, cloud sync status, MIDI device selector (including simulator mode) and the Google Drive settings modal.
+- [x] **7.3. Recording header and metronome:**
+  - Build the recording control panel with BPM selector, metronome toggle, live monitoring toggle and record button with a live time indicator.
+- [x] **7.4. Markdown editor with image support:**
+  - Build the session notes editor with split/preview view, intercepting image `paste` and `drop` to save them locally through `save_session_image` and render them in the Markdown.
 
-## Fase 8: Frontend Angular - Recortador Visual y Reproductor con Comentarios
-- [x] **8.1. Componente Recortador de Pista Bruta (`MidiSlicerComponent`):**
-  - Dibujar en `<canvas>` los bloques de actividad MIDI devueltos por el backend.
-  - Implementar selectores arrastrables de inicio y fin de recorte (`start_ms`, `end_ms`), preescucha del tramo seleccionado, botón **"Extraer Fragmento"** (con formulario de título y explicación) y botón **"Descartar Tramo"**.
-- [x] **8.2. Componente de Fragmento y Línea de Tiempo (`FragmentPlayerComponent`):**
-  - Construir el reproductor interactivo para cada fragmento con barra de progreso, controles `Play/Pause/Stop` y bloques de actividad.
-  - Renderizar los **marcadores (pins)** en la línea de tiempo para cada comentario.
-  - Mostrar el **popup flotante** automático sobre la línea de tiempo cuando la reproducción pasa por el segundo del comentario o al pasar el cursor sobre el pin.
-  - Construir el **listado lateral de comentarios** ordenado por segundo (con salto directo al hacer clic) y el input rápido para insertar nuevos comentarios en el instante actual.
+## Phase 8: Angular Frontend - Visual Slicer and Player with Comments
+- [x] **8.1. Raw take slicer component (`MidiSlicerComponent`):**
+  - Draw the MIDI activity blocks returned by the backend on a `<canvas>`.
+  - Implement draggable start and end slice handles (`start_ms`, `end_ms`), preview of the selected section, an **"Extract Fragment"** button (with a title and explanation form) and a **"Discard Section"** button.
+- [x] **8.2. Fragment and timeline component (`FragmentPlayerComponent`):**
+  - Build the interactive player for each fragment with a progress bar, `Play/Pause/Stop` controls and activity blocks.
+  - Render the **markers (pins)** on the timeline for each comment.
+  - Show the automatic **floating popup** over the timeline when playback reaches the comment's second or when hovering over the pin.
+  - Build the **side list of comments** sorted by second (jumping straight to it on click) and the quick input to add new comments at the current instant.
 
-## Fase 9: Validación End-to-End y Pulido Final
-- [x] **9.1. Compilación Completa Frontend y Backend:**
-  - Ejecutar `npm run build` para validar la compilación de Angular sin errores de plantillas ni tipos.
-  - Ejecutar `cargo test` y `cargo build` en `src-tauri` para validar que el binario de escritorio en Linux compila limpiamente.
-- [x] **9.2. Revisión del Checklist:**
-  - Marcar todas las tareas completadas en `task.md`.
+## Phase 9: End-to-End Validation and Final Polish
+- [x] **9.1. Full frontend and backend build:**
+  - Run `npm run build` to validate that Angular compiles without template or type errors.
+  - Run `cargo test` and `cargo build` in `src-tauri` to validate that the Linux desktop binary builds cleanly.
+- [x] **9.2. Checklist review:**
+  - Mark all completed tasks in `task.md`.
 
-## Fase 10: Bóvedas en lugar de Google Drive
-- [x] **10.1. Eliminar la sincronización con Google Drive:**
-  - Borrar `drive_sync.rs`, sus comandos, el evento `sync-status`, `SyncStatusDto` y las dependencias `reqwest`, `url`, `sha2`, `rand`, `tokio` y `tauri-plugin-shell`.
-- [x] **10.2. Base de datos v2 (`db.rs`):**
-  - Migración que elimina `sync_queue`, `sync_status`, `drive_file_id` y los ajustes de Google.
-  - Rutas relativas a la bóveda en la base de datos y en las imágenes del Markdown; la API las devuelve absolutas.
-  - `journal_mode = DELETE` para que la base de datos sea un único fichero en reposo.
-- [x] **10.3. Módulo `vault.rs`:**
-  - Configuración del equipo en `~/.config/piano-tracker/config.json` (bóveda actual, recientes, SoundFont).
-  - Crear, abrir y cerrar bóvedas, lock por equipo y pid, aviso de copias en conflicto e importación de los datos de la versión anterior.
+## Phase 10: Vaults Instead of Google Drive
+- [x] **10.1. Remove the Google Drive sync:**
+  - Delete `drive_sync.rs`, its commands, the `sync-status` event, `SyncStatusDto` and the `reqwest`, `url`, `sha2`, `rand`, `tokio` and `tauri-plugin-shell` dependencies.
+- [x] **10.2. Database v2 (`db.rs`):**
+  - Migration that drops `sync_queue`, `sync_status`, `drive_file_id` and the Google settings.
+  - Paths relative to the vault in the database and in the Markdown images; the API returns them absolute.
+  - `journal_mode = DELETE` so the database is a single file at rest.
+- [x] **10.3. `vault.rs` module:**
+  - Machine configuration in `~/.config/piano-tracker/config.json` (current vault, recent ones, SoundFont).
+  - Create, open and close vaults, lock per computer and pid, warning about conflicting copies, and import of the previous version's data.
 - [x] **10.4. Frontend:**
-  - `VaultStore`, pantalla de bienvenida (`vault-welcome`) y pestaña *Bóveda* en Ajustes (`settings-dialog`).
-  - Quitar los indicadores de nube de la barra lateral, la cabecera de sesión y los fragmentos.
-  - Imágenes del Markdown con rutas relativas a la bóveda.
-- [ ] **10.5. Verificación manual con `npm run tauri dev`:**
-  - Importar los datos antiguos a una bóveda dentro de Dropbox y comprobar sesiones, reproducción e imágenes.
-  - Grabar con el simulador, recortar y pegar una imagen: todo debe quedar dentro de la bóveda.
-  - Copiar la bóveda a otra ruta, abrirla con «Abrir otra bóveda…» y comprobar que todo funciona.
-  - Abrir la misma bóveda en dos instancias: la segunda debe avisar del lock.
+  - `VaultStore`, welcome screen (`vault-welcome`) and *Vault* tab in Settings (`settings-dialog`).
+  - Remove the cloud indicators from the sidebar, the session header and the fragments.
+  - Markdown images with paths relative to the vault.
+- [ ] **10.5. Manual check with `npm run tauri dev`:**
+  - Import the old data into a vault inside Dropbox and check sessions, playback and images.
+  - Record with the simulator, slice and paste an image: everything must end up inside the vault.
+  - Copy the vault to another path, open it with "Open another vault…" and check that everything works.
+  - Open the same vault in two instances: the second one must warn about the lock.
 
-## Fase 11: Multi-idioma (inglés y español)
-- [x] **11.1. Ficheros de idioma compartidos:** `src/locales/en.json` (referencia) y `es.json`, usados por Angular y por Rust.
+## Phase 11: Multi-language Support (English and Spanish)
+- [x] **11.1. Shared language files:** `src/locales/en.json` (reference) and `es.json`, used by both Angular and Rust.
 - [x] **11.2. Backend (`i18n.rs`):**
-  - Macro `t!`, idioma del sistema por variables de entorno con inglés de reserva, y preferencia en `AppConfig.language`.
-  - Comandos `get_language` / `set_language`.
-  - Mensajes de error traducidos y tests de paridad de claves y huecos.
+  - `t!` macro, system language from environment variables with English as the fallback, and the preference in `AppConfig.language`.
+  - `get_language` / `set_language` commands.
+  - Translated error messages and key/placeholder parity tests.
 - [x] **11.3. Frontend:**
-  - `I18nService`, pipes `t` / `tp`, `LanguageStore`, claves tipadas y fechas con `Intl` según el idioma.
-  - Todos los componentes traducidos.
-  - Selector de idioma en Ajustes → General y en la pantalla de bienvenida.
-- [ ] **11.4. Verificación manual con `npm run tauri dev`:**
-  - Arrancar con `LANG=es_ES.UTF-8` (español) y con `LANG=fr_FR.UTF-8` (inglés).
-  - Cambiar de idioma en Ajustes sin recargar y comprobar que se mantiene al reiniciar.
-  - Provocar un error del backend (p. ej. crear una bóveda en una carpeta no vacía) y verlo en el idioma elegido.
+  - `I18nService`, `t` / `tp` pipes, `LanguageStore`, typed keys and dates with `Intl` according to the language.
+  - All components translated.
+  - Language selector in Settings → General and on the welcome screen.
+- [ ] **11.4. Manual check with `npm run tauri dev`:**
+  - Start with `LANG=es_ES.UTF-8` (Spanish) and with `LANG=fr_FR.UTF-8` (English).
+  - Change the language in Settings without reloading and check that it is kept after a restart.
+  - Trigger a backend error (e.g. creating a vault in a non-empty folder) and see it in the chosen language.
 
+## Phase 12: English as the Project's Official Language
+- [x] **12.1.** Comments, doc comments, logs, test messages and test data translated into English in Rust, TypeScript, HTML and CSS.
+- [x] **12.2.** `CLAUDE.md`, `SPECIFICATIONS.md` and `TASKS.md` translated into English.
+
+## Phase 13: CI/CD with GitHub Actions
+- [x] **13.1. Frontend tests:** Vitest through `@angular/build:unit-test` (`npm test`, `npm run test:ci` with v8 coverage) and specs for `format`, `markdown` and `I18nService`.
+- [x] **13.2. CI (`ci.yml`, every PR):** frontend build + tests, Rust tests with `cargo-llvm-cov`, and a coverage table in the job summary and a sticky PR comment.
+- [x] **13.3. Releases (`release.yml`, every push to `main`):** release-please with Conventional Commits keeps the version in sync across `package.json`, `Cargo.toml`, `Cargo.lock` and `tauri.conf.json`; merging the release PR tags `vX.Y.Z` and attaches the `.deb`, `.AppImage` and `SHA256SUMS.txt` to the GitHub Release.
+- [ ] **13.4. GitHub configuration (manual):**
+  - Settings → Actions → General: "Read and write permissions" and "Allow GitHub Actions to create and approve pull requests".
+  - Branch protection on `main` requiring the `Frontend` and `Backend` checks; squash merge with Conventional Commit titles.
+  - Optional: a PAT in the `RELEASE_PLEASE_TOKEN` secret so the release PR also runs CI.
+- [ ] **13.5. First release:** open a test PR (CI + coverage comment), merge it, merge the release PR and install the published `.deb`.
+- [ ] **13.6. More frontend tests:** stores (`SessionStore`, `PlaybackStore`, `RecordingStore`, `VaultStore`) with `TauriApiService` mocked.

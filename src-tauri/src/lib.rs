@@ -1,4 +1,4 @@
-// Primero, para que la macro `t!` esté disponible en el resto de módulos.
+// First, so the `t!` macro is available in the other modules.
 #[macro_use]
 pub mod i18n;
 pub mod audio_engine;
@@ -26,16 +26,16 @@ use crate::vault::AppConfig;
 
 pub const EVENT_PLAYBACK_PROGRESS: &str = "playback-progress";
 
-/// Construye el estado de la aplicación: directorios, SoundFont, audio y la última bóveda abierta.
+/// Builds the application state: directories, SoundFont, audio and the last open vault.
 fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
     let dirs = AppDirs::default_location();
     dirs.ensure_dirs()?;
 
-    // El SoundFont se genera localmente si falta: la app nunca depende de descargas.
+    // The SoundFont is generated locally if missing: the app never depends on downloads.
     let sf2 = match sf2_builder::ensure_soundfont(&dirs.sf2_file) {
         Ok(p) => p,
         Err(e) => {
-            log::error!("No se pudo preparar el SoundFont: {e}");
+            log::error!("Could not prepare the SoundFont: {e}");
             dirs.sf2_file.clone()
         }
     };
@@ -46,11 +46,11 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
     });
     let audio = Arc::new(AudioEngine::new(&sf2, progress));
     if !audio.output_available() {
-        log::warn!("Sin dispositivo de audio: el motor funciona en modo salida nula");
+        log::warn!("No audio device: the engine runs in null output mode");
     }
 
     let config = AppConfig::load(&dirs.config_file);
-    // Antes de reabrir la bóveda, para que sus avisos salgan ya en el idioma elegido.
+    // Before reopening the vault, so its warnings already come out in the chosen language.
     i18n::set_language(i18n::resolve(config.language.as_deref()));
     let last_vault = config.current_vault.clone();
     let state = AppState {
@@ -63,18 +63,18 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
         soundfont: Arc::new(Mutex::new(SoundfontState { current: sf2.clone(), loading: false })),
     };
 
-    // Reabre la última bóveda. Si no está disponible o parece abierta en otro equipo, la app
-    // arranca sin bóveda y el frontend muestra la pantalla de bienvenida.
+    // Reopens the last vault. If it is not available or seems open on another computer, the app
+    // starts without a vault and the frontend shows the welcome screen.
     if let Some(last) = last_vault {
         match commands::activate_vault(app, &state, Path::new(&last), false) {
             Ok(r) if r.opened => {}
             Ok(r) => log::warn!("{}", r.lock_warning.unwrap_or_default()),
-            Err(e) => log::warn!("No se pudo abrir la última bóveda: {e}"),
+            Err(e) => log::warn!("Could not open the last vault: {e}"),
         }
     }
 
-    // El motor arranca al instante con el piano integrado; el SoundFont preferido (p. ej.
-    // FluidR3_GM.sf2 del sistema, con muestras reales de piano) se carga en segundo plano.
+    // The engine starts instantly with the built-in piano; the preferred SoundFont (e.g. the
+    // system's FluidR3_GM.sf2, with real piano samples) loads in the background.
     let saved = state.config.lock().unwrap_or_else(|p| p.into_inner()).soundfont_path.clone();
     let preferred = soundfont::preferred(&state.dirs, saved.as_deref());
     if preferred != sf2 {
@@ -136,7 +136,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            // Al salir se libera el lock de la bóveda para que otro equipo pueda abrirla sin aviso.
+            // On exit the vault lock is released so another computer can open it without a warning.
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<AppState>() {
                     if let Some(v) = state.vault.read().unwrap_or_else(|p| p.into_inner()).as_ref() {

@@ -1,3 +1,3 @@
-# Limita el paralelismo de compilación: con todos los núcleos el equipo se queda sin RAM.
+# Limits build parallelism: with every core in use the machine runs out of RAM.
 [build]
 jobs = 4

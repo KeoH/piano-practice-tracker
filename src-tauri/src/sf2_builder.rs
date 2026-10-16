@@ -1,29 +1,28 @@
-//! Generador de un SoundFont 2 de piano acústico compacto, sintetizado en memoria.
+//! Generator of a compact acoustic piano SoundFont 2, synthesized in memory.
 //!
-//! Garantiza que `rustysynth` funcione 100% offline desde el primer arranque
-//! (TASKS 1.3). El fichero resultante contiene un único preset "Acoustic Piano"
-//! (banco 0, programa 0) con 7 muestras (una por octava, raíces C1..C7) sintetizadas
-//! de forma aditiva con parciales inarmónicos (B·n²), decaimiento por parcial más
-//! rápido en agudos, transitorio de martillo con ruido y bucle sin discontinuidad
-//! en la parte sostenida.
+//! Guarantees that `rustysynth` works 100% offline from the very first launch (TASKS 1.3).
+//! The resulting file holds a single "Acoustic Piano" preset (bank 0, program 0) with 7 samples
+//! (one per octave, roots C1..C7) synthesized additively with inharmonic partials (B·n²), faster
+//! per-partial decay in the treble, a noisy hammer transient and a seamless loop in the
+//! sustained part.
 
 use std::f64::consts::PI;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-/// Frecuencia de muestreo de las muestras generadas.
+/// Sample rate of the generated samples.
 const SAMPLE_RATE: u32 = 44_100;
-/// Notas raíz (MIDI) de cada muestra: C1, C2, ..., C7.
+/// Root notes (MIDI) of each sample: C1, C2, ..., C7.
 const ROOT_KEYS: [u8; 7] = [24, 36, 48, 60, 72, 84, 96];
-/// Puntos de ceros de guarda tras cada muestra (exigidos por la especificación SF2).
+/// Guard zero points after each sample (required by the SF2 specification).
 const GUARD_POINTS: usize = 46;
-/// Duración objetivo del bucle (s). Fija la resolución de frecuencia de los parciales (1/LOOP_SECS Hz).
+/// Target loop duration (s). Sets the frequency resolution of the partials (1/LOOP_SECS Hz).
 const LOOP_SECS: f64 = 0.5;
 
 const PRESET_NAME: &str = "Acoustic Piano";
 const INSTRUMENT_NAME: &str = "Piano";
 
-// Generadores SF2 usados.
+// SF2 generators used.
 const GEN_REVERB_SEND: u16 = 16;
 const GEN_ATTACK_VOL_ENV: u16 = 34;
 const GEN_DECAY_VOL_ENV: u16 = 36;
@@ -45,7 +44,7 @@ struct SynthSample {
     pitch_correction: i8,
 }
 
-/// Generador pseudoaleatorio determinista (xorshift) para el ruido del martillo.
+/// Deterministic pseudo-random generator (xorshift) for the hammer noise.
 struct XorShift(u64);
 impl XorShift {
     fn next_f64(&mut self) -> f64 {
@@ -62,12 +61,12 @@ fn key_to_hz(key: f64) -> f64 {
     440.0 * 2f64.powf((key - 69.0) / 12.0)
 }
 
-/// Sintetiza la muestra de una nota raíz.
+/// Synthesizes the sample for a root note.
 fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
     let sr = SAMPLE_RATE as f64;
     let f0 = key_to_hz(root as f64);
-    // Bucle de longitud L con un número entero de periodos de la fundamental:
-    // todos los parciales se cuantizan a múltiplos de sr/L → la zona de bucle es periódica.
+    // Loop of length L with a whole number of periods of the fundamental:
+    // all partials are quantized to multiples of sr/L → the loop region is periodic.
     let periods = (LOOP_SECS * f0).round().max(1.0);
     let loop_len = (periods * sr / f0).round() as usize;
     let df = sr / loop_len as f64;
@@ -75,7 +74,7 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
     let cents = 1200.0 * (f1 / f0).log2();
     let pitch_correction = (-cents).round().clamp(-99.0, 99.0) as i8;
 
-    let lowness = (96.0 - root as f64) / 72.0; // 1 en C1, 0 en C7
+    let lowness = (96.0 - root as f64) / 72.0; // 1 at C1, 0 at C7
     let attack_secs = 0.3 + 0.5 * lowness;
     let nominal_loop_start = (attack_secs * sr) as usize;
     let max_freq = (0.42 * sr) / 2f64.powf(max_shift_semitones / 12.0);
@@ -104,11 +103,11 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
         if freq >= max_freq {
             break;
         }
-        // Espectro: caída ~1/n^tilt con muesca por posición del martillo.
+        // Spectrum: ~1/n^tilt roll-off with a notch from the hammer position.
         let amp = nf.powf(-tilt) * (0.55 + 0.45 * (PI * nf / 7.3).sin().abs());
         let tau = tau_base / (1.0 + 0.28 * (nf - 1.0));
         partials.push(Partial { freq, amp, tau, phase: (rng.next_f64() + 1.0) * PI });
-        // Segunda cuerda ligeramente desafinada (un paso de rejilla) → batido suave.
+        // Second string slightly detuned (one grid step) → gentle beating.
         if n <= 6 {
             let freq2 = (bin + 1) as f64 * df;
             if freq2 < max_freq {
@@ -117,7 +116,7 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
         }
     }
 
-    // Render en f64: tramo de ataque (amplitudes decayendo) + tramo estacionario periódico.
+    // Render in f64: attack section (decaying amplitudes) + periodic steady section.
     let render_len = nominal_loop_start + loop_len + (sr / f0) as usize + 16;
     let freeze_t = nominal_loop_start as f64 / sr;
     let mut buf = vec![0f64; render_len];
@@ -126,8 +125,8 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
         let frozen = p.amp * (-freeze_t / p.tau).exp();
         let decay_per_sample = (-1.0 / (p.tau * sr)).exp();
         let mut a = p.amp;
-        // Oscilador por recurrencia de rotación (más rápido que sin() por muestra),
-        // re-sincronizado periódicamente para evitar deriva numérica.
+        // Rotation-recurrence oscillator (faster than sin() per sample), periodically
+        // resynchronized to avoid numerical drift.
         let (mut s, mut c) = p.phase.sin_cos();
         let (sw, cw) = w.sin_cos();
         for (i, out) in buf.iter_mut().enumerate() {
@@ -144,7 +143,7 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
             a *= decay_per_sample;
         }
     }
-    // Transitorio del martillo: ruido filtrado con envolvente muy corta (< 60 ms).
+    // Hammer transient: filtered noise with a very short envelope (< 60 ms).
     let mut lp = 0.0;
     let cutoff = (0.08 + 0.5 * (1.0 - lowness)).min(0.6);
     let transient_len = (0.06 * sr) as usize;
@@ -154,13 +153,13 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
         let env = 0.35 * (-t / 0.004).exp() * (1.0 - i as f64 / transient_len as f64);
         *out += env * lp;
     }
-    // Fundido de entrada de 1 ms para evitar clics por fase inicial.
+    // 1 ms fade-in to avoid clicks from the initial phase.
     let ramp = (0.001 * sr) as usize;
     for (i, out) in buf.iter_mut().take(ramp).enumerate() {
         *out *= i as f64 / ramp as f64;
     }
 
-    // Inicio de bucle en un cruce por cero ascendente dentro del primer periodo estacionario.
+    // Loop start at a rising zero crossing within the first steady period.
     let period = (sr / f0).ceil() as usize + 1;
     let mut loop_start = nominal_loop_start;
     let mut best = f64::MAX;
@@ -174,7 +173,7 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
         }
     }
     let loop_end = loop_start + loop_len;
-    let end = loop_end + 8; // unos puntos tras el bucle (iguales al inicio por periodicidad)
+    let end = loop_end + 8; // a few points after the loop (equal to the start thanks to periodicity)
     buf.truncate(end);
 
     let peak = buf.iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1e-9);
@@ -186,7 +185,7 @@ fn synth_sample(root: u8, max_shift_semitones: f64) -> SynthSample {
 }
 
 // ---------------------------------------------------------------------------
-// Serialización RIFF
+// RIFF serialization
 // ---------------------------------------------------------------------------
 
 fn chunk(id: &[u8; 4], data: &[u8]) -> Vec<u8> {
@@ -208,7 +207,7 @@ fn list(kind: &[u8; 4], subchunks: &[Vec<u8>]) -> Vec<u8> {
     chunk(b"LIST", &body)
 }
 
-/// Cadena terminada en cero y de longitud par.
+/// Zero-terminated string of even length.
 fn zstr(s: &str) -> Vec<u8> {
     let mut v = s.as_bytes().to_vec();
     v.push(0);
@@ -218,7 +217,7 @@ fn zstr(s: &str) -> Vec<u8> {
     v
 }
 
-/// Nombre de longitud fija (20 bytes, terminado en cero).
+/// Fixed-length name (20 bytes, zero-terminated).
 fn name20(s: &str) -> [u8; 20] {
     let mut out = [0u8; 20];
     for (o, b) in out.iter_mut().zip(s.bytes().take(19)) {
@@ -238,16 +237,16 @@ fn push_gen(v: &mut Vec<u8>, gen: u16, amount: u16) {
     push_u16(v, amount);
 }
 
-/// Genera un SoundFont 2 válido en memoria con el preset "Acoustic Piano" (banco 0, programa 0).
+/// Builds a valid SoundFont 2 in memory with the "Acoustic Piano" preset (bank 0, program 0).
 pub fn build_piano_sf2() -> Vec<u8> {
-    // --- Muestras -------------------------------------------------------
+    // --- Samples --------------------------------------------------------
     let n = ROOT_KEYS.len();
     let mut samples = Vec::with_capacity(n);
     let mut ranges = Vec::with_capacity(n);
     for (i, &root) in ROOT_KEYS.iter().enumerate() {
         let lo: u8 = if i == 0 { 0 } else { root - 6 };
         let hi: u8 = if i + 1 == n { 127 } else { root + 5 };
-        // La última muestra cubre hasta 127, pero se limita el espectro pensando en C8 (108).
+        // The last sample covers up to 127, but the spectrum is limited with C8 (108) in mind.
         let max_shift = (hi.min(108) as f64 - root as f64).max(0.0);
         samples.push(synth_sample(root, max_shift));
         ranges.push((lo, hi));
@@ -278,20 +277,20 @@ pub fn build_piano_sf2() -> Vec<u8> {
     shdr.extend_from_slice(&name20("EOS"));
     shdr.extend(std::iter::repeat(0u8).take(26));
 
-    // --- Instrumento ----------------------------------------------------
+    // --- Instrument -----------------------------------------------------
     let mut igen: Vec<u8> = Vec::new();
     let mut ibag: Vec<u8> = Vec::new();
     let mut gen_count: u16 = 0;
-    // Zona global: envolvente de volumen tipo piano.
+    // Global zone: piano-like volume envelope.
     push_u16(&mut ibag, gen_count);
     push_u16(&mut ibag, 0);
     let global: [(u16, i16); 6] = [
-        (GEN_REVERB_SEND, 150),             // 15 % de reverberación
+        (GEN_REVERB_SEND, 150),             // 15 % reverb
         (GEN_ATTACK_VOL_ENV, -10_000),      // ~3 ms
-        (GEN_DECAY_VOL_ENV, 4_600),         // ~14 s en C4
-        (GEN_SUSTAIN_VOL_ENV, 1_000),       // 100 dB: la nota se extingue sola como un piano
+        (GEN_DECAY_VOL_ENV, 4_600),         // ~14 s at C4
+        (GEN_SUSTAIN_VOL_ENV, 1_000),       // 100 dB: the note dies out on its own like a piano
         (GEN_RELEASE_VOL_ENV, -1_200),      // ~0.5 s
-        (GEN_KEYNUM_TO_VOL_ENV_DECAY, 60),  // agudos decaen más rápido (×1.5 por octava)
+        (GEN_KEYNUM_TO_VOL_ENV_DECAY, 60),  // treble decays faster (×1.5 per octave)
     ];
     for (g, a) in global {
         push_gen(&mut igen, g, a as u16);
@@ -338,7 +337,7 @@ pub fn build_piano_sf2() -> Vec<u8> {
     push_gen(&mut pgen, 0, 0); // terminal
     let modulator_terminal = vec![0u8; 10];
 
-    // --- Ensamblado -----------------------------------------------------
+    // --- Assembly -------------------------------------------------------
     let mut ifil = Vec::new();
     push_u16(&mut ifil, 2);
     push_u16(&mut ifil, 1);
@@ -373,7 +372,7 @@ pub fn build_piano_sf2() -> Vec<u8> {
     chunk(b"RIFF", &body)
 }
 
-/// `true` si los bytes son un SoundFont que `rustysynth` puede cargar y tiene al menos un preset.
+/// `true` if the bytes are a SoundFont that `rustysynth` can load and that has at least one preset.
 pub fn is_valid_soundfont(bytes: &[u8]) -> bool {
     match rustysynth::SoundFont::new(&mut Cursor::new(bytes)) {
         Ok(sf) => !sf.get_presets().is_empty(),
@@ -381,19 +380,19 @@ pub fn is_valid_soundfont(bytes: &[u8]) -> bool {
     }
 }
 
-/// Garantiza que existe un SoundFont válido en `path`. Si no existe o `rustysynth` no puede
-/// cargarlo, genera uno con `build_piano_sf2` y lo escribe de forma atómica (tmp + rename).
+/// Guarantees there is a valid SoundFont at `path`. If it does not exist or `rustysynth` cannot
+/// load it, builds one with `build_piano_sf2` and writes it atomically (tmp + rename).
 pub fn ensure_soundfont(path: &Path) -> Result<PathBuf, String> {
     if path.is_file() {
         match std::fs::read(path) {
             Ok(bytes) if is_valid_soundfont(&bytes) => return Ok(path.to_path_buf()),
-            Ok(_) => log::warn!("SoundFont inválido en {}: se regenera", path.display()),
-            Err(e) => log::warn!("No se pudo leer {}: {e}; se regenera", path.display()),
+            Ok(_) => log::warn!("Invalid SoundFont at {}: regenerating it", path.display()),
+            Err(e) => log::warn!("Could not read {}: {e}; regenerating it", path.display()),
         }
     }
     let bytes = build_piano_sf2();
     crate::midi_slicer::atomic_write(path, &bytes)?;
-    log::info!("SoundFont de piano generado en {} ({} bytes)", path.display(), bytes.len());
+    log::info!("Piano SoundFont generated at {} ({} bytes)", path.display(), bytes.len());
     Ok(path.to_path_buf())
 }
 
@@ -427,8 +426,8 @@ mod tests {
     #[test]
     fn soundfont_loads_with_expected_structure() {
         let bytes = sf2();
-        println!("SF2 generado: {} bytes", bytes.len());
-        assert!(bytes.len() < 3 * 1024 * 1024, "SF2 demasiado grande: {}", bytes.len());
+        println!("Generated SF2: {} bytes", bytes.len());
+        assert!(bytes.len() < 3 * 1024 * 1024, "SF2 too large: {}", bytes.len());
         assert_eq!(&bytes[0..4], b"RIFF");
         assert_eq!(&bytes[8..12], b"sfbk");
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize, bytes.len() - 8);
@@ -445,7 +444,7 @@ mod tests {
             assert!(h.get_start() < h.get_start_loop());
             assert!(h.get_start_loop() < h.get_end_loop());
             assert!(h.get_end_loop() < h.get_end());
-            // 46 ceros de guarda tras cada muestra.
+            // 46 guard zeros after each sample.
             let wave = sf.get_wave_data();
             let end = h.get_end() as usize;
             assert!(wave[end..end + GUARD_POINTS].iter().all(|v| *v == 0));
@@ -465,17 +464,17 @@ mod tests {
         let _ = render(&mut s, 88_200);
         let (l, r) = render(&mut s, 4_410);
         let peak = l.iter().chain(r.iter()).fold(0f32, |m, v| m.max(v.abs()));
-        assert!(peak < 1e-3, "peak tras release = {peak}");
+        assert!(peak < 1e-3, "peak after release = {peak}");
     }
 
     #[test]
     fn sustained_notes_loop_without_dying_early_and_pitch_is_correct() {
-        // A4 (69): estimación de f0 por autocorrelación ≈ 440 Hz.
+        // A4 (69): f0 estimated by autocorrelation ≈ 440 Hz.
         let mut s = synth();
         s.note_on(0, 69, 100);
-        let _ = render(&mut s, 44_100); // pasa el ataque y entra en el bucle
+        let _ = render(&mut s, 44_100); // past the attack and into the loop
         let (l, _) = render(&mut s, 8_192);
-        assert!(rms(&l) > 0.003, "la nota sostenida debe seguir sonando (bucle), rms={}", rms(&l));
+        assert!(rms(&l) > 0.003, "the sustained note must keep sounding (loop), rms={}", rms(&l));
         let best_lag = (60..200)
             .max_by(|a, b| {
                 let ca: f32 = (0..4096).map(|i| l[i] * l[i + a]).sum();
@@ -484,8 +483,8 @@ mod tests {
             })
             .unwrap();
         let f = 44_100.0 / best_lag as f32;
-        assert!((f - 440.0).abs() < 8.0, "f0 estimada {f}");
-        // Nota extrema grave y aguda también suenan.
+        assert!((f - 440.0).abs() < 8.0, "estimated f0 {f}");
+        // The lowest and highest notes sound too.
         for key in [21, 108] {
             let mut s = synth();
             s.note_on(0, key, 90);
@@ -506,12 +505,12 @@ mod tests {
         let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20));
         ensure_soundfont(&path).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), mtime, "no debe reescribir");
-        // Un fichero corrupto se regenera.
-        std::fs::write(&path, b"no soy un sf2").unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), mtime, "must not rewrite it");
+        // A corrupt file is regenerated.
+        std::fs::write(&path, b"not an sf2").unwrap();
         ensure_soundfont(&path).unwrap();
         assert!(is_valid_soundfont(&std::fs::read(&path).unwrap()));
-        // No quedan temporales.
+        // No temporary files are left.
         let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().collect();
         assert_eq!(leftovers.len(), 1);
     }

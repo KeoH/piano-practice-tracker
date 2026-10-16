@@ -1,5 +1,5 @@
-// Contrato IPC: espejo exacto de `src-tauri/src/models.rs` (campos en snake_case).
-// Los argumentos de `invoke` van en camelCase (convención Tauri v2), p. ej.
+// IPC contract: exact mirror of `src-tauri/src/models.rs` (fields in snake_case).
+// `invoke` arguments are in camelCase (Tauri v2 convention), e.g.
 // invoke('start_recording', { sessionId, portId, bpm, metronomeOn, liveSynthOn }).
 
 export interface MidiPortInfo {
@@ -53,7 +53,7 @@ export interface FragmentDto {
 export interface SessionMediaDto {
   id: string;
   session_id: string;
-  /** Ruta absoluta (en la base de datos se guarda relativa a la bóveda). */
+  /** Absolute path (stored relative to the vault in the database). */
   local_path: string;
 }
 
@@ -104,44 +104,44 @@ export interface SoundfontInfo {
 
 export interface RecentVault {
   path: string;
-  /** Nombre de la carpeta. */
+  /** Folder name. */
   name: string;
-  /** La carpeta existe y sigue siendo una bóveda. */
+  /** The folder exists and is still a vault. */
   available: boolean;
 }
 
-/** Bóveda abierta (si hay), recientes y avisos. */
+/** Open vault (if any), recent ones and warnings. */
 export interface VaultInfo {
-  /** Raíz de la bóveda abierta (ruta absoluta), o null si no hay ninguna. */
+  /** Root of the open vault (absolute path), or null if there is none. */
   current: string | null;
   name: string | null;
-  /** Más recientes primero; incluye la abierta. */
+  /** Most recent first; includes the open one. */
   recent: RecentVault[];
-  /** Carpeta con datos de la versión anterior (sin bóvedas) que se pueden importar. */
+  /** Folder with data from the previous version (without vaults) that can be imported. */
   legacy_data_path: string | null;
-  /** Avisos sobre la bóveda abierta (p. ej. copias en conflicto de Dropbox). */
+  /** Warnings about the open vault (e.g. conflicting copies from Dropbox). */
   warnings: string[];
 }
 
 export interface VaultOpenResult {
   info: VaultInfo;
-  /** false si no se abrió porque parece abierta en otro equipo (ver lock_warning). */
+  /** false if it was not opened because it seems open on another computer (see lock_warning). */
   opened: boolean;
-  /** Mensaje para pedir confirmación antes de abrir con force = true. */
+  /** Message asking for confirmation before opening with force = true. */
   lock_warning: string | null;
 }
 
-/** Idioma de la interfaz. */
+/** UI language. */
 export interface LanguageInfo {
-  /** Elegido por el usuario; null = automático (el del sistema). */
+  /** Chosen by the user; null = automatic (the system language). */
   preference: string | null;
-  /** Idioma en uso. */
+  /** Language in use. */
   effective: string;
-  /** Idioma detectado en el sistema (o el de reserva si no está disponible). */
+  /** Language detected on the system (or the fallback if it is not available). */
   system: string;
 }
 
-/** Payload del evento `playback-progress` (cada 50 ms). */
+/** Payload of the `playback-progress` event (every 50 ms). */
 export interface PlaybackProgress {
   file_path: string;
   current_ms: number;
@@ -149,8 +149,8 @@ export interface PlaybackProgress {
   is_playing: boolean;
 }
 
-/** Nombres de eventos Tauri emitidos por el backend. */
+/** Names of the Tauri events emitted by the backend. */
 export const EVENT_PLAYBACK_PROGRESS = 'playback-progress';
 
-/** Id del puerto simulador de MIDI (siempre presente en `list_midi_ports`). */
+/** Id of the MIDI simulator port (always present in `list_midi_ports`). */
 export const SIMULATOR_PORT_ID = 'simulator';

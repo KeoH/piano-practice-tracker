@@ -29,7 +29,7 @@ export class SidebarComponent {
 
   protected readonly totalCount = computed(() => this.store.sessions().length);
 
-  /** Sesiones agrupadas por semana / mes, respetando el orden de la lista. */
+  /** Sessions grouped by week / month, keeping the list order. */
   protected readonly groups = computed(() => {
     const now = new Date();
     const groups: { label: string; items: SessionSummaryDto[] }[] = [];
@@ -42,7 +42,7 @@ export class SidebarComponent {
     return groups;
   });
 
-  /** Estado del teclado elegido para el pie de la barra lateral. */
+  /** State of the chosen keyboard for the sidebar footer. */
   protected readonly port = computed(() => {
     const p = this.rec.selectedPort();
     if (!p) {

@@ -91,6 +91,25 @@
             }
           },
           "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "tsConfig": "tsconfig.spec.json",
+            "coverageInclude": [
+              "src/app/**/*.ts"
+            ],
+            "coverageExclude": [
+              "src/app/**/*.spec.ts",
+              "src/app/core/models.ts"
+            ],
+            "coverageReporters": [
+              "text",
+              "json-summary",
+              "lcov",
+              "html"
+            ]
+          }
         }
       }
     }

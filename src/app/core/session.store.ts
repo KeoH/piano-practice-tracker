@@ -4,7 +4,7 @@ import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 import { I18nService } from './i18n/i18n.service';
 
-/** Pestañas de la vista de sesión. */
+/** Tabs of the session view. */
 export type SessionTab = 'record' | 'fragments' | 'notes';
 
 export interface SessionFieldsPatch {
@@ -13,7 +13,7 @@ export interface SessionFieldsPatch {
   markdown_notes?: string;
 }
 
-/** Estado de sesiones: lista lateral, sesión seleccionada y su detalle. */
+/** Session state: sidebar list, selected session and its detail. */
 @Injectable({ providedIn: 'root' })
 export class SessionStore {
   private readonly api = inject(TauriApiService);
@@ -26,9 +26,9 @@ export class SessionStore {
   readonly detail = signal<SessionDetailDto | null>(null);
   readonly detailLoading = signal(false);
   readonly filter = signal('');
-  /** Número de guardados `update_session` en curso. */
+  /** Number of `update_session` saves in progress. */
   readonly savingCount = signal(0);
-  /** Pestaña visible de la sesión (se conserva al cambiar de sesión). */
+  /** Visible session tab (kept when switching sessions). */
   readonly tab = signal<SessionTab>('record');
 
   readonly session = computed<SessionDto | null>(() => this.detail()?.session ?? null);
@@ -46,11 +46,11 @@ export class SessionStore {
     return q ? sorted.filter((s) => s.title.toLowerCase().includes(q)) : sorted;
   });
 
-  /** Cadena de guardados para serializar `update_session` y evitar escrituras fuera de orden. */
+  /** Chain of saves to serialize `update_session` and avoid out-of-order writes. */
   private saveChain: Promise<unknown> = Promise.resolve();
   private detailRequest = 0;
 
-  /** Vacía lista y selección (al cambiar de bóveda). */
+  /** Clears the list and the selection (when switching vaults). */
   reset(): void {
     this.detailRequest++;
     this.sessions.set([]);
@@ -128,8 +128,8 @@ export class SessionStore {
   }
 
   /**
-   * Aplica cambios a título/BPM/notas de la sesión seleccionada (optimista) y persiste con
-   * `update_session` enviando siempre los tres campos actuales.
+   * Applies changes to the selected session's title/BPM/notes (optimistically) and persists them
+   * with `update_session`, always sending the three current fields.
    */
   saveFields(patch: SessionFieldsPatch): Promise<boolean> {
     const d = this.detail();
@@ -144,7 +144,7 @@ export class SessionStore {
     );
     this.savingCount.update((n) => n + 1);
     const run = async (): Promise<boolean> => {
-      // Usa los valores más recientes en el momento de ejecutar (por si llegaron más cambios).
+      // Uses the latest values at execution time (in case more changes arrived).
       const live = this.detail();
       const cur = live && live.session.id === sessionId ? live.session : updated;
       try {
@@ -162,7 +162,7 @@ export class SessionStore {
     return p;
   }
 
-  /** Sustituye el SessionDto devuelto por el backend (tras grabar/recortar). */
+  /** Replaces the SessionDto returned by the backend (after recording/slicing). */
   applySession(s: SessionDto): void {
     const d = this.detail();
     if (d && d.session.id === s.id) this.detail.set({ ...d, session: s });

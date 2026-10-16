@@ -9,8 +9,8 @@ import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 
 /**
- * Bóveda de datos: carpeta elegida por el usuario donde viven la base de datos, los MIDI y las
- * imágenes. Sin bóveda abierta la app muestra la pantalla de bienvenida.
+ * Data vault: a folder chosen by the user where the database, the MIDI files and the images live.
+ * Without an open vault the app shows the welcome screen.
  */
 @Injectable({ providedIn: 'root' })
 export class VaultStore {
@@ -23,12 +23,12 @@ export class VaultStore {
   private readonly recording = inject(RecordingStore);
 
   readonly info = signal<VaultInfo | null>(null);
-  /** Ya se consultó el backend (evita parpadeos de la bienvenida al arrancar). */
+  /** The backend has been queried (avoids flashing the welcome screen on startup). */
   readonly loaded = signal(false);
   readonly busy = signal(false);
   readonly settingsOpen = signal(false);
 
-  /** Raíz absoluta de la bóveda abierta. */
+  /** Absolute root of the open vault. */
   readonly root = computed(() => this.info()?.current ?? null);
   readonly isOpen = computed(() => !!this.root());
   readonly name = computed(() => this.info()?.name ?? null);
@@ -48,22 +48,22 @@ export class VaultStore {
     }
   }
 
-  /** Vuelve a pedir el estado (p. ej. tras cambiar de idioma, porque los avisos vienen traducidos). */
+  /** Fetches the state again (e.g. after a language change, because the warnings come translated). */
   async refreshInfo(): Promise<void> {
     if (!this.api.available) return;
     try {
       this.apply(await this.api.getVaultInfo());
     } catch (err) {
-      console.warn('No se pudo actualizar la bóveda:', err);
+      console.warn('Could not refresh the vault:', err);
     }
   }
 
-  /** Une carpeta y nombre de la bóveda nueva. */
+  /** Joins the folder and the name of the new vault. */
   static join(parent: string, name: string): string {
     return `${parent.replace(/\/+$/, '')}/${name.trim()}`;
   }
 
-  /** Abre una bóveda existente; si parece abierta en otro equipo pide confirmación. */
+  /** Opens an existing vault; if it seems open on another computer, asks for confirmation. */
   async open(path: string): Promise<boolean> {
     return this.run(this.i18n.t('vault.errors.open'), async () => {
       let res = await this.api.openVault(path, false);
@@ -83,7 +83,7 @@ export class VaultStore {
     });
   }
 
-  /** Diálogo de carpeta y abrir. */
+  /** Folder dialog, then open. */
   async pickAndOpen(): Promise<boolean> {
     const path = await this.pick(this.i18n.t('vault.pickOpenTitle'));
     return path ? this.open(path) : false;
@@ -105,7 +105,7 @@ export class VaultStore {
     });
   }
 
-  /** Cierra la bóveda actual y vuelve a la pantalla de bienvenida. */
+  /** Closes the current vault and goes back to the welcome screen. */
   async close(): Promise<boolean> {
     if (this.recording.isRecording()) {
       this.toast.warning(this.i18n.t('vault.stopRecordingFirst'));
@@ -145,7 +145,7 @@ export class VaultStore {
     }
   }
 
-  /** Ruta servible por el webview para una imagen del Markdown (relativa a la bóveda o absoluta). */
+  /** Webview-servable path for a Markdown image (relative to the vault or absolute). */
   resolveAsset(path: string): string {
     const root = this.root();
     const abs = path.startsWith('/') || !root ? path : `${root.replace(/\/+$/, '')}/${path.replace(/^\.\//, '')}`;

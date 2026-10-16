@@ -2,121 +2,143 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Piano Practice Tracker: app de escritorio para Ubuntu (Tauri v2 + Angular 22) que graba sesiones de piano por USB-MIDI, recorta la pista bruta en fragmentos, reproduce con un sintetizador SoundFont, ancla comentarios a la línea de tiempo y guarda todo en una bóveda: una carpeta elegida por el usuario, al estilo de Obsidian (la app no sincroniza nada; si la bóveda está en Dropbox, lo hace Dropbox). La especificación funcional está en `SPECIFICATIONS.md` y el plan en `TASKS.md`. El código, los comentarios, los logs y los tests están en español; mantén ese idioma. Los textos que ve el usuario no van en el código: están en `src/locales/*.json` (inglés por defecto y español; ver «Internacionalización»).
+Piano Practice Tracker: a desktop app for Ubuntu (Tauri v2 + Angular 22) that records piano sessions over USB-MIDI, slices the raw take into fragments, plays back with a SoundFont synthesizer, anchors comments to the timeline and stores everything in a vault: a folder chosen by the user, Obsidian-style (the app syncs nothing itself; if the vault is in Dropbox, Dropbox does it). The functional specification is in `SPECIFICATIONS.md` and the plan in `TASKS.md`.
 
-## Comandos
+**English is the project's official language:** code, comments, logs, tests and documentation are in English. User-facing text never goes in the code: it lives in `src/locales/*.json` (English is the reference, Spanish is a translation; see "Internationalization").
+
+## Commands
 
 ```bash
-npm run tauri dev          # app completa (lanza `ng serve` en :4200 + binario Rust)
-npm run build              # solo frontend (dist/piano-tracker/browser)
-npm run tauri build        # paquetes .deb / AppImage
+npm run tauri dev          # full app (starts `ng serve` on :4200 + the Rust binary)
+npm run build              # frontend only (dist/piano-tracker/browser)
+npm run tauri build        # .deb / AppImage packages
+npm test                   # frontend tests (Vitest via `ng test`, watch mode in a TTY)
+npm run test:ci            # frontend tests once, with coverage in coverage/piano-tracker/
+npx ng test --include src/app/core/format.spec.ts  # a single spec file
 
 cd src-tauri
-cargo test --lib                                   # todos los tests Rust
-cargo test --lib midi_slicer::                     # tests de un módulo
-cargo test --lib midi_slicer::tests::<nombre>      # un test concreto
-cargo test --lib -- --ignored --nocapture output_latency   # tests #[ignore] que usan audio real / FluidR3 del sistema
+cargo test --lib                                   # all Rust tests
+cargo test --lib midi_slicer::                     # tests of one module
+cargo test --lib midi_slicer::tests::<name>        # a single test
+cargo test --lib -- --ignored --nocapture output_latency   # #[ignore] tests that use real audio / the system's FluidR3
+cargo llvm-cov --lib --summary-only                # Rust coverage (needs `cargo install cargo-llvm-cov`)
 cargo check
 ```
 
-No hay tests de frontend ni linter configurado (hay `.prettierrc`; clippy no está instalado).
+Frontend specs are `*.spec.ts` next to the code (Vitest globals, jsdom; `TestBed` for services). So far they cover only pure code (`format`, `markdown`, `I18nService`). No linter is configured (there is a `.prettierrc`; clippy is not installed).
 
-Entorno de esta máquina:
-- `src-tauri/.cargo/config.toml` limita cargo a `jobs = 4` y `Cargo.toml` quita debuginfo de dependencias: el equipo se quedaba sin RAM. No subas el paralelismo ni lances varios builds pesados a la vez.
-- `~/.local/piano-sysroot/env.sh` es un toolchain local de respaldo (gcc y librerías `-dev` extraídas sin sudo). Ya no hace falta porque las dependencias del sistema están instaladas. Nunca pongas `gcc-ar` en el PATH con el nombre `ar`: se invoca a sí mismo y provocó una fork bomb que tumbó el equipo.
-- `angular.json` tiene `"analytics": false`; sin eso `ng serve` se bloquea en una pregunta interactiva dentro de `tauri dev`.
+Environment on this machine:
+- `src-tauri/.cargo/config.toml` limits cargo to `jobs = 4` and `Cargo.toml` strips debuginfo from dependencies: the machine was running out of RAM. Don't raise the parallelism or run several heavy builds at once.
+- `~/.local/piano-sysroot/env.sh` is a fallback local toolchain (gcc and `-dev` libraries extracted without sudo). It is no longer needed because the system dependencies are installed. Never put `gcc-ar` on the PATH under the name `ar`: it calls itself and caused a fork bomb that took the machine down.
+- `angular.json` has `"analytics": false`; without it `ng serve` hangs on an interactive prompt inside `tauri dev`.
 
-## Arquitectura
+## CI & releases
 
-### Contrato IPC (lo más fácil de romper)
-- `src-tauri/src/models.rs` y `src/app/core/models.ts` son espejos exactos. Los campos de los DTO van en **snake_case** en ambos lados (sin `serde(rename)`).
-- Los argumentos de `invoke` van en **camelCase** (convención de Tauri v2: `{ sessionId, startMs }`), salvo `extract_midi_fragment`, que recibe `{ req: ExtractFragmentReq }` con campos snake_case.
-- Para añadir un comando hay que tocar tres sitios:
-  1. una función `async` en `commands.rs`;
-  2. registrarla en `generate_handler!` en `lib.rs`;
-  3. un método en `TauriApiService` (`src/app/core/tauri-api.service.ts`), que es el único punto de entrada IPC del frontend.
-- Evento backend → frontend: `playback-progress` (`PlaybackProgress`, cada 50 ms).
+- **`.github/workflows/ci.yml`** runs on every PR:
+  - `frontend`: build plus `npm run test:ci`;
+  - `backend`: `cargo llvm-cov --lib`, with a placeholder `dist/` because `generate_context!` needs one to compile;
+  - `coverage`: joins both summaries with `.github/scripts/coverage-summary.mjs` into the job summary and a sticky PR comment.
+
+  The apt packages live in the composite action `.github/actions/setup-linux`.
+- **`.github/workflows/release.yml`** runs on every push to `main`:
+  1. it calls `ci.yml`;
+  2. **release-please** updates the release PR;
+  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release, and the `bundle` job (ubuntu-22.04, for an older glibc) uploads the `.deb`, the `.AppImage` and `SHA256SUMS.txt`.
+- **Versioning:**
+  - Commits on `main` (squash-merge PR titles) follow **Conventional Commits**: `feat:` bumps the minor while on 0.x, `fix:` the patch, and `feat!:` or `BREAKING CHANGE` bumps the major.
+  - Never edit the version by hand. release-please keeps it in sync in `.release-please-manifest.json`, `version.txt`, `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json` (see `release-please-config.json`), and writes `CHANGELOG.md`.
+
+## Architecture
+
+### IPC contract (the easiest thing to break)
+- `src-tauri/src/models.rs` and `src/app/core/models.ts` are exact mirrors. DTO fields are in **snake_case** on both sides (no `serde(rename)`).
+- `invoke` arguments are in **camelCase** (Tauri v2 convention: `{ sessionId, startMs }`), except `extract_midi_fragment`, which takes `{ req: ExtractFragmentReq }` with snake_case fields.
+- Adding a command means touching three places:
+  1. an `async` function in `commands.rs`;
+  2. registering it in `generate_handler!` in `lib.rs`;
+  3. a method in `TauriApiService` (`src/app/core/tauri-api.service.ts`), which is the frontend's only IPC entry point.
+- Backend → frontend event: `playback-progress` (`PlaybackProgress`, every 50 ms).
 
 ### Backend (`src-tauri/src`)
-- **Módulos independientes de Tauri:** `db`, `vault`, `midi_recorder`, `midi_slicer`, `audio_engine`, `sf2_builder`, `soundfont` y `paths` no importan `tauri::`, para poder testearlos sin app. Emiten hacia fuera mediante callbacks (`ProgressEmitter`, `MidiSink`) que `lib.rs` conecta a `AppHandle::emit`.
-- **`commands.rs`** define `AppState`, el estado gestionado de Tauri. Sus comandos son `async` para no bloquear el hilo de UI; el trabajo pesado (recorte y análisis MIDI) va en `spawn_blocking`.
-  - La bóveda abierta está en `AppState.vault: RwLock<Option<Arc<Vault>>>` y puede cambiar en caliente. Los comandos de datos empiezan con `let vault = state.vault()?;` (error «No hay ninguna bóveda abierta» si no hay) y usan `vault.db` / `vault.paths`.
-  - `activate_vault` es el único camino para abrir una: comprueba el lock antes de cerrar la actual, guarda la configuración y añade la carpeta al alcance del asset protocol.
-- **Arranque (`lib.rs::init_state`):**
-  1. directorios de la app (`AppDirs`);
-  2. SoundFont integrado;
+- **Tauri-independent modules:** `db`, `vault`, `i18n`, `midi_recorder`, `midi_slicer`, `audio_engine`, `sf2_builder`, `soundfont` and `paths` don't import `tauri::`, so they can be tested without the app. They emit outwards through callbacks (`ProgressEmitter`, `MidiSink`) that `lib.rs` wires to `AppHandle::emit`.
+- **`commands.rs`** defines `AppState`, Tauri's managed state. Its commands are `async` so they don't block the UI thread; heavy work (MIDI slicing and analysis) goes in `spawn_blocking`.
+  - The open vault lives in `AppState.vault: RwLock<Option<Arc<Vault>>>` and can change at runtime. Data commands start with `let vault = state.vault()?;` (error "No vault is open" if there is none) and use `vault.db` / `vault.paths`.
+  - `activate_vault` is the only way to open one: it checks the lock before closing the current one, saves the configuration and adds the folder to the asset protocol scope.
+- **Startup (`lib.rs::init_state`):**
+  1. app directories (`AppDirs`);
+  2. built-in SoundFont;
   3. `AudioEngine`;
-  4. configuración (`AppConfig`), idioma del backend (`i18n::set_language`) y reapertura de la última bóveda; si falla o está bloqueada, se arranca sin bóveda y el frontend muestra la bienvenida;
-  5. carga en segundo plano del SoundFont preferido.
+  4. configuration (`AppConfig`), backend language (`i18n::set_language`) and reopening of the last vault; if that fails or the vault is locked, the app starts without a vault and the frontend shows the welcome screen;
+  5. background loading of the preferred SoundFont.
 
-  Al salir (`RunEvent::Exit`) se borra el lock de la bóveda.
-- **Rutas (`paths.rs`):**
-  - `AppPaths` es la estructura de una bóveda: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `media/` y el marcador `.piano-tracker/` (`vault.json` y `lock`).
-  - `AppDirs` es lo que depende del equipo: `~/.config/piano-tracker/config.json` y `~/.local/share/piano-tracker/assets/default_piano.sf2`. En `~/.local/share/piano-tracker/` vivían los datos antes de las bóvedas.
+  On exit (`RunEvent::Exit`) the vault lock is deleted.
+- **Paths (`paths.rs`):**
+  - `AppPaths` is the layout of a vault: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `media/` and the `.piano-tracker/` marker (`vault.json` and `lock`).
+  - `AppDirs` is what depends on the machine: `~/.config/piano-tracker/config.json` and `~/.local/share/piano-tracker/assets/default_piano.sf2`. The data lived in `~/.local/share/piano-tracker/` before vaults existed.
 - **`vault.rs`:**
-  - `AppConfig` guarda la bóveda actual, las recientes, el SoundFont elegido y el idioma (`language`, `None` = el del sistema); depende del equipo, por eso no va en la bóveda.
-  - Crear exige carpeta nueva o vacía. Abrir acepta el marcador o una carpeta con `piano_tracker.sqlite` (la de la versión anterior).
-  - El lock `{ host, pid, opened_at }` hace que abrir una bóveda en uso en otro equipo pida confirmación (`open_vault(path, force)`). Un lock de este equipo con el pid muerto se ignora.
-  - `import_legacy` mueve la base de datos, `midi/` y `media/` de la carpeta antigua tras volcar su WAL.
-- **`db.rs`** (esquema v2):
-  - Las rutas se guardan **relativas a la bóveda** y la API pública las devuelve absolutas (`store_path` / `load_path`). El frontend y el audio solo ven rutas absolutas.
-  - `journal_mode = DELETE`, no WAL: en reposo la base de datos es un único fichero, más seguro dentro de una carpeta sincronizada.
-  - La migración v1 → v2 quita `sync_queue`, `sync_status`, `drive_file_id` y los ajustes de Google, y convierte las rutas absolutas antiguas en relativas, también las de las imágenes en `markdown_notes`.
-  - `delete_session` y `delete_fragment` devuelven las rutas; borrar los ficheros le toca a quien llama.
-- **Imágenes del Markdown:** `save_session_image` devuelve la ruta relativa (`media/…`) y es lo que se inserta en las notas. El frontend la resuelve contra la raíz de la bóveda y la sirve por el asset protocol. `assetProtocol.scope` está vacío en `tauri.conf.json`: cada bóveda se permite en tiempo de ejecución.
-- **`midi_slicer.rs`** trabaja con `TimedMidiEvent { time_us, bytes }` en tiempo absoluto, respetando el mapa de tempos, y escribe SMF formato 0 a 480 TPQ con escritura atómica (tmp + rename).
-  - El recorte quita el intervalo `[start, end)`: un evento justo en `end` se conserva.
-  - Al extraer cierra las notas abiertas y preserva o cierra el pedal (CC64).
-  - `midi_recorder` lo reutiliza (`write_smf`, `read_timed_events`) para escribir la pista bruta y reanudar grabaciones añadiendo al final.
-- **`midi_recorder.rs`:** el puerto `"simulator"` siempre está presente y genera notas sin teclado físico. Los puertos reales tienen id `midir:<nombre>`.
+  - `AppConfig` stores the current vault, the recent ones, the chosen SoundFont and the language (`language`, `None` = the system language); it depends on the machine, which is why it doesn't go in the vault.
+  - Creating requires a new or empty folder. Opening accepts the marker or a folder with `piano_tracker.sqlite` (the previous version's folder).
+  - The lock `{ host, pid, opened_at }` makes opening a vault in use on another computer ask for confirmation (`open_vault(path, force)`). A lock from this computer with a dead pid is ignored.
+  - `import_legacy` moves the database, `midi/` and `media/` from the old folder after flushing its WAL.
+- **`db.rs`** (schema v2):
+  - Paths are stored **relative to the vault** and the public API returns them absolute (`store_path` / `load_path`). The frontend and the audio engine only see absolute paths.
+  - `journal_mode = DELETE`, not WAL: at rest the database is a single file, which is safer inside a synced folder.
+  - The v1 → v2 migration drops `sync_queue`, `sync_status`, `drive_file_id` and the Google settings, and turns the old absolute paths into relative ones, including those of the images in `markdown_notes`.
+  - `delete_session` and `delete_fragment` return the paths; deleting the files is the caller's job.
+- **Markdown images:** `save_session_image` returns the relative path (`media/…`), which is what gets inserted into the notes. The frontend resolves it against the vault root and serves it through the asset protocol. `assetProtocol.scope` is empty in `tauri.conf.json`: each vault is allowed at runtime.
+- **`midi_slicer.rs`** works with `TimedMidiEvent { time_us, bytes }` in absolute time, honouring the tempo map, and writes SMF format 0 at 480 TPQ with atomic writes (tmp + rename).
+  - Slicing removes the `[start, end)` interval: an event exactly at `end` is kept.
+  - When extracting, it closes open notes and keeps or closes the pedal (CC64).
+  - `midi_recorder` reuses it (`write_smf`, `read_timed_events`) to write the raw take and to resume recordings by appending at the end.
+- **`midi_recorder.rs`:** the `"simulator"` port is always present and generates notes without a physical keyboard. Real ports have the id `midir:<name>`.
 - **`audio_engine.rs`:**
-  - **Hilos:** el `cpal::Stream` (que no es `Send`) vive en un hilo dedicado; el estado compartido es `Arc<Mutex<AudioState>>`.
-  - **Reproductor:** hay un único reproductor global: synth + secuenciador + metrónomo.
-  - **Sin dispositivo de audio:** un "reloj nulo" avanza el tiempo igual. `new_headless` + `render_offline` sirven para testear sin hardware.
-  - **Búfer:** se pide `BufferSize::Fixed(256)` para tener baja latencia en el monitoreo en vivo; si el dispositivo lo rechaza, se usa el búfer por defecto.
-  - **Medidas:** `callback_frames()` y `output_latency_us()` exponen lo medido. La salida Bluetooth añade unos 200 ms que la app no puede evitar.
+  - **Threads:** the `cpal::Stream` (which is not `Send`) lives on a dedicated thread; the shared state is `Arc<Mutex<AudioState>>`.
+  - **Player:** there is a single global player: synth + sequencer + metronome.
+  - **No audio device:** a "null clock" advances time anyway. `new_headless` + `render_offline` are used to test without hardware.
+  - **Buffer:** `BufferSize::Fixed(256)` is requested for low latency in live monitoring; if the device rejects it, the default buffer is used.
+  - **Measurements:** `callback_frames()` and `output_latency_us()` expose what was measured. Bluetooth output adds about 200 ms that the app cannot avoid.
 - **SoundFont (`soundfont.rs` + `sf2_builder.rs`):**
-  - **Orden de preferencia:**
-    1. el elegido en Ajustes (`AppConfig.soundfont_path`; las bóvedas antiguas lo tenían en `app_settings` y se traslada al abrirlas);
-    2. uno GM del sistema (`/usr/share/sounds/sf2/FluidR3_GM.sf2`…);
-    3. el piano sintético generado por `sf2_builder` como último recurso (suena poco realista).
-  - **Formato:** solo se admite `.sf2`; `rustysynth` no lee `.sf3`.
-  - **Rendimiento:** `rustysynth`, `cpal` y `midly` se compilan con `opt-level = 3` también en el perfil dev, para que el render llegue a tiempo real.
+  - **Order of preference:**
+    1. the one chosen in Settings (`AppConfig.soundfont_path`; old vaults kept it in `app_settings` and it is moved over when they are opened);
+    2. a system GM one (`/usr/share/sounds/sf2/FluidR3_GM.sf2`…);
+    3. the synthetic piano generated by `sf2_builder` as a last resort (it doesn't sound very realistic).
+  - **Format:** only `.sf2` is supported; `rustysynth` cannot read `.sf3`.
+  - **Performance:** `rustysynth`, `cpal` and `midly` are compiled with `opt-level = 3` in the dev profile too, so rendering keeps up with real time.
 
 ### Frontend (`src/app`)
-- **Angular 22 standalone y zoneless** (no hay zone.js): todo estado que pinte la UI debe estar en signals o `computed`; los callbacks de eventos Tauri escriben en signals.
-- **Stores en `core/`:**
-  - `SessionStore`: lista, sesión seleccionada y detalle.
-  - `PlaybackStore`: un único reproductor global, con la posición indexada por `file_path`; cada línea de tiempo solo reacciona al progreso de su fichero.
-  - `RecordingStore`: puerto, BPM, toggles y cronómetro.
-  - `VaultStore`: bóveda abierta, recientes, crear / abrir / importar / cerrar y el diálogo de Ajustes (`settingsOpen`). Sin bóveda, `app.html` muestra `vault-welcome` en lugar del layout.
-  - `LanguageStore`: preferencia de idioma (o automático) e idioma del sistema; la guarda el backend (o `localStorage` sin Tauri).
-- **Detalles de comportamiento:**
-  - Reanudar después de una pausa es volver a llamar a `play_midi_file(file, current_ms)`.
-  - La preescucha del recortador se para desde el frontend al llegar a `end_ms`.
-  - `update_live_recording_settings` también se usa fuera de grabación, para previsualizar el metrónomo.
-- **Vista de sesión:** `session-header` (título, resumen y menú) y tres pestañas (`SessionStore.tab`): *Grabar y recortar* (`recorder-deck` + `midi-slicer`), *Fragmentos* y *Notas*. Las pestañas se ocultan con `hidden` en vez de destruirse, para no perder la selección del recortador ni el estado del editor.
-- **Componentes de línea de tiempo:** `timeline-canvas` es el canvas compartido (devicePixelRatio, ResizeObserver, bloques de actividad, selección, progreso) que usan `midi-slicer` y `fragment-player`. Su regla mide `RULER_H` (18 px): los overlays del padre usan `bottom-[18px]`.
-- **Sin Tauri** (`ng serve` en un navegador normal), `TauriApiService.available` es `false` y las llamadas devuelven `IpcError` en lugar de romper.
-- **Textos enriquecidos:** una frase con palabras en negrita es una sola clave con `**…**`, que pinta `<app-rich-text [text]="'clave' | t" />`.
-- **Estilos:** Tailwind v4 vía `@tailwindcss/postcss` (`.postcssrc.json`).
-  - Los colores son tokens de `@theme` en `src/styles.css` (`ink-*`, `line`, `fg`, `muted`, `faint`, `accent` latón, `rec`, `ok`, `ivory`); no uses la paleta `zinc`/`amber` de Tailwind.
-  - Las clases propias (`.btn`, `.btn-primary`, `.btn-lg`, `.field`, `.panel`, `.label`, `.chip`, `.dot`, `.switch`, `.tabular`) también están ahí. El canvas no lee CSS: sus colores están duplicados como constantes en `timeline-canvas`.
-  - Las fuentes (Hanken Grotesk y JetBrains Mono) van empaquetadas con `@fontsource-variable/*` desde `angular.json`, porque la app funciona sin conexión.
-  - `rem` es 16 px; el texto base del `body` es 14 px.
+- **Angular 22 standalone and zoneless** (there is no zone.js): any state the UI renders must be in signals or `computed`; Tauri event callbacks write to signals.
+- **Stores in `core/`:**
+  - `SessionStore`: list, selected session and detail.
+  - `PlaybackStore`: a single global player, with the position indexed by `file_path`; each timeline only reacts to the progress of its own file.
+  - `RecordingStore`: port, BPM, toggles and timer.
+  - `VaultStore`: open vault, recent ones, create / open / import / close and the Settings dialog (`settingsOpen`). Without a vault, `app.html` shows `vault-welcome` instead of the layout.
+  - `LanguageStore`: language preference (or automatic) and the system language; the backend stores it (or `localStorage` without Tauri).
+- **Behaviour details:**
+  - Resuming after a pause means calling `play_midi_file(file, current_ms)` again.
+  - The slicer's preview is stopped from the frontend when it reaches `end_ms`.
+  - `update_live_recording_settings` is also used outside recording, to preview the metronome.
+- **Session view:** `session-header` (title, summary and menu) and three tabs (`SessionStore.tab`): *Record & trim* (`recorder-deck` + `midi-slicer`), *Fragments* and *Notes*. Tabs are hidden with `hidden` instead of being destroyed, so the slicer's selection and the editor's state are not lost.
+- **Timeline components:** `timeline-canvas` is the shared canvas (devicePixelRatio, ResizeObserver, activity blocks, selection, progress) used by `midi-slicer` and `fragment-player`. Its ruler is `RULER_H` (18 px) tall: the parent's overlays use `bottom-[18px]`.
+- **Without Tauri** (`ng serve` in a regular browser), `TauriApiService.available` is `false` and calls return an `IpcError` instead of breaking.
+- **Rich text:** a sentence with bold words is a single key using `**…**`, rendered by `<app-rich-text [text]="'key' | t" />`.
+- **Styles:** Tailwind v4 via `@tailwindcss/postcss` (`.postcssrc.json`).
+  - Colours are `@theme` tokens in `src/styles.css` (`ink-*`, `line`, `fg`, `muted`, `faint`, brass `accent`, `rec`, `ok`, `ivory`); don't use Tailwind's `zinc`/`amber` palette.
+  - The custom classes (`.btn`, `.btn-primary`, `.btn-lg`, `.field`, `.panel`, `.label`, `.chip`, `.dot`, `.switch`, `.tabular`) live there too. The canvas doesn't read CSS: its colours are duplicated as constants in `timeline-canvas`.
+  - The fonts (Hanken Grotesk and JetBrains Mono) are bundled with `@fontsource-variable/*` from `angular.json`, because the app works offline.
+  - `rem` is 16 px; the `body` base text is 14 px.
 
-### Internacionalización
-- **Un único juego de ficheros para todo:** `src/locales/en.json` (la referencia) y `src/locales/es.json`. Angular los importa y Rust los incrusta al compilar (`include_str!` en `i18n.rs`); Rust solo usa las claves `backend.*`.
-- **Idioma por defecto:** el del sistema si está disponible (Rust lo lee de `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` y `LANG`); si no, inglés. El usuario lo cambia en Ajustes → General o en la pantalla de bienvenida; `set_language` lo guarda en `AppConfig` y cambia también el idioma de los mensajes del backend.
-- **Formato de los textos:** huecos `{nombre}`, iguales en los dos lados. Plurales con sufijos `_one` / `_other` (y `_zero` opcional), elegidos con `Intl.PluralRules`.
+### Internationalization
+- **One set of files for everything:** `src/locales/en.json` (the reference) and `src/locales/es.json`. Angular imports them and Rust embeds them at compile time (`include_str!` in `i18n.rs`); Rust only uses the `backend.*` keys.
+- **Default language:** the system language if available (Rust reads it from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`); otherwise English. The user changes it in Settings → General or on the welcome screen; `set_language` stores it in `AppConfig` and also switches the language of the backend messages.
+- **Text format:** `{name}` placeholders, the same on both sides. Plurals use `_one` / `_other` suffixes (and an optional `_zero`), chosen with `Intl.PluralRules`.
 - **Frontend (`core/i18n/`):**
-  - `| t` en plantillas (`{{ 'sidebar.newSession' | t }}`, `[attr.aria-label]="'x.y' | t"`), `| tp: n` para plurales e `I18nService.t()` / `.plural()` en TypeScript (toasts, confirmaciones, `computed`).
-  - Las claves están tipadas (`MessageKey`, derivado de `en.json`): una clave mal escrita no compila, también en plantillas.
-  - Fechas y números van con `I18nService` (`longDate`, `shortDate`, `dateGroup`, `dateTime`, `locale()`); no escribas `'es-ES'` ni `'en-US'` a mano.
-  - Los pipes son impuros a propósito, para releer el signal del idioma: el cambio se aplica sin recargar.
-- **Backend:** `t!("backend.vault.notEmpty", path = dir.display())` devuelve el `String` del error. Los `log::*` siguen en español y sin traducir.
-- **Tests:** `i18n::tests` comprueba que todos los idiomas tienen las mismas claves y los mismos huecos, así que una traducción incompleta rompe `cargo test`. Los tests usan `tr_in(lang, …)` y nunca cambian el idioma global, porque se ejecutan en paralelo.
-- **Añadir un idioma:**
-  1. copia `src/locales/en.json` a `src/locales/<código>.json` y tradúcelo (incluido `backend.vault.lockDateFormat`, en formato `strftime`);
-  2. añade su entrada en `LANGUAGES` (`src/app/core/i18n/languages.ts`);
-  3. añade su línea en `LOCALES` (`src-tauri/src/i18n.rs`).
+  - `| t` in templates (`{{ 'sidebar.newSession' | t }}`, `[attr.aria-label]="'x.y' | t"`), `| tp: n` for plurals, and `I18nService.t()` / `.plural()` in TypeScript (toasts, confirmations, `computed`).
+  - Keys are typed (`MessageKey`, derived from `en.json`): a misspelled key doesn't compile, in templates too.
+  - Dates and numbers go through `I18nService` (`longDate`, `shortDate`, `dateGroup`, `dateTime`, `locale()`); don't hard-code `'es-ES'` or `'en-US'`.
+  - The pipes are impure on purpose, so they re-read the language signal: a change applies without reloading.
+- **Backend:** `t!("backend.vault.notEmpty", path = dir.display())` returns the error `String`. `log::*` messages are not translated.
+- **Tests:** `i18n::tests` checks that every language has the same keys and the same placeholders, so an incomplete translation breaks `cargo test`. Tests use `tr_in(lang, …)` and never change the global language, because they run in parallel.
+- **Adding a language:**
+  1. copy `src/locales/en.json` to `src/locales/<code>.json` and translate it (including `backend.vault.lockDateFormat`, in `strftime` format);
+  2. add its entry to `LANGUAGES` (`src/app/core/i18n/languages.ts`);
+  3. add its line to `LOCALES` (`src-tauri/src/i18n.rs`).

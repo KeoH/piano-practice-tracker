@@ -1,0 +1,93 @@
+name: Release
+
+# Every push to main: tests, then release-please updates the "chore(main): release X.Y.Z" PR.
+# Merging that PR creates the vX.Y.Z tag and GitHub Release, and `bundle` attaches the installers.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+    # A called workflow can't get more than its caller grants (the coverage job asks for these).
+    permissions:
+      contents: read
+      pull-requests: write
+
+  release-please:
+    name: Release PR
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # With GITHUB_TOKEN the release PR doesn't trigger ci.yml; a PAT in RELEASE_PLEASE_TOKEN does.
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+  bundle:
+    name: Installers
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    # The oldest supported Ubuntu: the AppImage links against its glibc, so it runs on more distros.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: ./.github/actions/setup-linux
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: bundle
+
+      - run: npm ci
+
+      # beforeBuildCommand builds the frontend; tauri.conf.json targets deb + AppImage.
+      - name: Build installers
+        run: npm run tauri build
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          out="$RUNNER_TEMP/installers"
+          mkdir -p "$out"
+          shopt -s nullglob
+          # "Piano Practice Tracker_X.Y.Z_amd64.deb" -> "piano-practice-tracker_X.Y.Z_amd64.deb"
+          for f in src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage; do
+            name="$(basename "$f")"
+            name="${name// /-}"
+            cp "$f" "$out/${name/Piano-Practice-Tracker/piano-practice-tracker}"
+          done
+          cd "$out"
+          ls -1 | grep -q . || { echo "No installers were built" >&2; exit 1; }
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release upload "$TAG" * --clobber --repo "$GITHUB_REPOSITORY"

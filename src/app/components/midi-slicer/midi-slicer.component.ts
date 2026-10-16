@@ -38,7 +38,7 @@ interface DragState {
 const MIN_SELECTION_MS = 100;
 const DRAG_THRESHOLD_PX = 4;
 
-/** Recortador visual de la pista bruta de la sesión (selección, preescucha, extraer y descartar). */
+/** Visual slicer for the session's raw take (selection, preview, extract and discard). */
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -64,7 +64,7 @@ export class MidiSlicerComponent {
   protected readonly selection = signal<TimeRange | null>(null);
   protected readonly working = signal(false);
 
-  // Modal de extracción
+  // Extraction modal
   protected readonly extractOpen = signal(false);
   protected readonly extractTitle = signal('');
   protected readonly extractExplanation = signal('');
@@ -89,7 +89,7 @@ export class MidiSlicerComponent {
   });
 
   constructor() {
-    // Recarga la actividad cuando cambia la ruta o la duración de la pista bruta
+    // Reloads the activity when the raw take's path or duration changes
     const rawKey = computed(() => `${this.session().raw_midi_path ?? ''}|${this.session().raw_duration_ms}`);
     effect(() => {
       rawKey();
@@ -106,7 +106,7 @@ export class MidiSlicerComponent {
     try {
       const a = await this.api.getMidiActivity(path);
       if (this.session().raw_midi_path === path) this.activity.set(a);
-      // Ajusta la selección a la nueva duración
+      // Fits the selection to the new duration
       const sel = this.selection();
       if (sel && sel.end > a.duration_ms) this.selection.set(null);
     } catch (err) {
@@ -132,7 +132,7 @@ export class MidiSlicerComponent {
     return Math.round(clamp((clientX - r.left) / r.width, 0, 1) * d);
   }
 
-  // ---- Interacción con puntero ----
+  // ---- Pointer interaction ----
   protected onHandleDown(ev: PointerEvent, mode: 'start' | 'end'): void {
     if (ev.button !== 0 || this.locked()) return;
     ev.stopPropagation();
@@ -186,7 +186,7 @@ export class MidiSlicerComponent {
     if (!d || d.pointerId !== ev.pointerId) return;
     this.drag = null;
     if (!d.moved) {
-      // Clic simple = seek
+      // Single click = seek
       void this.playback.seek(this.rawPath(), this.msAt(ev.clientX));
       return;
     }
@@ -242,7 +242,7 @@ export class MidiSlicerComponent {
     this.selection.set(null);
   }
 
-  // ---- Preescucha ----
+  // ---- Preview ----
   protected async play(): Promise<void> {
     const path = this.rawPath();
     if (!path || this.isPlaying()) return;
@@ -266,7 +266,7 @@ export class MidiSlicerComponent {
     void this.playback.stop(this.rawPath());
   }
 
-  // ---- Acciones destructivas ----
+  // ---- Destructive actions ----
   protected openExtract(): void {
     if (!this.validSelection()) {
       this.toast.warning(this.i18n.t('slicer.invalidRange'));

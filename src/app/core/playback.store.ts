@@ -5,10 +5,10 @@ import { ToastService } from './toast.service';
 import { I18nService } from './i18n/i18n.service';
 
 /**
- * Reproductor global único. El backend solo reproduce un fichero a la vez; el progreso
- * (`playback-progress`) se aplica únicamente al componente cuyo `file_path` coincide.
- * Para ficheros no activos se guarda un "cursor" local (posición de seek) desde el que
- * arrancará la siguiente reproducción.
+ * Single global player. The backend only plays one file at a time; progress
+ * (`playback-progress`) only applies to the component whose `file_path` matches.
+ * For inactive files a local "cursor" (seek position) is kept, from which the next playback
+ * will start.
  */
 @Injectable({ providedIn: 'root' })
 export class PlaybackStore {
@@ -16,13 +16,13 @@ export class PlaybackStore {
   private readonly toast = inject(ToastService);
   private readonly i18n = inject(I18nService);
 
-  /** Último progreso recibido (o estimado de forma optimista). */
+  /** Last progress received (or optimistically estimated). */
   readonly progress = signal<PlaybackProgress | null>(null);
-  /** Fichero cargado actualmente en el reproductor del backend. */
+  /** File currently loaded in the backend player. */
   readonly activeFile = signal<string | null>(null);
-  /** Posiciones locales por fichero (seek sobre ficheros no activos). */
+  /** Local positions per file (seek on inactive files). */
   readonly cursors = signal<Record<string, number>>({});
-  /** Fin de preescucha: se detiene al alcanzar `endMs` en `file`. */
+  /** End of preview: stops when `endMs` is reached in `file`. */
   private stopAt: { file: string; endMs: number } | null = null;
   private unlisten: (() => void) | null = null;
 
@@ -48,7 +48,7 @@ export class PlaybackStore {
     this.cursors.set({ ...cur, [file]: ms });
   }
 
-  /** Posición actual (ms) del fichero: progreso real si es el activo, si no su cursor local. */
+  /** Current position (ms) of the file: real progress if it is the active one, otherwise its local cursor. */
   positionFor(file: string | null | undefined): number {
     if (!file) return 0;
     const p = this.progress();
@@ -61,7 +61,7 @@ export class PlaybackStore {
     return !!file && !!p && p.file_path === file && p.is_playing;
   }
 
-  /** Reproduce `file` desde `startMs` (por defecto, su cursor). `endMs` = parar al llegar. */
+  /** Plays `file` from `startMs` (its cursor by default). `endMs` = stop when it is reached. */
   async play(file: string, startMs?: number, endMs?: number): Promise<void> {
     const from = Math.max(0, Math.round(startMs ?? this.positionFor(file)));
     this.stopAt = endMs !== undefined ? { file, endMs } : null;
@@ -96,7 +96,7 @@ export class PlaybackStore {
     else await this.play(file, undefined, endMs);
   }
 
-  /** Mueve la posición. Si `file` es el activo, hace seek en el backend; si no, mueve su cursor. */
+  /** Moves the position. If `file` is the active one, seeks in the backend; otherwise moves its cursor. */
   async seek(file: string, ms: number): Promise<void> {
     const target = Math.max(0, Math.round(ms));
     const p = this.progress();
@@ -131,13 +131,13 @@ export class PlaybackStore {
     if (file) this.setCursor(file, 0);
   }
 
-  /** Detiene la reproducción si el fichero activo es `file` (p. ej. antes de recortarlo). */
+  /** Stops playback if the active file is `file` (e.g. before slicing it). */
   async stopIfActive(file: string | null | undefined): Promise<void> {
     const p = this.progress();
     if (file && p && p.file_path === file && p.is_playing) await this.stop();
   }
 
-  /** Atajo Espacio: pausa/reanuda el último fichero usado. */
+  /** Space shortcut: pauses/resumes the last file used. */
   async toggleActive(): Promise<void> {
     const file = this.activeFile() ?? this.progress()?.file_path;
     if (file) await this.toggle(file);

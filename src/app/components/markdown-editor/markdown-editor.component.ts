@@ -34,7 +34,7 @@ const MODES: { id: EditorMode; label: MessageKey }[] = [
   { id: 'preview', label: 'notes.modes.preview' },
 ];
 
-/** Editor de notas Markdown de la sesión con autoguardado e imágenes pegadas/arrastradas. */
+/** Markdown notes editor for the session, with autosave and pasted/dropped images. */
 @Component({
   selector: 'app-markdown-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -70,7 +70,7 @@ export class MarkdownEditorComponent {
   private lastSession: SessionDto | null = null;
 
   constructor() {
-    // Cambio de sesión: guarda lo pendiente de la anterior y carga el texto de la nueva
+    // Session change: save what is pending from the previous one and load the new one's text
     effect(() => {
       const s = this.session();
       untracked(() => {
@@ -93,7 +93,7 @@ export class MarkdownEditorComponent {
     try {
       localStorage.setItem(MODE_KEY, m);
     } catch {
-      /* sin almacenamiento */
+      /* no storage */
     }
   }
 
@@ -118,12 +118,12 @@ export class MarkdownEditorComponent {
     }
     this.saveState.set('saving');
     const ok = await this.store.saveFields({ markdown_notes: text });
-    // Si se escribió más mientras guardaba, sigue "sucio"
+    // If more was typed while saving, it stays "dirty"
     if (this.saveTimer) return;
     this.saveState.set(ok ? (this.text() === text ? 'saved' : 'dirty') : 'error');
   }
 
-  /** Guarda inmediatamente el texto pendiente de una sesión que ya no es la actual. */
+  /** Immediately saves the pending text of a session that is no longer the current one. */
   private flushFor(prev: SessionDto): void {
     if (!this.saveTimer) return;
     clearTimeout(this.saveTimer);
@@ -135,7 +135,7 @@ export class MarkdownEditorComponent {
       .catch((err) => this.toast.error(err, this.i18n.t('notes.errors.save')));
   }
 
-  // ---- Imágenes: paste / drop ----
+  // ---- Images: paste / drop ----
   protected onPaste(ev: ClipboardEvent): void {
     const items = ev.clipboardData?.items;
     if (!items) return;
@@ -151,7 +151,7 @@ export class MarkdownEditorComponent {
     void this.insertImages(files, true);
   }
 
-  /** Imágenes elegidas con el botón «Insertar imagen». */
+  /** Images chosen with the "Insert image" button. */
   protected onFilesPicked(input: HTMLInputElement): void {
     const files = Array.from(input.files ?? []).filter((f) => f.type.startsWith('image/'));
     input.value = '';
@@ -171,7 +171,7 @@ export class MarkdownEditorComponent {
     const files = Array.from(ev.dataTransfer?.files ?? []).filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
     ev.preventDefault();
-    // Coloca el cursor donde se soltó, si el navegador lo permite
+    // Put the cursor where it was dropped, if the browser allows it
     void this.insertImages(files, false);
   }
 
@@ -190,7 +190,7 @@ export class MarkdownEditorComponent {
       try {
         const base64 = await readAsBase64(file);
         const name = imageFileName(file, pasted);
-        // Ruta relativa a la bóveda (`media/…`): las notas siguen valiendo en otro equipo.
+        // Path relative to the vault (`media/…`): the notes still work on another computer.
         const relPath = await this.api.saveSessionImage(sessionId, name, base64);
         if (this.session().id !== sessionId) continue;
         const alt = name.replace(/\.[^.]+$/, '').replace(/[[\]]/g, '');
@@ -224,7 +224,7 @@ export class MarkdownEditorComponent {
     this.scheduleSave();
   }
 
-  /** Tab inserta dos espacios en lugar de mover el foco (Escape + Tab para salir). */
+  /** Tab inserts two spaces instead of moving focus (Escape + Tab to leave). */
   protected onKeydown(ev: KeyboardEvent): void {
     if (ev.key === 'Tab' && !ev.shiftKey && !ev.ctrlKey && !ev.altKey) {
       const ta = ev.target as HTMLTextAreaElement;
@@ -247,7 +247,7 @@ function readMode(): EditorMode {
     const m = localStorage.getItem(MODE_KEY);
     if (m === 'edit' || m === 'preview' || m === 'split') return m;
   } catch {
-    /* sin almacenamiento */
+    /* no storage */
   }
   return 'split';
 }

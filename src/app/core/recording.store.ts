@@ -12,7 +12,7 @@ const PORT_KEY = 'piano-tracker.port';
 export const BPM_MIN = 40;
 export const BPM_MAX = 240;
 
-/** Estado de grabación, puerto MIDI, BPM y toggles de metrónomo/sintetizador en vivo. */
+/** Recording state, MIDI port, BPM and metronome/live synth toggles. */
 @Injectable({ providedIn: 'root' })
 export class RecordingStore {
   private readonly api = inject(TauriApiService);
@@ -29,7 +29,7 @@ export class RecordingStore {
   readonly metronomeOn = signal(false);
   readonly liveSynthOn = signal(false);
 
-  /** Sesión que se está grabando (null = no se graba). */
+  /** Session being recorded (null = not recording). */
   readonly recordingSessionId = signal<string | null>(null);
   readonly busy = signal(false);
   readonly elapsedMs = signal(0);
@@ -39,7 +39,7 @@ export class RecordingStore {
     () => this.ports().find((p) => p.id === this.selectedPortId()) ?? null,
   );
 
-  /** Nombre visible de un puerto: el del simulador va traducido, el resto es el del sistema. */
+  /** Display name of a port: the simulator's is translated, the rest come from the system. */
   portName(p: MidiPortInfo): string {
     return p.id === SIMULATOR_PORT_ID ? this.i18n.t('recorder.simulatorPort') : p.name;
   }
@@ -73,7 +73,7 @@ export class RecordingStore {
     writeStored(PORT_KEY, id);
   }
 
-  /** Sincroniza el BPM con la sesión seleccionada (si no se está grabando). */
+  /** Syncs the BPM with the selected session (if not recording). */
   loadFromSession(s: SessionDto | null): void {
     if (s && !this.isRecording()) this.setBpm(s.bpm);
   }
@@ -96,7 +96,7 @@ export class RecordingStore {
     this.pushLiveSettings(false);
   }
 
-  /** Envía `update_live_recording_settings` (también sin grabar: metrónomo de previsualización). */
+  /** Sends `update_live_recording_settings` (also when not recording: metronome preview). */
   private pushLiveSettings(debounce: boolean): void {
     if (!this.api.available) return;
     if (this.liveTimer) clearTimeout(this.liveTimer);
@@ -152,7 +152,7 @@ export class RecordingStore {
     }
   }
 
-  /** Detiene la grabación y recarga la sesión con la pista bruta ampliada. */
+  /** Stops recording and reloads the session with the extended raw take. */
   async stopAndRefresh(): Promise<void> {
     const updated = await this.stop();
     if (!updated) return;
@@ -180,6 +180,6 @@ function writeStored(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch {
-    /* almacenamiento no disponible */
+    /* storage not available */
   }
 }

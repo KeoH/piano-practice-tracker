@@ -23,14 +23,14 @@ import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
 
-/** Tiempo que permanece visible el popup automático de un comentario. */
+/** How long a comment's automatic popup stays visible. */
 const AUTO_POPUP_MS = 2500;
-/** Saltos mayores se consideran seek (no se recorren los comentarios intermedios). */
+/** Larger jumps count as a seek (the comments in between are not walked through). */
 const MAX_CONTINUOUS_STEP_MS = 1500;
-/** Tolerancia para mostrar un comentario al aterrizar (seek/inicio) justo sobre él. */
+/** Tolerance to show a comment when landing (seek/start) right on it. */
 const LANDING_WINDOW_MS = 350;
 
-/** Tarjeta expandible de un fragmento con reproductor, pins de comentarios y panel lateral. */
+/** Expandable fragment card with player, comment pins and side panel. */
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -59,7 +59,7 @@ export class FragmentPlayerComponent {
   protected readonly addingComment = signal(false);
   protected readonly hoverComment = signal<TimelineCommentDto | null>(null);
   protected readonly autoComment = signal<TimelineCommentDto | null>(null);
-  /** Posición durante un arrastre de scrub (null = sin arrastre). */
+  /** Position during a scrub drag (null = not dragging). */
   protected readonly scrubMs = signal<number | null>(null);
 
   private readonly timeline = viewChild<ElementRef<HTMLElement>>('timeline');
@@ -76,11 +76,11 @@ export class FragmentPlayerComponent {
     [...this.fragment().comments].sort((a, b) => a.timestamp_ms - b.timestamp_ms),
   );
   protected readonly popup = computed(() => this.hoverComment() ?? this.autoComment());
-  /** Número de orden con dos cifras («01»). */
+  /** Two-digit order number ("01"). */
   protected readonly number = computed(() => String(this.index() + 1).padStart(2, '0'));
 
   constructor() {
-    // Borradores de título/explicación sincronizados con el DTO
+    // Title/explanation drafts kept in sync with the DTO
     const srcTitle = computed(() => this.fragment().title);
     const srcExplanation = computed(() => this.fragment().explanation);
     effect(() => {
@@ -92,19 +92,19 @@ export class FragmentPlayerComponent {
       untracked(() => this.explanationDraft.set(e));
     });
 
-    // Carga la actividad al expandir (y si cambia el fichero)
+    // Loads the activity when expanded (and if the file changes)
     effect(() => {
       const open = this.expanded();
       const path = this.file();
       if (open && path !== this.loadedPath) untracked(() => void this.loadActivity(path));
     });
 
-    // Se expande automáticamente cuando empieza a sonar este fragmento
+    // Expands automatically when this fragment starts playing
     effect(() => {
       if (this.isPlaying() && !untracked(this.expanded)) this.expanded.set(true);
     });
 
-    // Popup automático al pasar la reproducción por el instante de un comentario
+    // Automatic popup when playback passes a comment's instant
     let prev: number | null = null;
     effect(() => {
       const p = this.playback.progress();
@@ -121,10 +121,10 @@ export class FragmentPlayerComponent {
         let hit: TimelineCommentDto | undefined;
         const step = last === null ? -1 : cur - last;
         if (last !== null && step > 0 && step <= MAX_CONTINUOUS_STEP_MS) {
-          // Recorrido continuo: comentarios en (last, cur]; nos quedamos con el último cruzado
+          // Continuous playback: comments in (last, cur]; keep the last one crossed
           for (const c of list) if (c.timestamp_ms > last && c.timestamp_ms <= cur) hit = c;
         } else if (step !== 0) {
-          // Inicio o salto: comentario sobre el que se aterriza
+          // Start or jump: the comment it lands on
           hit = list.find((c) => cur >= c.timestamp_ms && cur - c.timestamp_ms <= LANDING_WINDOW_MS);
         }
         if (hit) this.showAuto(hit);
@@ -168,7 +168,7 @@ export class FragmentPlayerComponent {
     return clamp(this.pct(ms), 12, 88);
   }
 
-  // ---- Transporte ----
+  // ---- Transport ----
   protected async togglePlay(): Promise<void> {
     const f = this.file();
     if (this.isPlaying()) {
@@ -183,7 +183,7 @@ export class FragmentPlayerComponent {
     void this.playback.stop(this.file());
   }
 
-  // ---- Scrub / seek en la línea de tiempo ----
+  // ---- Scrub / seek on the timeline ----
   private msAt(clientX: number): number {
     const el = this.timeline()?.nativeElement;
     const d = this.durationMs();
@@ -225,7 +225,7 @@ export class FragmentPlayerComponent {
     void this.playback.seek(this.file(), clamp(target, 0, this.durationMs()));
   }
 
-  // ---- Comentarios ----
+  // ---- Comments ----
   protected seekTo(c: TimelineCommentDto): void {
     void this.playback.seek(this.file(), c.timestamp_ms);
     this.showAuto(c);
@@ -263,7 +263,7 @@ export class FragmentPlayerComponent {
     }
   }
 
-  // ---- Metadatos ----
+  // ---- Metadata ----
   protected async saveMeta(): Promise<void> {
     const f = this.fragment();
     const title = this.titleDraft().trim();

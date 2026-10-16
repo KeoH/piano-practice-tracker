@@ -6,7 +6,7 @@ import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
 
-/** Sección de Ajustes para elegir el SoundFont (.sf2) con el que suena el sintetizador. */
+/** Settings section to choose the SoundFont (.sf2) the synthesizer plays with. */
 @Component({
   selector: 'app-soundfont-settings',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -82,7 +82,7 @@ export class SoundfontSettingsComponent {
     const i = this.info();
     return !!i && i.candidates.every((c) => c.is_builtin);
   });
-  /** SoundFont activo elegido por el usuario fuera de las carpetas conocidas. */
+  /** Active SoundFont chosen by the user outside the known folders. */
   protected readonly customCurrent = computed(() => {
     const i = this.info();
     return i && !i.candidates.some((c) => c.path === i.current_path) ? i.current_path : null;
@@ -99,7 +99,7 @@ export class SoundfontSettingsComponent {
     try {
       const info = await this.api.getSoundfontInfo();
       this.info.set(info);
-      // Al arrancar la app el SoundFont preferido se carga en segundo plano.
+      // On app startup the preferred SoundFont loads in the background.
       if (info.loading && !this.poll) this.poll = setInterval(() => void this.refresh(), 700);
       if (!info.loading) this.stopPolling();
     } catch (err) {

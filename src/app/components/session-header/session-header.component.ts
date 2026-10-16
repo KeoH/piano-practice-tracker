@@ -8,7 +8,7 @@ import { SessionStore } from '../../core/session.store';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
 
-/** Cabecera de sesión: título editable, fecha, resumen (pista, fragmentos, guardado) y menú de acciones. */
+/** Session header: editable title, date, summary (take, fragments, saved state) and actions menu. */
 @Component({
   selector: 'app-session-header',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -32,7 +32,7 @@ export class SessionHeaderComponent {
     () => !!this.session() && this.rec.recordingSessionId() === this.session()!.id,
   );
 
-  /** Estado de guardado de la sesión en la bóveda. */
+  /** Save state of the session in the vault. */
   protected readonly saveChip = computed(() =>
     this.store.savingCount() > 0
       ? { label: this.i18n.t('header.saving'), dot: 'bg-accent animate-pulse' }
@@ -43,7 +43,7 @@ export class SessionHeaderComponent {
   private readonly firstItem = viewChild<ElementRef<HTMLButtonElement>>('firstItem');
 
   constructor() {
-    // Al cambiar de sesión: reinicia el borrador del título y cierra el menú
+    // When the session changes: reset the title draft and close the menu
     let lastId: string | null = null;
     effect(() => {
       const s = this.session();
@@ -57,7 +57,7 @@ export class SessionHeaderComponent {
       }
     });
 
-    // Lleva el foco a la primera opción al abrir el menú
+    // Move focus to the first option when the menu opens
     effect(() => {
       const item = this.firstItem();
       if (item) queueMicrotask(() => item.nativeElement.focus());
