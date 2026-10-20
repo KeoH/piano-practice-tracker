@@ -17,6 +17,7 @@ import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { FragmentDto, MidiActivityDto, MidiNotesDto, TimelineCommentDto } from '../../core/models';
+import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
@@ -24,6 +25,7 @@ import { TimelineDrag } from '../../core/timeline-drag';
 import { ToastService } from '../../core/toast.service';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
+import { PiecePickerComponent, type PieceChoice } from '../piece-picker/piece-picker.component';
 import { RangeHandlesComponent } from '../range-handles/range-handles.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
@@ -40,7 +42,7 @@ const LANDING_WINDOW_MS = 350;
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
   templateUrl: './fragment-player.component.html',
 })
 export class FragmentPlayerComponent {
@@ -59,6 +61,7 @@ export class FragmentPlayerComponent {
   protected readonly expanded = signal(false);
   protected readonly prefs = inject(UiPrefsStore);
   protected readonly exporter = inject(ExportService);
+  private readonly pieces = inject(PieceStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly activityLoading = signal(false);
@@ -87,6 +90,7 @@ export class FragmentPlayerComponent {
   protected readonly popup = computed(() => this.hoverComment() ?? this.autoComment());
   /** Two-digit order number ("01"). */
   protected readonly number = computed(() => String(this.index() + 1).padStart(2, '0'));
+  protected readonly piece = computed(() => this.pieces.byId(this.fragment().piece_id));
   /** A-B loop of this fragment (while it is on, dragging on the timeline edits it). */
   protected readonly loop = computed(() => this.playback.loopFor(this.file()));
   protected readonly loopDrag = new TimelineDrag({
@@ -333,6 +337,12 @@ export class FragmentPlayerComponent {
     } catch (err) {
       this.toast.error(err, this.i18n.t('fragments.errors.save'));
     }
+  }
+
+  protected async assignPiece(choice: PieceChoice): Promise<void> {
+    const f = this.fragment();
+    if (choice.pieceId === f.piece_id && choice.passage === f.passage) return;
+    await this.pieces.assign(f, choice.pieceId, choice.passage);
   }
 
   protected async deleteFragment(): Promise<void> {

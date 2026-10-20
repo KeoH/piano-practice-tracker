@@ -972,10 +972,32 @@ impl Database {
             .map_err(db_err)?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(PieceSummaryDto { piece: map_piece(r)?, take_count: to_u32(r.get(7)?), last_practiced: r.get(8)? })
+                Ok(PieceSummaryDto {
+                    piece: map_piece(r)?,
+                    take_count: to_u32(r.get(7)?),
+                    last_practiced: r.get(8)?,
+                    passages: Vec::new(),
+                })
             })
             .map_err(db_err)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+        let mut pieces = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT piece_id, passage FROM midi_fragments WHERE piece_id IS NOT NULL AND passage <> '' \
+                 GROUP BY piece_id, passage ORDER BY passage COLLATE NOCASE",
+            )
+            .map_err(db_err)?;
+        let passages = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(db_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(db_err)?;
+        for (piece_id, passage) in passages {
+            if let Some(p) = pieces.iter_mut().find(|p| p.piece.id == piece_id) {
+                p.passages.push(passage);
+            }
+        }
+        Ok(pieces)
     }
 
     pub fn get_piece_detail(&self, piece_id: &str) -> Result<PieceDetailDto, String> {
@@ -1468,6 +1490,7 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!((list[0].piece.id.as_str(), list[0].take_count), (nocturne.id.as_str(), 3));
         assert_eq!(list[0].last_practiced.as_deref(), Some(today().as_str()));
+        assert_eq!(list[0].passages, vec!["bars 1-4".to_string()]);
         assert_eq!((list[1].take_count, list[1].last_practiced.as_deref()), (0, None));
 
         let archived = db.update_piece(&nocturne.id, "Nocturne", "F. Chopin", "Rubato!", true).unwrap();

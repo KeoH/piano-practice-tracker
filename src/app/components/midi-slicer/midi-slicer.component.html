@@ -231,6 +231,11 @@
           <label for="frag-title" class="label">{{ 'fragments.titleLabel' | t }}</label>
           <input id="frag-title" class="field" autofocus [value]="extractTitle()" (input)="extractTitle.set($any($event.target).value)" />
         </div>
+        <app-piece-picker
+          [pieceId]="extractPiece().pieceId"
+          [passage]="extractPiece().passage"
+          (changed)="extractPiece.set($event)"
+        />
         <div>
           <label for="frag-expl" class="label">{{ 'fragments.explanationLabel' | t }} <span class="font-normal text-faint">{{ 'common.optional' | t }}</span></label>
           <textarea id="frag-expl" class="field min-h-24 resize-y" [placeholder]="'fragments.explanationPlaceholder' | t"

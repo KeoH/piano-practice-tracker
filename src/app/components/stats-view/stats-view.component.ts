@@ -34,6 +34,7 @@ interface Tip {
 /** Practice statistics: today, the week against the goal, streaks, a year heatmap and the last 30 days. */
 @Component({
   selector: 'app-stats-view',
+  host: { class: 'block' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [IconComponent, TranslatePipe, PluralPipe],
   templateUrl: './stats-view.component.html',

@@ -16,6 +16,7 @@ import { clamp, formatMs, parseTime } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { MidiActivityDto, MidiNotesDto, SessionDto, TimeRangeDto } from '../../core/models';
+import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
@@ -23,6 +24,7 @@ import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
+import { PiecePickerComponent, type PieceChoice } from '../piece-picker/piece-picker.component';
 import { RangeHandlesComponent } from '../range-handles/range-handles.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
@@ -34,7 +36,7 @@ import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mo
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -53,6 +55,7 @@ export class MidiSlicerComponent {
 
   protected readonly prefs = inject(UiPrefsStore);
   protected readonly exporter = inject(ExportService);
+  private readonly pieces = inject(PieceStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly loading = signal(false);
@@ -67,6 +70,7 @@ export class MidiSlicerComponent {
   protected readonly extractOpen = signal(false);
   protected readonly extractTitle = signal('');
   protected readonly extractExplanation = signal('');
+  protected readonly extractPiece = signal<PieceChoice>({ pieceId: null, passage: '' });
 
   private readonly track = viewChild.required<ElementRef<HTMLElement>>('track');
   protected readonly drag = new TimelineDrag({
@@ -207,6 +211,9 @@ export class MidiSlicerComponent {
     }
     this.extractTitle.set(this.i18n.t('slicer.defaultFragmentTitle', { n: this.fragmentCount() + 1 }));
     this.extractExplanation.set('');
+    // Usually the same piece as the previous fragment of the session (a new passage, though).
+    const last = [...this.store.fragments()].reverse().find((f) => f.piece_id);
+    this.extractPiece.set({ pieceId: last?.piece_id ?? null, passage: '' });
     this.extractOpen.set(true);
   }
 
@@ -227,12 +234,15 @@ export class MidiSlicerComponent {
         end_ms: Math.round(sel.end),
         title,
         explanation: this.extractExplanation().trim(),
+        piece_id: this.extractPiece().pieceId,
+        passage: this.extractPiece().passage,
       });
       this.extractOpen.set(false);
       this.selection.set(null);
       this.store.applySession(res.session);
       await this.store.reloadDetail();
       void this.store.refreshList();
+      if (res.fragment.piece_id) void this.pieces.refreshList();
       this.toast.success(
         this.i18n.t('slicer.extracted', { title: res.fragment.title, duration: formatMs(res.fragment.duration_ms) }),
       );

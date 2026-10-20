@@ -9,10 +9,14 @@ import {
   type AppLink,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
+  type FragmentDto,
   type LanguageInfo,
   type MidiActivityDto,
   type MidiNotesDto,
   type MidiPortInfo,
+  type PieceDetailDto,
+  type PieceDto,
+  type PieceSummaryDto,
   type PlaybackProgress,
   type PracticeStatsDto,
   type SessionDetailDto,
@@ -153,6 +157,32 @@ export class TauriApiService {
       startMs: range ? Math.max(0, Math.round(range.start)) : null,
       endMs: range ? Math.max(0, Math.round(range.end)) : null,
     });
+  }
+
+  // ---- Repertoire ----
+  getPieces(): Promise<PieceSummaryDto[]> {
+    return this.call('get_pieces');
+  }
+
+  getPieceDetail(pieceId: string): Promise<PieceDetailDto> {
+    return this.call('get_piece_detail', { pieceId });
+  }
+
+  createPiece(title: string, composer: string): Promise<PieceDto> {
+    return this.call('create_piece', { title, composer });
+  }
+
+  updatePiece(pieceId: string, title: string, composer: string, notes: string, archived: boolean): Promise<PieceDto> {
+    return this.call('update_piece', { pieceId, title, composer, notes, archived });
+  }
+
+  deletePiece(pieceId: string): Promise<void> {
+    return this.call('delete_piece', { pieceId });
+  }
+
+  /** Files a fragment under a piece and passage (`null` takes it out of its piece). */
+  assignFragmentPiece(fragmentId: string, pieceId: string | null, passage: string): Promise<FragmentDto> {
+    return this.call('assign_fragment_piece', { fragmentId, pieceId, passage });
   }
 
   // ---- Practice statistics ----

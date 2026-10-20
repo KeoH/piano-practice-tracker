@@ -159,6 +159,8 @@ export interface PieceSummaryDto {
   take_count: number;
   /** Date of the most recent session with a take of the piece. */
   last_practiced: string | null;
+  /** Passages already used in the piece's takes (sorted, without the empty one). */
+  passages: string[];
 }
 
 export interface PieceTakeDto {

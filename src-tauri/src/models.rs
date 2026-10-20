@@ -199,6 +199,8 @@ pub struct PieceSummaryDto {
     pub take_count: u32,
     /// Date (`YYYY-MM-DD`) of the most recent session with a take of the piece.
     pub last_practiced: Option<String>,
+    /// Passages already used in the piece's takes (sorted, without the empty one).
+    pub passages: Vec<String>,
 }
 
 /// A fragment filed under a piece, with the session it comes from.

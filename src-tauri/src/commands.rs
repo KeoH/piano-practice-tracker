@@ -443,6 +443,59 @@ pub async fn set_playback_loop(
 }
 
 // ---------------------------------------------------------------------------
+// Repertoire
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_pieces(state: State<'_, AppState>) -> Result<Vec<PieceSummaryDto>, String> {
+    state.vault()?.db.list_pieces()
+}
+
+#[tauri::command]
+pub async fn get_piece_detail(state: State<'_, AppState>, piece_id: String) -> Result<PieceDetailDto, String> {
+    state.vault()?.db.get_piece_detail(&piece_id)
+}
+
+#[tauri::command]
+pub async fn create_piece(state: State<'_, AppState>, title: String, composer: String) -> Result<PieceDto, String> {
+    let title = if title.trim().is_empty() { t!("backend.defaults.pieceTitle") } else { title.trim().to_string() };
+    state.vault()?.db.create_piece(&title, composer.trim())
+}
+
+#[tauri::command]
+pub async fn update_piece(
+    state: State<'_, AppState>,
+    piece_id: String,
+    title: String,
+    composer: String,
+    notes: String,
+    archived: bool,
+) -> Result<PieceDto, String> {
+    let vault = state.vault()?;
+    let title = if title.trim().is_empty() { t!("backend.defaults.pieceTitle") } else { title.trim().to_string() };
+    vault.db.update_piece(&piece_id, &title, composer.trim(), &notes, archived)
+}
+
+/// Deletes the piece; its fragments stay in their sessions.
+#[tauri::command]
+pub async fn delete_piece(state: State<'_, AppState>, piece_id: String) -> Result<(), String> {
+    state.vault()?.db.delete_piece(&piece_id)
+}
+
+/// Files a fragment under a piece and passage (`piece_id = None` takes it out).
+#[tauri::command]
+pub async fn assign_fragment_piece(
+    state: State<'_, AppState>,
+    fragment_id: String,
+    piece_id: Option<String>,
+    passage: String,
+) -> Result<FragmentDto, String> {
+    let piece_id = piece_id.filter(|p| !p.is_empty());
+    let passage = if piece_id.is_some() { passage } else { String::new() };
+    state.vault()?.db.set_fragment_piece(&fragment_id, piece_id.as_deref(), &passage)
+}
+
+// ---------------------------------------------------------------------------
 // Practice statistics
 // ---------------------------------------------------------------------------
 

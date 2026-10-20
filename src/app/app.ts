@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dialog.component';
 import { SettingsDialogComponent } from './components/settings-dialog/settings-dialog.component';
 import { SessionViewComponent } from './components/session-view/session-view.component';
+import { PiecesViewComponent } from './components/pieces-view/pieces-view.component';
 import { StatsViewComponent } from './components/stats-view/stats-view.component';
 import { SidebarComponent } from './components/sidebar/sidebar.component';
 import { ToastsComponent } from './components/toasts/toasts.component';
@@ -23,6 +24,7 @@ import { VaultStore } from './core/vault.store';
     SidebarComponent,
     SessionViewComponent,
     StatsViewComponent,
+    PiecesViewComponent,
     SettingsDialogComponent,
     VaultWelcomeComponent,
     ToastsComponent,
