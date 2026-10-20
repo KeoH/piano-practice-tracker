@@ -20,6 +20,9 @@ A native desktop application for **Ubuntu Linux** for recording, slicing and ana
 5. **Multi-language:**
    - The UI and the backend messages are available in English and Spanish. The system language is used if available, otherwise English; the user can choose it in Settings and on the welcome screen.
    - All texts live in `src/locales/<code>.json`, shared by Angular and Rust, so adding a language means adding a file.
+6. **Trims can be undone:** before each trim the raw take is copied to `midi/history/`; the last 10 trims of each session can be undone (undoing an extraction deletes the fragment it created). Recording again clears that history.
+7. **Practice time is recorded, not derived:** `practice_log` keeps what was actually recorded each day, so trimming or deleting a session does not change the statistics.
+8. **Repertoire:** a fragment can be filed under a piece and a passage (free text), so the takes of the same passage can be compared across sessions.
 
 ---
 
@@ -56,6 +59,7 @@ Layout of a vault (`<Vault>` is the folder chosen by the user):
 - `<Vault>/piano_tracker.sqlite` (database, in `journal_mode = DELETE`: a single file at rest)
 - `<Vault>/midi/raw/` (session raw takes)
 - `<Vault>/midi/fragments/` (sliced fragments)
+- `<Vault>/midi/history/<session_id>/` (copies of the raw take taken before each trim, to undo it)
 - `<Vault>/media/` (images in the Markdown notes)
 
 Outside the vault:
@@ -64,7 +68,7 @@ Outside the vault:
 
 The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
-### 3.1. Full SQL Schema (version 2)
+### 3.1. Full SQL Schema (version 3)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -90,7 +94,39 @@ CREATE TABLE IF NOT EXISTS midi_fragments (
     duration_ms INTEGER NOT NULL,
     order_index INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
+    piece_id TEXT REFERENCES pieces(id) ON DELETE SET NULL,
+    passage TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pieces (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    composer TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Time actually recorded per day (local date); not changed by trims.
+CREATE TABLE IF NOT EXISTS practice_log (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    practiced_on TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+
+-- Undo stack of the raw takes (at most 10 per session).
+CREATE TABLE IF NOT EXISTS raw_history (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,          -- relative: midi/history/<session>/<uuid>.mid
+    duration_ms INTEGER NOT NULL,     -- duration of the take when the copy was taken
+    action TEXT NOT NULL,             -- 'extract' | 'discard'
+    fragment_id TEXT,                 -- fragment created by an 'extract'
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS timeline_comments (
@@ -116,6 +152,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 ```
 
 Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and `drive_file_id` columns. The migration to version 2 drops them, deletes the `google_*` and `drive_*` settings, and turns the old absolute paths into relative ones (in `markdown_notes` too).
+
+The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the `piece_id` / `passage` columns. It fills `practice_log` with one entry per existing session: its raw take plus its fragments, on the session's date. It is an approximation: sections discarded before version 3 are not counted. The weekly goal is the `weekly_goal_minutes` key of `app_settings`.
 
 ---
 
@@ -156,6 +194,19 @@ Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and
 - **Built-in MIDI Player:**
   - Reads the events of the selected `.mid`, advances the clock according to the audio frames consumed by `cpal`, feeds `rustysynth` and emits a Tauri `playback-progress` event every $50\text{ ms}$ with `{ file_path, current_ms, duration_ms, is_playing }`.
   - Supports `play`, `pause`, `stop` and `seek(ms)` (sending `reset_all_controllers` and `note_off_all` on seek).
+  - **Speed:** from 0.25 to 1.5 (the UI offers 50–100 %). The position advances in file time at that rate, so the pitch does not change.
+  - **A-B loop** of the loaded file: on reaching the end it releases the sounding notes and jumps back to the start, restoring the controllers (pedal) at that point.
+- **WAV export:** a file is rendered offline with its own synthesizer and the current SoundFont (the live player is not touched), plus 2 s of tail, and written as 16-bit stereo PCM at 44.1 kHz block by block, so a long take does not have to fit in memory. The level is the same as playback (no normalization).
+
+### 4.5. Notes and Cut Suggestions (`midi_notes.rs`)
+- `extract_notes`: pairs NoteOn/NoteOff per channel and key (a repeated NoteOn closes the previous note) and returns the notes with velocity, the sustain pedal intervals and the key range, for the piano roll.
+- `suggest_segments`: the passages separated by at least a minimum silence (3 s by default). A note released with the pedal down rings until the pedal goes up. Passages shorter than 4 s join the closest neighbour, and each one keeps up to 0.5 s of silence around it.
+- `discard_ranges` (`midi_slicer.rs`) removes several ranges with one read and one write, so "discard every silence" is a single undo step.
+
+### 4.6. Undo (`raw_history.rs`)
+- Before a trim the raw take is copied (tmp + rename) to `midi/history/<session>/`; after a successful trim the copy is recorded in `raw_history` and the copies beyond the 10 newest are deleted.
+- Undoing renames the newest copy over the raw take, restores its duration and, if that trim extracted a fragment that still exists, deletes it.
+- If inserting the fragment fails after the take was trimmed, the copy is put back, so the section is not lost.
 
 ### 4.4. Vaults (`vault.rs`)
 - **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
@@ -183,6 +234,27 @@ Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and
 - `pause_midi_playback() -> Result<(), String>`
 - `seek_midi_playback(ms: u64) -> Result<(), String>`
 - `stop_midi_playback() -> Result<(), String>`
+- `set_playback_rate(rate: f32) -> Result<f32, String>` (returns the speed applied)
+- `set_playback_loop(start_ms: Option<u64>, end_ms: Option<u64>) -> Result<(), String>` (`None` removes the loop)
+- `get_midi_notes(file_path: String) -> Result<MidiNotesDto, String>`
+- `suggest_midi_segments(file_path: String, min_gap_ms: Option<u64>) -> Result<Vec<TimeRangeDto>, String>`
+- `discard_midi_ranges(session_id: String, ranges: Vec<TimeRangeDto>) -> Result<SessionDto, String>`
+- `undo_raw_trim(session_id: String) -> Result<UndoTrimResult, String>`
+- `export_audio(file_path: String, dest_path: String) -> Result<String, String>` (returns the path written, with `.wav` added if missing)
+
+`ExtractFragmentReq` also accepts `piece_id` and `passage` to file the new fragment under a piece. `SessionDetailDto` includes `undo_depth` and `undo_fragment_id` (the fragment the next undo would delete).
+
+### Repertoire
+- `get_pieces() -> Result<Vec<PieceSummaryDto>, String>`
+- `get_piece_detail(piece_id: String) -> Result<PieceDetailDto, String>`
+- `create_piece(title: String, composer: String) -> Result<PieceDto, String>`
+- `update_piece(piece_id: String, title: String, composer: String, notes: String, archived: bool) -> Result<PieceDto, String>`
+- `delete_piece(piece_id: String) -> Result<(), String>` (the fragments stay in their sessions)
+- `assign_fragment_piece(fragment_id: String, piece_id: Option<String>, passage: String) -> Result<FragmentDto, String>`
+
+### Practice Statistics
+- `get_practice_stats(from: String, to: String) -> Result<PracticeStatsDto, String>` (ISO dates; only the days with practice)
+- `set_weekly_goal(minutes: u32) -> Result<u32, String>`
 
 ### Sessions, Fragments and Comments
 - `get_sessions() -> Result<Vec<SessionSummaryDto>, String>`
@@ -218,8 +290,8 @@ Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and
 ## 6. User Interface Design (Angular UI/UX)
 
 1. **Left Sidebar (Navigation and Status):**
-   - "+ New Practice Session" button.
-   - Chronological list of sessions.
+   - Three views: **Sessions**, **Repertoire** and **Statistics**.
+   - "+ New Practice Session" button and the chronological list of sessions (in the Repertoire view: "+ New piece" and the list of pieces, the archived ones apart).
    - Quick USB-MIDI port selector and Settings button (with the name of the open vault) in the sidebar footer.
    - Without an open vault, the app shows a welcome screen: create a vault (name + location), open an existing one, recent ones and import of the previous version's data.
 2. **Session Header and Recording / Metronome Panel:**
@@ -227,10 +299,13 @@ Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and
    - Metronome controls: numeric/slider BPM selector ($40 - 240$), metronome toggle, live synthesizer monitoring switch, and the main **Record / Stop** button with a live timer.
 3. **Raw Take and Slicer Area:**
    - Visible when the session has a master recording (`raw_midi_path`).
-   - Interactive timeline with visual MIDI activity blocks.
+   - Interactive timeline drawn as a **piano roll** (each note, with the pedal strip) or as density blocks; the choice is kept on this machine.
+   - **"Suggest cuts"** marks the passages separated by silences (minimum silence adjustable from 1 to 10 s); clicking one selects it, and **"Discard the silences"** removes every gap at once.
+   - **Undo** (and Ctrl+Z) reverts the last trims, one by one.
+   - Playback speed and WAV export of the raw take.
    - Range selection controls (Start `mm:ss` - End `mm:ss`) that can be dragged on the canvas.
    - Action buttons for the selected range:
-     - **"Extract as Fragment"** (opens a quick modal/form for the title and initial explanation, creates the fragment and slices the master track).
+     - **"Extract as Fragment"** (opens a quick modal/form for the title, piece, passage and initial explanation, creates the fragment and slices the master track).
      - **"Discard Selection"** (removes silences or failed takes from the master track).
 4. **Session Fragment List + Timeline Comments:**
    - Expandable cards for each extracted fragment.
@@ -239,6 +314,15 @@ Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and
      - **Timeline Player with Markers (Pins):** Shows the progress bar and markers at the exact seconds where there are comments. When hovering over a pin, or when playback passes that second, a **floating popup** with the comment appears over the timeline.
      - **Quick form "+ Add comment at the current second (`mm:ss`)"**.
      - **Right side panel inside the card:** Chronologically sorted list of all the fragment's comments. Clicking any comment automatically jumps (`seek`) to that instant.
+     - **Loop and speed:** "Loop" repeats the whole fragment; dragging on the timeline narrows the passage. The speed goes from 50 % to 100 %.
+     - Piece and passage of the take, and **"Export WAV"**.
 5. **Session Notes Editor (Markdown + Images):**
    - Tab or split panel (Edit / Preview / Split) to write general session notes in Markdown.
    - Supports pasting images from the clipboard (`Ctrl+V`) or dragging them in; saves them in `media/` inside the vault, registers them in `session_media`, inserts their relative path into the Markdown and renders them in the preview.
+6. **Repertoire:**
+   - A piece has a title, composer, notes and can be archived.
+   - Its takes are grouped by passage, in chronological order, each with a mini piano roll, duration, BPM and comments, and a link to its session.
+   - Two takes can be compared one above the other on the same time scale, each with its own play button.
+7. **Practice Statistics:**
+   - Today, the current and best streak (days with at least a minute of practice; today's practice can still continue yesterday's streak), and the week against a goal set by the user.
+   - A heatmap of the last 53 weeks (levels at 1, 15, 30 and 60 minutes) and a bar chart of the last 30 days, with a tooltip on hover or focus and a table view.

@@ -61,7 +61,7 @@ Environment on this machine:
 - Backend → frontend event: `playback-progress` (`PlaybackProgress`, every 50 ms).
 
 ### Backend (`src-tauri/src`)
-- **Tauri-independent modules:** `db`, `vault`, `i18n`, `midi_recorder`, `midi_slicer`, `audio_engine`, `sf2_builder`, `soundfont` and `paths` don't import `tauri::`, so they can be tested without the app. They emit outwards through callbacks (`ProgressEmitter`, `MidiSink`) that `lib.rs` wires to `AppHandle::emit`.
+- **Tauri-independent modules:** `db`, `vault`, `raw_history`, `i18n`, `midi_recorder`, `midi_slicer`, `midi_notes`, `audio_engine`, `wav`, `sf2_builder`, `soundfont` and `paths` don't import `tauri::`, so they can be tested without the app. They emit outwards through callbacks (`ProgressEmitter`, `MidiSink`) that `lib.rs` wires to `AppHandle::emit`.
 - **`commands.rs`** defines `AppState`, Tauri's managed state. Its commands are `async` so they don't block the UI thread; heavy work (MIDI slicing and analysis) goes in `spawn_blocking`.
   - The open vault lives in `AppState.vault: RwLock<Option<Arc<Vault>>>` and can change at runtime. Data commands start with `let vault = state.vault()?;` (error "No vault is open" if there is none) and use `vault.db` / `vault.paths`.
   - `activate_vault` is the only way to open one: it checks the lock before closing the current one, saves the configuration and adds the folder to the asset protocol scope.
@@ -74,28 +74,35 @@ Environment on this machine:
 
   On exit (`RunEvent::Exit`) the vault lock is deleted.
 - **Paths (`paths.rs`):**
-  - `AppPaths` is the layout of a vault: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `media/` and the `.piano-tracker/` marker (`vault.json` and `lock`).
+  - `AppPaths` is the layout of a vault: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `midi/history/<session>/<uuid>.mid` (undo snapshots), `media/` and the `.piano-tracker/` marker (`vault.json` and `lock`).
   - `AppDirs` is what depends on the machine: `~/.config/piano-tracker/config.json` and `~/.local/share/piano-tracker/assets/default_piano.sf2`. The data lived in `~/.local/share/piano-tracker/` before vaults existed.
 - **`vault.rs`:**
   - `AppConfig` stores the current vault, the recent ones, the chosen SoundFont and the language (`language`, `None` = the system language); it depends on the machine, which is why it doesn't go in the vault.
   - Creating requires a new or empty folder. Opening accepts the marker or a folder with `piano_tracker.sqlite` (the previous version's folder).
   - The lock `{ host, pid, opened_at }` makes opening a vault in use on another computer ask for confirmation (`open_vault(path, force)`). A lock from this computer with a dead pid is ignored.
   - `import_legacy` moves the database, `midi/` and `media/` from the old folder after flushing its WAL.
-- **`db.rs`** (schema v2):
+- **`db.rs`** (schema v3):
   - Paths are stored **relative to the vault** and the public API returns them absolute (`store_path` / `load_path`). The frontend and the audio engine only see absolute paths.
   - `journal_mode = DELETE`, not WAL: at rest the database is a single file, which is safer inside a synced folder.
   - The v1 → v2 migration drops `sync_queue`, `sync_status`, `drive_file_id` and the Google settings, and turns the old absolute paths into relative ones, including those of the images in `markdown_notes`.
-  - `delete_session` and `delete_fragment` return the paths; deleting the files is the caller's job.
+  - The v2 → v3 migration adds `pieces`, `midi_fragments.piece_id` / `passage`, `practice_log` and `raw_history`, and backfills `practice_log` with what each session kept (raw take + fragments) on its date.
+  - `delete_session` and `delete_fragment` return the paths (`delete_session` includes the undo snapshots); deleting the files is the caller's job.
+  - `practice_log` is the time actually recorded (`stop_recording` adds the new part of the take); trimming doesn't change it and deleting a session keeps it (`session_id` → `NULL`). The weekly goal is the `weekly_goal_minutes` setting in `app_settings`.
+- **Undo (`raw_history.rs`, an `impl Vault`):** every trim (extract, discard, discard several) first copies the raw take to `midi/history/` (`snapshot_raw`) and then records it (`record_trim`); `undo_trim` renames the newest snapshot back over the take and deletes the fragment that trim extracted. 10 steps per session (`RAW_HISTORY_LIMIT`). A new recording clears the history: the snapshots don't contain what was recorded after them.
 - **Markdown images:** `save_session_image` returns the relative path (`media/…`), which is what gets inserted into the notes. The frontend resolves it against the vault root and serves it through the asset protocol. `assetProtocol.scope` is empty in `tauri.conf.json`: each vault is allowed at runtime.
 - **`midi_slicer.rs`** works with `TimedMidiEvent { time_us, bytes }` in absolute time, honouring the tempo map, and writes SMF format 0 at 480 TPQ with atomic writes (tmp + rename).
   - Slicing removes the `[start, end)` interval: an event exactly at `end` is kept.
   - When extracting, it closes open notes and keeps or closes the pedal (CC64).
   - `midi_recorder` reuses it (`write_smf`, `read_timed_events`) to write the raw take and to resume recordings by appending at the end.
+  - `discard_ranges` removes several ranges with one read and one write (from the last to the first).
+- **`midi_notes.rs`:** notes as intervals (`extract_notes`, for the piano roll) and the cut suggestions (`suggest_segments`: passages separated by a minimum silence, counting the pedal as sound).
 - **`midi_recorder.rs`:** the `"simulator"` port is always present and generates notes without a physical keyboard. Real ports have the id `midir:<name>`.
 - **`audio_engine.rs`:**
   - **Threads:** the `cpal::Stream` (which is not `Send`) lives on a dedicated thread; the shared state is `Arc<Mutex<AudioState>>`.
   - **Player:** there is a single global player: synth + sequencer + metronome.
   - **No audio device:** a "null clock" advances time anyway. `new_headless` + `render_offline` are used to test without hardware.
+  - **Speed and loop:** the position is in file time (`pos_us: f64`) and advances `rate` µs per real µs, so a slower speed doesn't change the pitch. The A-B loop (`loop_us`) belongs to the loaded file; jumping back releases the notes instead of cutting them.
+  - **Export:** `render_file_offline` renders a file with its own `AudioState` (the live player is not touched) and hands blocks to `wav::WavWriter`, which streams 16-bit PCM to disk; a long take never sits in memory.
   - **Buffer:** `BufferSize::Fixed(256)` is requested for low latency in live monitoring; if the device rejects it, the default buffer is used.
   - **Measurements:** `callback_frames()` and `output_latency_us()` expose what was measured. Bluetooth output adds about 200 ms that the app cannot avoid.
 - **SoundFont (`soundfont.rs` + `sf2_builder.rs`):**
@@ -114,16 +121,25 @@ Environment on this machine:
   - `RecordingStore`: port, BPM, toggles and timer.
   - `VaultStore`: open vault, recent ones, create / open / import / close and the Settings dialog (`settingsOpen`). Without a vault, `app.html` shows `vault-welcome` instead of the layout.
   - `LanguageStore`: language preference (or automatic) and the system language; the backend stores it (or `localStorage` without Tauri).
+  - `NavStore`: the main view (`sessions`, `pieces`, `stats`), chosen in the sidebar. `session-view` stays mounted (hidden) while another view is shown.
+  - `PieceStore`: repertoire list, selected piece and its takes; `assign` files a fragment under a piece and passage.
+  - `StatsStore`: practice per day and the weekly goal; streaks, heatmap and week totals are pure functions in `core/stats.ts`.
+  - `UiPrefsStore`: view preferences of this machine (piano roll or density bars) in `localStorage`, guarded with try/catch. Vault data never goes there.
+  - `ExportService`: save dialog + `export_audio`.
 - **Behaviour details:**
   - Resuming after a pause means calling `play_midi_file(file, current_ms)` again.
-  - The slicer's preview is stopped from the frontend when it reaches `end_ms`.
+  - The slicer's preview is stopped from the frontend when it reaches `end_ms`; the fragment loop runs in the backend (`set_playback_loop`), so it wraps without gaps.
+  - The speed (`PlaybackStore.rate`) is global; the loop belongs to one file and is dropped when another file plays.
+  - Shortcuts in `app.ts`: Space = play/pause, Ctrl+Z = undo the last trim (only on the *Record & trim* tab).
   - `update_live_recording_settings` is also used outside recording, to preview the metronome.
 - **Session view:** `session-header` (title, summary and menu) and three tabs (`SessionStore.tab`): *Record & trim* (`recorder-deck` + `midi-slicer`), *Fragments* and *Notes*. Tabs are hidden with `hidden` instead of being destroyed, so the slicer's selection and the editor's state are not lost.
-- **Timeline components:** `timeline-canvas` is the shared canvas (devicePixelRatio, ResizeObserver, activity blocks, selection, progress) used by `midi-slicer` and `fragment-player`. Its ruler is `RULER_H` (18 px) tall: the parent's overlays use `bottom-[18px]`.
+- **Timeline components:** `timeline-canvas` is the shared canvas (devicePixelRatio, ResizeObserver, selection, progress) used by `midi-slicer`, `fragment-player` and `pieces-view`. It draws a piano roll (`mode="roll"`, from `get_midi_notes`; the notes go to a cached layer per colour) or density bars (`mode="activity"`, also the fallback without notes). Its ruler is `RULER_H` (18 px) tall: the parent's overlays use `bottom-[18px]`.
+  - Range selection (drag to create or move, handles, click to seek) lives in `core/timeline-drag.ts` and the handles in `range-handles`; the slicer and the fragment loop share them.
 - **Without Tauri** (`ng serve` in a regular browser), `TauriApiService.available` is `false` and calls return an `IpcError` instead of breaking.
 - **Rich text:** a sentence with bold words is a single key using `**…**`, rendered by `<app-rich-text [text]="'key' | t" />`.
 - **Styles:** Tailwind v4 via `@tailwindcss/postcss` (`.postcssrc.json`).
-  - Colours are `@theme` tokens in `src/styles.css` (`ink-*`, `line`, `fg`, `muted`, `faint`, brass `accent`, `rec`, `ok`, `ivory`); don't use Tailwind's `zinc`/`amber` palette.
+  - Colours are `@theme` tokens in `src/styles.css` (`ink-*`, `line`, `fg`, `muted`, `faint`, brass `accent`, `rec`, `ok`, `ivory`, and the heatmap ramp `heat-0…4`); don't use Tailwind's `zinc`/`amber` palette.
+  - Tailwind only emits the variables its utilities use: tokens read as `var(--color-…)` from templates (the heatmap) go in an `@theme static` block.
   - The custom classes (`.btn`, `.btn-primary`, `.btn-lg`, `.field`, `.panel`, `.label`, `.chip`, `.dot`, `.switch`, `.tabular`) live there too. The canvas doesn't read CSS: its colours are duplicated as constants in `timeline-canvas`.
   - The fonts (Hanken Grotesk and JetBrains Mono) are bundled with `@fontsource-variable/*` from `angular.json`, because the app works offline.
   - `rem` is 16 px; the `body` base text is 14 px.
