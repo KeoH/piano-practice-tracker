@@ -14,6 +14,7 @@ import {
   type MidiNotesDto,
   type MidiPortInfo,
   type PlaybackProgress,
+  type PracticeStatsDto,
   type SessionDetailDto,
   type SessionDto,
   type SessionSummaryDto,
@@ -152,6 +153,16 @@ export class TauriApiService {
       startMs: range ? Math.max(0, Math.round(range.start)) : null,
       endMs: range ? Math.max(0, Math.round(range.end)) : null,
     });
+  }
+
+  // ---- Practice statistics ----
+  getPracticeStats(from: string, to: string): Promise<PracticeStatsDto> {
+    return this.call('get_practice_stats', { from, to });
+  }
+
+  /** Weekly goal in minutes (0 = none); resolves with the value stored. */
+  setWeeklyGoal(minutes: number): Promise<number> {
+    return this.call('set_weekly_goal', { minutes: Math.max(0, Math.round(minutes)) });
   }
 
   // ---- Sessions, fragments and comments ----

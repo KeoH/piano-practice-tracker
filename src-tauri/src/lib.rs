@@ -121,6 +121,8 @@ pub fn run() {
             commands::set_playback_rate,
             commands::set_playback_loop,
             commands::export_audio,
+            commands::get_practice_stats,
+            commands::set_weekly_goal,
             commands::get_sessions,
             commands::get_session_detail,
             commands::create_session,

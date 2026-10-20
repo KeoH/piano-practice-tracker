@@ -9,6 +9,23 @@
   </div>
 </div>
 
+<!-- Views -->
+<nav class="mx-4 mb-3 grid grid-flow-col gap-1 rounded-[10px] border border-line bg-ink-900 p-1" [attr.aria-label]="'nav.label' | t">
+  @for (item of navItems; track item.view) {
+    @let active = nav.view() === item.view;
+    <button
+      type="button"
+      class="flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-[7px] px-2 text-[13px] font-medium transition-colors"
+      [class]="active ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+      [attr.aria-current]="active ? 'page' : null"
+      [title]="item.label | t"
+      (click)="nav.view.set(item.view)"
+    >
+      <app-icon [name]="item.icon" [size]="15" class="shrink-0" /><span class="truncate">{{ item.label | t }}</span>
+    </button>
+  }
+</nav>
+
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="newSession()" [disabled]="!api.available">
     <app-icon name="plus" [size]="18" /> {{ 'sidebar.newSession' | t }}

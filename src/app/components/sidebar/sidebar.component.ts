@@ -2,13 +2,20 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
+import type { MessageKey } from '../../core/i18n/languages';
 import type { SessionSummaryDto } from '../../core/models';
+import { NavStore, type AppView } from '../../core/nav.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { VaultStore } from '../../core/vault.store';
-import { IconComponent } from '../icon/icon.component';
+import { IconComponent, type IconName } from '../icon/icon.component';
+
+const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
+  { view: 'sessions', label: 'nav.sessions', icon: 'calendar' },
+  { view: 'stats', label: 'nav.stats', icon: 'chart' },
+];
 
 @Component({
   selector: 'app-sidebar',
@@ -24,6 +31,8 @@ export class SidebarComponent {
   protected readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
   protected readonly i18n = inject(I18nService);
+  protected readonly nav = inject(NavStore);
+  protected readonly navItems = NAV_ITEMS;
 
   protected readonly formatMs = formatMs;
 
@@ -59,6 +68,7 @@ export class SidebarComponent {
       this.toast.warning(this.i18n.t('sidebar.stopToSwitch'));
       return;
     }
+    this.nav.view.set('sessions');
     void this.store.select(s.id);
   }
 
@@ -67,6 +77,7 @@ export class SidebarComponent {
       this.toast.warning(this.i18n.t('sidebar.stopToCreate'));
       return;
     }
+    this.nav.view.set('sessions');
     void this.store.create();
   }
 }

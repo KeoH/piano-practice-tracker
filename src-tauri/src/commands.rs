@@ -443,6 +443,43 @@ pub async fn set_playback_loop(
 }
 
 // ---------------------------------------------------------------------------
+// Practice statistics
+// ---------------------------------------------------------------------------
+
+/// Vault setting with the weekly goal in minutes.
+const WEEKLY_GOAL_SETTING: &str = "weekly_goal_minutes";
+/// One week of practice, at most.
+const MAX_WEEKLY_GOAL_MINUTES: u32 = 7 * 24 * 60;
+
+fn parse_iso_date(value: &str) -> Result<&str, String> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|_| value)
+        .map_err(|_| t!("backend.invalidDate", date = value))
+}
+
+/// Practice per day in `[from, to]` (ISO dates) and the weekly goal.
+#[tauri::command]
+pub async fn get_practice_stats(state: State<'_, AppState>, from: String, to: String) -> Result<PracticeStatsDto, String> {
+    let vault = state.vault()?;
+    let days = vault.db.practice_days(parse_iso_date(&from)?, parse_iso_date(&to)?)?;
+    let weekly_goal_minutes = vault
+        .db
+        .get_setting(WEEKLY_GOAL_SETTING)?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    Ok(PracticeStatsDto { days, weekly_goal_minutes })
+}
+
+/// Sets the weekly goal (0 = no goal). Returns the value stored.
+#[tauri::command]
+pub async fn set_weekly_goal(state: State<'_, AppState>, minutes: u32) -> Result<u32, String> {
+    let vault = state.vault()?;
+    let minutes = minutes.min(MAX_WEEKLY_GOAL_MINUTES);
+    vault.db.set_setting(WEEKLY_GOAL_SETTING, &minutes.to_string())?;
+    Ok(minutes)
+}
+
+// ---------------------------------------------------------------------------
 // Sessions, fragments and comments
 // ---------------------------------------------------------------------------
 

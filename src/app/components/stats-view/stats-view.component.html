@@ -1,0 +1,203 @@
+<div class="mx-auto flex max-w-[1100px] flex-col gap-6 px-6 pt-8 pb-11 xl:px-11">
+  <header class="flex flex-wrap items-end gap-3">
+    <div class="flex flex-col gap-1">
+      <h1 class="text-[26px] leading-tight font-semibold text-fg-strong">{{ 'stats.title' | t }}</h1>
+      <p class="text-[13px] text-muted">{{ 'stats.subtitle' | t }}</p>
+    </div>
+    <span class="flex-1"></span>
+    @if (stats.loading()) {
+      <span class="text-[13px] text-faint" role="status">{{ 'common.loading' | t }}</span>
+    }
+  </header>
+
+  <!-- Stat tiles -->
+  <section class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" [attr.aria-label]="'stats.summary' | t">
+    <div class="panel flex flex-col gap-1.5 p-5">
+      <span class="text-[13px] text-muted">{{ 'stats.today' | t }}</span>
+      <span class="text-[28px] leading-none font-semibold text-fg-strong">{{ duration(stats.todayMs()) }}</span>
+    </div>
+
+    <div class="panel flex flex-col gap-1.5 p-5">
+      <span class="flex items-center gap-1.5 text-[13px] text-muted">
+        <app-icon name="flame" [size]="15" class="text-accent" />{{ 'stats.currentStreak' | t }}
+      </span>
+      <span class="text-[28px] leading-none font-semibold text-fg-strong">{{ 'stats.days' | tp: stats.streaks().current }}</span>
+    </div>
+
+    <div class="panel flex flex-col gap-1.5 p-5">
+      <span class="text-[13px] text-muted">{{ 'stats.bestStreak' | t }}</span>
+      <span class="text-[28px] leading-none font-semibold text-fg-strong">{{ 'stats.days' | tp: stats.streaks().best }}</span>
+    </div>
+
+    <!-- Weekly goal: meter with the track in a dim step of the same ramp -->
+    <div class="panel flex flex-col gap-2 p-5">
+      <span class="flex items-center gap-1.5 text-[13px] text-muted">
+        <app-icon name="target" [size]="15" class="text-accent" />{{ 'stats.thisWeek' | t }}
+        <span class="flex-1"></span>
+        @if (!editingGoal()) {
+          <button type="button" class="btn btn-ghost btn-icon -my-1.5 h-8 w-8" (click)="editGoal()" [attr.aria-label]="'stats.goal.edit' | t" [title]="'stats.goal.edit' | t">
+            <app-icon name="pencil" [size]="14" />
+          </button>
+        }
+      </span>
+      <span class="text-[28px] leading-none font-semibold text-fg-strong">{{ duration(stats.weekMs()) }}</span>
+      @if (editingGoal()) {
+        <form class="flex items-center gap-2" (submit)="$event.preventDefault(); saveGoal()">
+          <label class="sr-only" for="weekly-goal">{{ 'stats.goal.label' | t }}</label>
+          <input
+            id="weekly-goal"
+            type="number"
+            min="0"
+            step="15"
+            class="field tabular h-9 w-24"
+            autofocus
+            [value]="goalDraft()"
+            (input)="goalDraft.set($any($event.target).value)"
+            (keydown.escape)="editingGoal.set(false)"
+          />
+          <span class="text-[13px] text-muted">{{ 'stats.goal.unit' | t }}</span>
+          <button type="submit" class="btn btn-primary h-9">{{ 'stats.goal.save' | t }}</button>
+        </form>
+      } @else if (stats.goalMinutes() > 0) {
+        <div
+          class="h-2 overflow-hidden rounded-full bg-heat-1/45"
+          role="meter"
+          [attr.aria-label]="'stats.goal.label' | t"
+          aria-valuemin="0"
+          [attr.aria-valuemax]="stats.goalMinutes()"
+          [attr.aria-valuenow]="Math.round(stats.weekMs() / 60000)"
+        >
+          <div class="h-full rounded-full bg-accent" [style.width.%]="goalProgress() * 100"></div>
+        </div>
+        <span class="text-xs text-muted">
+          {{ (goalProgress() >= 1 ? 'stats.goal.reached' : 'stats.goal.of') | t: { goal: duration(goalMs()) } }}
+        </span>
+      } @else {
+        <button type="button" class="btn btn-link self-start text-[13px]" (click)="editGoal()">{{ 'stats.goal.set' | t }}</button>
+      }
+    </div>
+  </section>
+
+  <div #chartsPanel class="relative flex flex-col gap-6">
+    <!-- Year heatmap -->
+    <section class="panel p-6" aria-labelledby="heat-h">
+      <header class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 id="heat-h" class="text-[17px] font-semibold">{{ 'stats.heat.title' | t }}</h2>
+        <span class="text-[13px] text-muted">
+          {{ 'stats.heat.summary' | t: { time: duration(yearMs()), days: yearDays() } }}
+        </span>
+      </header>
+      <div class="overflow-x-auto">
+        <svg
+          class="block h-auto w-full min-w-[640px]"
+          [attr.viewBox]="'0 0 ' + heatWidth + ' ' + heatHeight"
+          role="img"
+          [attr.aria-label]="'stats.heat.aria' | t"
+          (pointerleave)="hideTip()"
+        >
+          @for (m of monthLabels(); track m.x) {
+            <text [attr.x]="m.x" y="10" class="fill-muted text-[10px]">{{ m.label }}</text>
+          }
+          @for (w of weekdayLabels(); track w.y) {
+            <text x="0" [attr.y]="w.y" dominant-baseline="middle" class="fill-faint text-[9.5px]">{{ w.label }}</text>
+          }
+          @for (c of heatCells(); track c.date) {
+            <rect
+              [attr.x]="c.x"
+              [attr.y]="c.y"
+              [attr.width]="cell"
+              [attr.height]="cell"
+              rx="2.5"
+              class="outline-none hover:stroke-ivory focus-visible:stroke-ivory"
+              stroke-width="1.5"
+              [attr.fill]="'var(--color-heat-' + c.level + ')'"
+              [attr.stroke]="c.date === stats.today() ? 'var(--color-fg-soft)' : null"
+              (pointerenter)="showTip($event, c.date, c.ms)"
+            />
+          }
+        </svg>
+      </div>
+      <!-- Legend: the colour steps with their ranges -->
+      <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted">
+        @for (l of legend(); track l.level) {
+          <span class="inline-flex items-center gap-1.5">
+            <span class="h-3 w-3 rounded-[3px]" [style.background]="'var(--color-heat-' + l.level + ')'"></span>{{ l.label }}
+          </span>
+        }
+      </div>
+    </section>
+
+    <!-- Last 30 days -->
+    <section class="panel p-6" aria-labelledby="days-h">
+      <header class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 id="days-h" class="text-[17px] font-semibold">{{ 'stats.last30.title' | t }}</h2>
+        <span class="text-[13px] text-muted">{{ 'stats.last30.total' | t: { time: duration(lastDaysMs()) } }}</span>
+      </header>
+      <svg
+        class="block h-auto w-full"
+        [attr.viewBox]="'0 0 ' + barW + ' ' + barH"
+        role="img"
+        [attr.aria-label]="'stats.last30.aria' | t"
+        (pointerleave)="hideTip()"
+      >
+        @for (t of yTicks(); track t.y) {
+          <line [attr.x1]="barLeft" [attr.x2]="barW" [attr.y1]="t.y" [attr.y2]="t.y" class="stroke-line" stroke-width="1" />
+          <text [attr.x]="barLeft - 8" [attr.y]="t.y" text-anchor="end" dominant-baseline="middle" class="tabular fill-faint text-[11px]">{{ t.label }}</text>
+        }
+        <text [attr.x]="barLeft - 8" y="0" text-anchor="end" dominant-baseline="hanging" class="fill-faint text-[10px]">min</text>
+        @for (b of bars(); track b.date) {
+          <!-- Hit target: the whole slot, taller than the bar -->
+          <g
+            tabindex="0"
+            class="group outline-none"
+            [attr.aria-label]="dayLabel(b.date) + ': ' + duration(b.ms)"
+            (pointerenter)="showTip($event, b.date, b.ms)"
+            (focus)="showTip($event, b.date, b.ms)"
+            (blur)="hideTip()"
+          >
+            <rect [attr.x]="b.slotX" y="0" [attr.width]="b.slot" [attr.height]="barBaseline" fill="transparent" />
+            @if (b.path) {
+              <path [attr.d]="b.path" class="fill-accent group-hover:fill-accent-hover group-focus-visible:fill-accent-hover" />
+            }
+          </g>
+          @if (b.tick) {
+            <text [attr.x]="b.center" [attr.y]="barH - 6" text-anchor="middle" class="fill-faint text-[11px]">{{ b.tick }}</text>
+          }
+        }
+        <line [attr.x1]="barLeft" [attr.x2]="barW" [attr.y1]="barBaseline" [attr.y2]="barBaseline" class="stroke-line-hover" stroke-width="1" />
+      </svg>
+
+      <details class="mt-4 border-t border-line pt-3">
+        <summary class="cursor-pointer text-[13px] font-semibold text-fg-soft">{{ 'stats.table.show' | t }}</summary>
+        <table class="mt-3 w-full max-w-md text-[13px]">
+          <thead>
+            <tr class="text-left text-xs text-muted">
+              <th class="py-1.5 font-semibold">{{ 'stats.table.day' | t }}</th>
+              <th class="py-1.5 text-right font-semibold">{{ 'stats.table.time' | t }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (d of lastDays().slice().reverse(); track d.date) {
+              <tr class="border-t border-line">
+                <td class="py-1.5 text-fg-soft">{{ dayLabel(d.date) }}</td>
+                <td class="tabular py-1.5 text-right" [class]="d.ms > 0 ? 'text-fg' : 'text-faint'">{{ duration(d.ms) }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </details>
+    </section>
+
+    @if (tip(); as t) {
+      <div
+        class="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full rounded-lg border border-line-strong bg-ink-750 px-2.5 py-1.5 shadow-lg shadow-black/50"
+        [style.left.px]="t.x"
+        [style.top.px]="t.y - 6"
+        role="status"
+      >
+        <span class="block text-[13px] font-semibold text-fg-strong">{{ t.value }}</span>
+        <span class="block text-xs text-muted">{{ t.label }}</span>
+      </div>
+    }
+  </div>
+</div>

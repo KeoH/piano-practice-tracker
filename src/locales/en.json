@@ -510,7 +510,8 @@
     "export": {
       "noSoundfont": "No SoundFont is loaded; choose one in Settings → Sound",
       "tooLong": "The recording is too long for a WAV file"
-    }
+    },
+    "invalidDate": "Invalid date: {date}"
   },
   "export": {
     "wav": "Export WAV",
@@ -520,6 +521,58 @@
     "done": "Audio saved to {path}",
     "errors": {
       "failed": "Could not export the audio"
+    }
+  },
+  "nav": {
+    "label": "Views",
+    "sessions": "Sessions",
+    "pieces": "Repertoire",
+    "stats": "Statistics"
+  },
+  "stats": {
+    "title": "Practice statistics",
+    "subtitle": "Time actually recorded, even if you trimmed it later",
+    "summary": "Summary",
+    "today": "Today",
+    "thisWeek": "This week",
+    "currentStreak": "Current streak",
+    "bestStreak": "Best streak",
+    "days_zero": "0 days",
+    "days_one": "{n} day",
+    "days_other": "{n} days",
+    "duration": {
+      "minutes": "{m} min",
+      "hours": "{h} h",
+      "hoursMinutes": "{h} h {m} min"
+    },
+    "goal": {
+      "label": "Weekly goal in minutes",
+      "unit": "min / week",
+      "edit": "Change the weekly goal",
+      "set": "Set a weekly goal",
+      "save": "Save",
+      "of": "of a {goal} goal",
+      "reached": "Goal of {goal} reached"
+    },
+    "heat": {
+      "title": "Last year",
+      "summary": "{time} over {days} days",
+      "aria": "Practice per day over the last year",
+      "none": "No practice"
+    },
+    "last30": {
+      "title": "Last 30 days",
+      "total": "{time} in total",
+      "aria": "Minutes of practice per day over the last 30 days"
+    },
+    "table": {
+      "show": "Show as a table",
+      "day": "Day",
+      "time": "Time"
+    },
+    "errors": {
+      "load": "Could not load the statistics",
+      "goal": "Could not save the goal"
     }
   }
 }

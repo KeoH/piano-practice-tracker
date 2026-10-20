@@ -10,7 +10,11 @@
     <div class="flex min-h-0 flex-1">
       <app-sidebar />
       <main class="min-w-0 flex-1 overflow-y-auto bg-ink-900">
-        <app-session-view />
+        <!-- Hidden instead of destroyed, so the session keeps its state while browsing other views -->
+        <app-session-view [hidden]="nav.view() !== 'sessions'" />
+        @if (nav.view() === 'stats') {
+          <app-stats-view />
+        }
       </main>
     </div>
   } @else if (vault.loaded()) {

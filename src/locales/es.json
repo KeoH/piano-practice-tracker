@@ -510,7 +510,8 @@
     "export": {
       "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
       "tooLong": "La grabación es demasiado larga para un archivo WAV"
-    }
+    },
+    "invalidDate": "Fecha no válida: {date}"
   },
   "export": {
     "wav": "Exportar WAV",
@@ -520,6 +521,58 @@
     "done": "Audio guardado en {path}",
     "errors": {
       "failed": "No se pudo exportar el audio"
+    }
+  },
+  "nav": {
+    "label": "Vistas",
+    "sessions": "Sesiones",
+    "pieces": "Repertorio",
+    "stats": "Estadísticas"
+  },
+  "stats": {
+    "title": "Estadísticas de práctica",
+    "subtitle": "Tiempo realmente grabado, aunque después lo hayas recortado",
+    "summary": "Resumen",
+    "today": "Hoy",
+    "thisWeek": "Esta semana",
+    "currentStreak": "Racha actual",
+    "bestStreak": "Mejor racha",
+    "days_zero": "0 días",
+    "days_one": "{n} día",
+    "days_other": "{n} días",
+    "duration": {
+      "minutes": "{m} min",
+      "hours": "{h} h",
+      "hoursMinutes": "{h} h {m} min"
+    },
+    "goal": {
+      "label": "Objetivo semanal en minutos",
+      "unit": "min / semana",
+      "edit": "Cambiar el objetivo semanal",
+      "set": "Fijar un objetivo semanal",
+      "save": "Guardar",
+      "of": "de un objetivo de {goal}",
+      "reached": "Objetivo de {goal} cumplido"
+    },
+    "heat": {
+      "title": "Último año",
+      "summary": "{time} en {days} días",
+      "aria": "Práctica por día durante el último año",
+      "none": "Sin práctica"
+    },
+    "last30": {
+      "title": "Últimos 30 días",
+      "total": "{time} en total",
+      "aria": "Minutos de práctica por día en los últimos 30 días"
+    },
+    "table": {
+      "show": "Ver como tabla",
+      "day": "Día",
+      "time": "Tiempo"
+    },
+    "errors": {
+      "load": "No se pudieron cargar las estadísticas",
+      "goal": "No se pudo guardar el objetivo"
     }
   }
 }
