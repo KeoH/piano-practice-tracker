@@ -42,6 +42,23 @@
       "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Francisco Manzano",
+    "homepage": "https://fmanzano.dev/",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "copyright": "Copyright (c) 2026 Francisco Manzano",
+    "category": "Music",
+    "shortDescription": "Piano practice tracker: USB-MIDI recording, take slicing, timeline comments and local data vaults",
+    "longDescription": "Records your piano practice from a digital piano over USB-MIDI, lets you slice the raw take into fragments and plays everything back through a SoundFont synthesizer. Anchor comments to exact moments, write Markdown notes, and keep all your data in a vault folder that any sync service can copy. Works fully offline, in English and Spanish.",
+    "linux": {
+      "deb": {
+        "section": "sound",
+        "files": {
+          "/usr/share/metainfo/com.keoh.pianotracker.metainfo.xml": "linux/com.keoh.pianotracker.metainfo.xml",
+          "/usr/share/doc/piano-practice-tracker/copyright": "linux/copyright"
+        }
+      }
+    }
   }
 }

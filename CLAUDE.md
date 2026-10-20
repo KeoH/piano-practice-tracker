@@ -47,6 +47,7 @@ Environment on this machine:
 - **Versioning:**
   - Commits on `main` (squash-merge PR titles) follow **Conventional Commits**: `feat:` bumps the minor while on 0.x, `fix:` the patch, and `feat!:` or `BREAKING CHANGE` bumps the major.
   - Never edit the version by hand. release-please keeps it in sync in `.release-please-manifest.json`, `version.txt`, `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json` (see `release-please-config.json`), and writes `CHANGELOG.md`.
+- **Packaging metadata:** the `.deb` metadata (maintainer, homepage, license, descriptions, category) lives in `bundle` in `tauri.conf.json` and in `src-tauri/Cargo.toml`. `src-tauri/linux/` holds the AppStream metainfo and the Debian `copyright`, installed through `bundle.linux.deb.files`. The metainfo has no `<releases>`: the version stays with release-please. The *About* tab in Settings reads the same `Cargo.toml` fields through `env!("CARGO_PKG_*")` (`commands::app_info`), so author, license and URLs are edited only there. `ci.yml` validates it with `appstreamcli`. Keep these texts in plain ASCII, because the App Center shows non-ASCII characters in the package description as `?`.
 
 ## Architecture
 

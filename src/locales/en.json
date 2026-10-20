@@ -139,6 +139,22 @@
       "forget": "Remove from recent",
       "syncTitle": "Backups and multiple computers",
       "syncText": "The app does not upload anything to the internet. If you put the vault inside a synced folder (Dropbox, Syncthing, Nextcloud…), that service will make the copy. Close the app on one computer and wait for it to finish syncing before opening it on another: the database does not support changes in two places at once."
+    },
+    "about": {
+      "tab": "About",
+      "title": "About",
+      "intro": "Version, author and license of this app.",
+      "version": "Version {version}",
+      "author": "Author",
+      "license": "License",
+      "builtWith": "Built with",
+      "website": "Website",
+      "source": "Source code",
+      "viewLicense": "View license",
+      "errors": {
+        "load": "Could not read the app information",
+        "open": "Could not open the link"
+      }
     }
   },
   "common": {
@@ -365,6 +381,7 @@
     "rangeEndBeforeStart": "The end of the range must come after its start",
     "commentEmpty": "The comment is empty",
     "revealFailed": "Could not open the file manager: {e}",
+    "openLinkFailed": "Could not open the link: {e}",
     "defaults": {
       "fragmentTitle": "Untitled fragment",
       "sessionTitle": "Practice session"

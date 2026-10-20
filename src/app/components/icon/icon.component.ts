@@ -32,7 +32,8 @@ export type IconName =
   | 'arrow-right'
   | 'comment'
   | 'folder'
-  | 'globe';
+  | 'globe'
+  | 'info';
 
 /** Inline SVG icons (1.75 stroke, inherit `currentColor`). */
 @Component({
@@ -52,6 +53,7 @@ export type IconName =
     >
       @switch (name()) {
         @case ('plus') { <path d="M12 5v14M5 12h14" /> }
+        @case ('info') { <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /> }
         @case ('search') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /> }
         @case ('folder') { <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9Z" /> }
         @case ('cloud') { <path d="M7 18a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5H7Z" /> }

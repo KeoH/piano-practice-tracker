@@ -3,15 +3,16 @@ import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import { RecordingStore } from '../../core/recording.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { VaultStore } from '../../core/vault.store';
+import { AboutSettingsComponent } from '../about-settings/about-settings.component';
 import { IconComponent } from '../icon/icon.component';
 import { LanguageSelectComponent } from '../language-select/language-select.component';
 import { SoundfontSettingsComponent } from '../soundfont-settings/soundfont-settings.component';
 
-/** Settings modal with three sections: general (language), sound (SoundFont) and vault (where the data is stored). */
+/** Settings modal with four sections: general (language), sound (SoundFont), vault (where the data is stored) and about. */
 @Component({
   selector: 'app-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, SoundfontSettingsComponent, LanguageSelectComponent, TranslatePipe],
+  imports: [IconComponent, SoundfontSettingsComponent, LanguageSelectComponent, AboutSettingsComponent, TranslatePipe],
   templateUrl: './settings-dialog.component.html',
 })
 export class SettingsDialogComponent {
@@ -19,7 +20,7 @@ export class SettingsDialogComponent {
   protected readonly rec = inject(RecordingStore);
   protected readonly api = inject(TauriApiService);
 
-  protected readonly tab = signal<'general' | 'sound' | 'vault'>('general');
+  protected readonly tab = signal<'general' | 'sound' | 'vault' | 'about'>('general');
 
   protected close(): void {
     this.vault.settingsOpen.set(false);

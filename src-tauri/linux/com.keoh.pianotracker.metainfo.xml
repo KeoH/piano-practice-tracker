@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Installed by the .deb (bundle.linux.deb.files in tauri.conf.json). No <releases>:
+     the version comes from the package and release-please owns it. -->
+<component type="desktop-application">
+  <id>com.keoh.pianotracker</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Piano Practice Tracker</name>
+  <summary>Record, slice and annotate your piano practice over USB-MIDI</summary>
+
+  <developer id="dev.fmanzano">
+    <name>Francisco Manzano</name>
+  </developer>
+
+  <description>
+    <p>
+      Piano Practice Tracker records your practice sessions from a digital piano over USB-MIDI,
+      lets you slice the raw take into fragments and plays everything back through a SoundFont
+      synthesizer. It works fully offline.
+    </p>
+    <ul>
+      <li>Record from any MIDI port, with a built-in metronome and optional live monitoring</li>
+      <li>Slice the raw take into fragments or discard silences and mistakes</li>
+      <li>Play back takes and fragments with play, pause and seek</li>
+      <li>Anchor comments to exact moments of a fragment and write Markdown notes with images</li>
+      <li>Keep your data in a vault folder that any sync service can copy between computers</li>
+      <li>Available in English and Spanish</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">Piano Practice Tracker.desktop</launchable>
+
+  <url type="homepage">https://fmanzano.dev/</url>
+  <url type="vcs-browser">https://github.com/KeoH/piano-practice-tracker</url>
+  <url type="bugtracker">https://github.com/KeoH/piano-practice-tracker/issues</url>
+
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Music</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+</component>

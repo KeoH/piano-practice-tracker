@@ -139,6 +139,22 @@
       "forget": "Quitar de recientes",
       "syncTitle": "Copias de seguridad y varios equipos",
       "syncText": "La app no sube nada a internet. Si pones la bóveda dentro de una carpeta sincronizada (Dropbox, Syncthing, Nextcloud…), ese servicio hará la copia. Cierra la app en un equipo y espera a que termine de sincronizar antes de abrirla en otro: la base de datos no admite cambios en dos sitios a la vez."
+    },
+    "about": {
+      "tab": "Acerca de",
+      "title": "Acerca de",
+      "intro": "Versión, autor y licencia de esta app.",
+      "version": "Versión {version}",
+      "author": "Autor",
+      "license": "Licencia",
+      "builtWith": "Hecha con",
+      "website": "Sitio web",
+      "source": "Código fuente",
+      "viewLicense": "Ver licencia",
+      "errors": {
+        "load": "No se pudo leer la información de la app",
+        "open": "No se pudo abrir el enlace"
+      }
     }
   },
   "common": {
@@ -365,6 +381,7 @@
     "rangeEndBeforeStart": "El final del rango debe ser posterior al inicio",
     "commentEmpty": "El comentario está vacío",
     "revealFailed": "No se pudo abrir el gestor de archivos: {e}",
+    "openLinkFailed": "No se pudo abrir el enlace: {e}",
     "defaults": {
       "fragmentTitle": "Fragmento sin título",
       "sessionTitle": "Sesión de práctica"

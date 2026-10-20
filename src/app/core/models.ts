@@ -141,6 +141,22 @@ export interface LanguageInfo {
   system: string;
 }
 
+/** What the "About" tab shows (comes from `Cargo.toml`). */
+export interface AppInfo {
+  name: string;
+  version: string;
+  /** Author names, without the email address. */
+  authors: string[];
+  /** SPDX identifier (`"MIT"`). */
+  license: string;
+  homepage: string;
+  repository: string;
+  tauri_version: string;
+}
+
+/** Links the "About" tab can open; the backend builds the URL. */
+export type AppLink = 'homepage' | 'repository' | 'license';
+
 /** Payload of the `playback-progress` event (every 50 ms). */
 export interface PlaybackProgress {
   file_path: string;

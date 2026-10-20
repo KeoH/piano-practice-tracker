@@ -3,6 +3,7 @@
 //! They are all `async` so they don't block the UI's main thread; the modules they wrap are
 //! synchronous and fast, except MIDI analysis/slicing.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -650,16 +651,58 @@ pub async fn forget_recent_vault(state: State<'_, AppState>, path: String) -> Re
 #[tauri::command]
 pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
     let vault = state.vault()?;
-    std::process::Command::new("xdg-open")
-        .arg(&vault.paths.base)
-        .spawn()
-        .map(|mut child| {
-            // Reaps the process when it exits so no zombies are left.
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-        })
-        .map_err(|e| t!("backend.revealFailed", e = e))
+    xdg_open(vault.paths.base.as_os_str()).map_err(|e| t!("backend.revealFailed", e = e))
+}
+
+/// Opens a path or URL with the desktop's default application.
+fn xdg_open(arg: &OsStr) -> std::io::Result<()> {
+    std::process::Command::new("xdg-open").arg(arg).spawn().map(|mut child| {
+        // Reaps the process when it exits so no zombies are left.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    })
+}
+
+// ---------------------------------------------------------------------------
+// About
+// ---------------------------------------------------------------------------
+
+/// Read from `Cargo.toml` at compile time; release-please keeps its version up to date.
+fn app_info() -> AppInfo {
+    AppInfo {
+        name: "Piano Practice Tracker".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        authors: env!("CARGO_PKG_AUTHORS")
+            .split(':')
+            .map(|a| a.split('<').next().unwrap_or(a).trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect(),
+        license: env!("CARGO_PKG_LICENSE").into(),
+        homepage: env!("CARGO_PKG_HOMEPAGE").into(),
+        repository: env!("CARGO_PKG_REPOSITORY").into(),
+        tauri_version: tauri::VERSION.into(),
+    }
+}
+
+fn app_link_url(link: AppLink) -> String {
+    let info = app_info();
+    match link {
+        AppLink::Homepage => info.homepage,
+        AppLink::Repository => info.repository,
+        AppLink::License => format!("{}/blob/main/LICENSE", info.repository),
+    }
+}
+
+#[tauri::command]
+pub async fn get_app_info() -> Result<AppInfo, String> {
+    Ok(app_info())
+}
+
+/// Opens one of the app's links in the browser.
+#[tauri::command]
+pub async fn open_app_link(target: AppLink) -> Result<(), String> {
+    xdg_open(OsStr::new(&app_link_url(target))).map_err(|e| t!("backend.openLinkFailed", e = e))
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +735,21 @@ pub async fn set_language(state: State<'_, AppState>, language: Option<String>) 
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_image_name;
+    use super::{app_info, app_link_url, sanitize_image_name};
+    use crate::models::AppLink;
+
+    #[test]
+    fn app_info_comes_from_cargo_toml() {
+        let info = app_info();
+        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+        assert!(!info.version.is_empty());
+        assert_eq!(info.license, "MIT");
+        assert_eq!(info.authors, ["Francisco Manzano"]);
+        for link in [AppLink::Homepage, AppLink::Repository, AppLink::License] {
+            assert!(app_link_url(link).starts_with("https://"), "{link:?}");
+        }
+        assert!(app_link_url(AppLink::License).ends_with("/blob/main/LICENSE"));
+    }
 
     #[test]
     fn sanitizes_image_names() {
