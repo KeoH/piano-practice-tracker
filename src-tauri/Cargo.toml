@@ -1,10 +1,11 @@
 [package]
 name = "piano-tracker"
 version = "0.2.0"
-description = "Piano Practice Tracker: MIDI recording, destructive slicing, timeline comments and local data vaults"
-authors = ["keoh"]
-license = ""
-repository = ""
+description = "Piano practice tracker: USB-MIDI recording, take slicing, timeline comments and local data vaults"
+authors = ["Francisco Manzano <keoh77@gmail.com>"]
+license = "MIT"
+homepage = "https://fmanzano.dev/"
+repository = "https://github.com/KeoH/piano-practice-tracker"
 edition = "2021"
 rust-version = "1.80"
 

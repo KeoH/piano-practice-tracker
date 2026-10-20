@@ -174,6 +174,29 @@ pub struct LanguageInfo {
     pub system: String,
 }
 
+/// What the "About" tab shows. It comes from `Cargo.toml`, the same source as the `.deb` metadata.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AppInfo {
+    pub name: String,
+    pub version: String,
+    /// Author names, without the email address.
+    pub authors: Vec<String>,
+    /// SPDX identifier (`"MIT"`).
+    pub license: String,
+    pub homepage: String,
+    pub repository: String,
+    pub tauri_version: String,
+}
+
+/// Links the "About" tab can open. The webview never sends a URL: the backend builds it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AppLink {
+    Homepage,
+    Repository,
+    License,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct VaultOpenResult {
     pub info: VaultInfo,

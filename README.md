@@ -29,6 +29,8 @@ Install the `.deb`:
 sudo apt install ./Piano*Practice*Tracker*_amd64.deb
 ```
 
+You can also open the `.deb` with Ubuntu's App Center. It shows a "Potentially unsafe" warning because the package doesn't come from the store; that is expected for any downloaded `.deb`, so check it against `SHA256SUMS.txt` first.
+
 Or run the AppImage directly:
 
 ```bash
@@ -129,3 +131,7 @@ English (`src/locales/en.json`) is the reference and Spanish is a translation. T
 ## Contributing
 
 Pull requests run the CI (frontend build and tests, backend tests and coverage). PR titles follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `feat!:`…), because they become the commit on `main` after the squash merge. [release-please](https://github.com/googleapis/release-please) uses them to work out the next version, update `CHANGELOG.md` and publish the release packages. Don't edit version numbers by hand.
+
+## License
+
+[MIT](LICENSE) © 2026 Francisco Manzano

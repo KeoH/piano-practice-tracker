@@ -5,6 +5,8 @@ import { errorMessage } from './format';
 import { I18nService } from './i18n/i18n.service';
 import {
   EVENT_PLAYBACK_PROGRESS,
+  type AppInfo,
+  type AppLink,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
   type LanguageInfo,
@@ -215,6 +217,16 @@ export class TauriApiService {
   /** `null` goes back to the system language. */
   setLanguage(language: string | null): Promise<LanguageInfo> {
     return this.call('set_language', { language });
+  }
+
+  // ---- About ----
+  getAppInfo(): Promise<AppInfo> {
+    return this.call('get_app_info');
+  }
+
+  /** Opens the website, the repository or the license in the browser. */
+  openAppLink(target: AppLink): Promise<void> {
+    return this.call('open_app_link', { target });
   }
 
   // ---- SoundFont ----

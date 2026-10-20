@@ -132,6 +132,8 @@ pub fn run() {
             commands::reveal_vault,
             commands::get_language,
             commands::set_language,
+            commands::get_app_info,
+            commands::open_app_link,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

@@ -63,6 +63,12 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
+      # The App Center reads this to show the publisher, license and description.
+      - name: Validate AppStream metainfo
+        run: |
+          sudo apt-get install -y --no-install-recommends appstream
+          appstreamcli validate --no-net linux/com.keoh.pianotracker.metainfo.xml
+
       # `tauri::generate_context!` embeds `frontendDist` at compile time; the tests don't need the real one.
       - name: Placeholder frontend
         working-directory: .
