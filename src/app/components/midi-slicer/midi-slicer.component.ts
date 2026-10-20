@@ -11,6 +11,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
+import { ExportService } from '../../core/export.service';
 import { clamp, formatMs, parseTime } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -51,6 +52,7 @@ export class MidiSlicerComponent {
   protected readonly formatMs = formatMs;
 
   protected readonly prefs = inject(UiPrefsStore);
+  protected readonly exporter = inject(ExportService);
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly loading = signal(false);

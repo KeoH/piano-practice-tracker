@@ -506,6 +506,20 @@
     "undo": {
       "empty": "There is nothing to undo in this session",
       "snapshotMissing": "The saved copy of the raw recording is missing: {path}"
+    },
+    "export": {
+      "noSoundfont": "No SoundFont is loaded; choose one in Settings → Sound",
+      "tooLong": "The recording is too long for a WAV file"
+    }
+  },
+  "export": {
+    "wav": "Export WAV",
+    "wavHint": "Save the audio as a WAV file, with the current piano sound",
+    "exporting": "Exporting…",
+    "pickTitle": "Export audio",
+    "done": "Audio saved to {path}",
+    "errors": {
+      "failed": "Could not export the audio"
     }
   }
 }

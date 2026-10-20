@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use base64::Engine as _;
 use tauri::{Manager, State};
 
-use crate::audio_engine::AudioEngine;
+use crate::audio_engine::{self, AudioEngine};
 use crate::i18n;
 use crate::midi_notes;
 use crate::midi_recorder::{self, MidiRecorder, MidiSink};
@@ -20,6 +20,7 @@ use crate::paths::AppDirs;
 use crate::raw_history::{remove_file_quietly, TrimAction};
 use crate::soundfont;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
+use crate::wav::WavWriter;
 
 /// Maximum number of activity blocks returned to the frontend.
 const ACTIVITY_BLOCKS: usize = 200;
@@ -400,6 +401,27 @@ pub async fn seek_midi_playback(state: State<'_, AppState>, ms: u64) -> Result<(
 #[tauri::command]
 pub async fn stop_midi_playback(state: State<'_, AppState>) -> Result<(), String> {
     state.audio.stop()
+}
+
+/// Sample rate of the exported audio.
+const EXPORT_SAMPLE_RATE: u32 = 44_100;
+
+/// Renders a `.mid` file to a 16-bit stereo WAV with the current SoundFont. Returns the path
+/// written (with a `.wav` extension added if it had none).
+#[tauri::command]
+pub async fn export_audio(state: State<'_, AppState>, file_path: String, dest_path: String) -> Result<String, String> {
+    let sound_font = state.audio.sound_font().ok_or_else(|| t!("backend.export.noSoundfont"))?;
+    let mut dest = PathBuf::from(dest_path);
+    if !dest.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        dest.as_mut_os_string().push(".wav");
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut wav = WavWriter::create(&dest, EXPORT_SAMPLE_RATE, 2)?;
+        audio_engine::render_file_offline(sound_font, Path::new(&file_path), EXPORT_SAMPLE_RATE, |b| wav.write(b))?;
+        wav.finish(EXPORT_SAMPLE_RATE).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
 }
 
 /// Playback speed (1.0 = original tempo). Returns the speed applied after clamping.

@@ -225,9 +225,20 @@
         @if (comments().length) {
           <p class="mx-2 mt-3.5 text-xs leading-normal text-faint">{{ 'fragments.commentsHint' | t }}</p>
         }
-        <button type="button" class="btn btn-danger mx-2 mt-5" (click)="deleteFragment()">
-          <app-icon name="trash" [size]="15" /> {{ 'fragments.delete' | t }}
-        </button>
+        <div class="mx-2 mt-5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="btn"
+            [title]="'export.wavHint' | t"
+            [disabled]="exporter.isBusy(f.file_path)"
+            (click)="exporter.exportWav(f.file_path, f.title)"
+          >
+            <app-icon name="download" [size]="15" /> {{ (exporter.isBusy(f.file_path) ? 'export.exporting' : 'export.wav') | t }}
+          </button>
+          <button type="button" class="btn btn-danger" (click)="deleteFragment()">
+            <app-icon name="trash" [size]="15" /> {{ 'fragments.delete' | t }}
+          </button>
+        </div>
       </aside>
     </div>
   }

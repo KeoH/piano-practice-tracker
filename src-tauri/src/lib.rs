@@ -13,6 +13,7 @@ pub mod raw_history;
 pub mod sf2_builder;
 pub mod soundfont;
 pub mod vault;
+pub mod wav;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
@@ -119,6 +120,7 @@ pub fn run() {
             commands::stop_midi_playback,
             commands::set_playback_rate,
             commands::set_playback_loop,
+            commands::export_audio,
             commands::get_sessions,
             commands::get_session_detail,
             commands::create_session,

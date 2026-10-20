@@ -506,6 +506,20 @@
     "undo": {
       "empty": "No hay nada que deshacer en esta sesión",
       "snapshotMissing": "Falta la copia guardada de la grabación: {path}"
+    },
+    "export": {
+      "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
+      "tooLong": "La grabación es demasiado larga para un archivo WAV"
+    }
+  },
+  "export": {
+    "wav": "Exportar WAV",
+    "wavHint": "Guardar el audio en un archivo WAV, con el sonido de piano actual",
+    "exporting": "Exportando…",
+    "pickTitle": "Exportar audio",
+    "done": "Audio guardado en {path}",
+    "errors": {
+      "failed": "No se pudo exportar el audio"
     }
   }
 }

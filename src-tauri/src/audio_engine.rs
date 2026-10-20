@@ -386,6 +386,11 @@ impl AudioEngine {
     }
 
     /// `true` if the SoundFont loaded and the synthesizer is working.
+    /// SoundFont loaded in the engine (to render offline with the same sound).
+    pub fn sound_font(&self) -> Option<Arc<SoundFont>> {
+        lock(&self.state).sound_font.clone()
+    }
+
     pub fn synth_available(&self) -> bool {
         lock(&self.state).synth.is_some()
     }
@@ -582,6 +587,53 @@ impl Drop for AudioEngine {
             let _ = h.join();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Offline rendering (export)
+// ---------------------------------------------------------------------------
+
+/// Reverb and release kept after the last event.
+const EXPORT_TAIL_SECS: u32 = 2;
+const EXPORT_BLOCK_FRAMES: usize = 4096;
+
+/// Renders `path` with `sound_font` at `sample_rate`, independently of the live player, and hands
+/// the interleaved stereo samples to `sink` block by block. Returns the frames rendered.
+pub fn render_file_offline(
+    sound_font: Arc<SoundFont>,
+    path: &Path,
+    sample_rate: u32,
+    mut sink: impl FnMut(&[f32]) -> Result<(), String>,
+) -> Result<u64, String> {
+    let (events, duration_ms) = read_timed_events(path)?;
+    let duration_us = (duration_ms * 1000).max(events.last().map(|e| e.time_us).unwrap_or(0));
+    let mut st = AudioState::new(Some(sound_font), sample_rate);
+    if st.synth.is_none() {
+        return Err(t!("backend.export.noSoundfont"));
+    }
+    st.seq = Sequencer {
+        file_path: Some(path.to_string_lossy().into_owned()),
+        events,
+        duration_us,
+        is_playing: duration_us > 0,
+        ..Sequencer::default()
+    };
+    let mut buf = vec![0.0f32; EXPORT_BLOCK_FRAMES * 2];
+    let mut frames = 0u64;
+    while st.seq.is_playing {
+        st.render_interleaved(&mut buf);
+        sink(&buf)?;
+        frames += EXPORT_BLOCK_FRAMES as u64;
+    }
+    let tail = (sample_rate * EXPORT_TAIL_SECS) as usize;
+    let mut done = 0;
+    while done < tail {
+        let n = EXPORT_BLOCK_FRAMES.min(tail - done);
+        st.render_interleaved(&mut buf[..n * 2]);
+        sink(&buf[..n * 2])?;
+        done += n;
+    }
+    Ok(frames + tail as u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,6 +1054,37 @@ mod tests {
         eng.render_offline(88_200);
         assert!(!eng.is_playing());
         assert_eq!(eng.position_ms(), 2_000);
+    }
+
+    #[test]
+    fn renders_a_file_offline_without_touching_the_player() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        eng.play_file(&mid, 500).unwrap();
+        let sf = eng.sound_font().expect("SoundFont loaded");
+
+        let mut out = Vec::new();
+        let frames = render_file_offline(sf, &mid, 22_050, |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(out.len() as u64, frames * 2);
+        // 2 s of music (rounded up to a block) + 2 s of tail.
+        let secs = frames as f64 / 22_050.0;
+        assert!((4.0..4.2).contains(&secs), "{secs} s");
+        assert!(rms(&out[..22_050 * 2]) > 0.01);
+        assert!(out.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        // The tail fades out.
+        assert!(peak(&out[out.len() - 2_000..]) < peak(&out[..22_050 * 2]));
+        // The live player is still where it was.
+        assert_eq!(eng.position_ms(), 500);
+        assert!(eng.is_playing());
+
+        let failing = render_file_offline(eng.sound_font().unwrap(), &mid, 22_050, |_| Err("disk full".into()));
+        assert_eq!(failing.unwrap_err(), "disk full");
     }
 
     #[test]

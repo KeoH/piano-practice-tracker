@@ -12,6 +12,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
+import { ExportService } from '../../core/export.service';
 import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -57,6 +58,7 @@ export class FragmentPlayerComponent {
 
   protected readonly expanded = signal(false);
   protected readonly prefs = inject(UiPrefsStore);
+  protected readonly exporter = inject(ExportService);
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly activityLoading = signal(false);

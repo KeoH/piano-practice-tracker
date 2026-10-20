@@ -20,6 +20,16 @@
       <app-icon name="wand" [size]="15" /> {{ 'slicer.suggest.button' | t }}
     </button>
     <app-timeline-mode-toggle />
+    <button
+      type="button"
+      class="btn btn-ghost btn-icon h-9 w-9"
+      [attr.aria-label]="'export.wav' | t"
+      [title]="'export.wavHint' | t"
+      [disabled]="!rawPath() || durationMs() <= 0 || exporter.isBusy(rawPath()) || recordingHere()"
+      (click)="exporter.exportWav(rawPath(), session().title)"
+    >
+      <app-icon name="download" [size]="17" [class.animate-pulse]="exporter.isBusy(rawPath())" />
+    </button>
     <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" [attr.aria-label]="'slicer.reanalyze' | t" [title]="'slicer.reanalyze' | t">
       <app-icon name="refresh" [size]="17" [class.animate-spin]="loading()" />
     </button>

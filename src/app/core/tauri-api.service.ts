@@ -233,6 +233,23 @@ export class TauriApiService {
     return this.call('reveal_vault');
   }
 
+  /** Renders a `.mid` file to WAV with the current SoundFont; resolves with the path written. */
+  exportAudio(filePath: string, destPath: string): Promise<string> {
+    return this.call('export_audio', { filePath, destPath });
+  }
+
+  /** Native "save as" dialog for a WAV file; returns null if cancelled. */
+  async pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+    if (!this.available) return null;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const picked = await save({ title, defaultPath: defaultName, filters: [{ name: 'WAV', extensions: ['wav'] }] });
+      return typeof picked === 'string' ? picked : null;
+    } catch (err) {
+      throw new IpcError('dialog.save', errorMessage(err));
+    }
+  }
+
   /** Native dialog to choose a folder; returns null if cancelled. */
   async pickFolder(title: string): Promise<string | null> {
     if (!this.available) return null;
