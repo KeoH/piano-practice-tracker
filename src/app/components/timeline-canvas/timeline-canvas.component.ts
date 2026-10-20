@@ -13,11 +13,7 @@ import {
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import type { ActivityBlock } from '../../core/models';
-
-export interface TimeRange {
-  start: number;
-  end: number;
-}
+import type { TimeRange } from '../../core/timeline-drag';
 
 const TICK_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
 /** Height of the time ruler below the track (the parent's overlays use `bottom-[18px]`). */

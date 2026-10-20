@@ -109,8 +109,19 @@
                 [blocks]="activity()?.blocks ?? []"
                 [durationMs]="durationMs()"
                 [height]="102"
+                [selection]="loopDrag.selection()"
                 [progressMs]="position() > 0 ? position() : null"
               />
+              @if (loopDrag.selection(); as range) {
+                <app-range-handles
+                  [range]="range"
+                  [durationMs]="durationMs()"
+                  [drag]="loopDrag"
+                  [knobHeight]="34"
+                  [startLabel]="'fragments.loopStart' | t"
+                  [endLabel]="'fragments.loopEnd' | t"
+                />
+              }
               <div class="pointer-events-none absolute top-0 bottom-[18px] z-10 -ml-px w-0.5 bg-ivory shadow-[0_0_8px] shadow-ivory/60" [style.left.%]="pct(position())"></div>
             </div>
           </div>
@@ -127,6 +138,21 @@
           <span class="tabular text-[15px]">
             <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
           </span>
+          <span class="flex-1"></span>
+          <button
+            type="button"
+            class="btn h-9"
+            [class]="loop() ? 'border-accent/60 bg-accent/15 text-accent' : 'text-fg-soft'"
+            [attr.aria-pressed]="!!loop()"
+            [title]="(loop() ? 'fragments.loopOn' : 'fragments.loopOff') | t"
+            (click)="toggleLoop()"
+          >
+            <app-icon name="repeat" [size]="15" /> {{ 'fragments.loop' | t }}
+            @if (loop(); as l) {
+              <span class="tabular text-xs">{{ formatMs(l.start) }}–{{ formatMs(l.end) }}</span>
+            }
+          </button>
+          <app-rate-select />
           @if (activityLoading()) {
             <span class="text-[13px] text-faint" role="status">{{ 'slicer.analyzing' | t }}</span>
           }

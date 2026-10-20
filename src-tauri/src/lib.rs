@@ -113,6 +113,8 @@ pub fn run() {
             commands::pause_midi_playback,
             commands::seek_midi_playback,
             commands::stop_midi_playback,
+            commands::set_playback_rate,
+            commands::set_playback_loop,
             commands::get_sessions,
             commands::get_session_detail,
             commands::create_session,

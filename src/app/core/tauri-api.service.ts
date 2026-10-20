@@ -124,6 +124,19 @@ export class TauriApiService {
     return this.call('stop_midi_playback');
   }
 
+  /** Playback speed (1 = original tempo); resolves with the speed applied. */
+  setPlaybackRate(rate: number): Promise<number> {
+    return this.call('set_playback_rate', { rate });
+  }
+
+  /** A-B loop of the loaded file; `null` removes it. */
+  setPlaybackLoop(range: { start: number; end: number } | null): Promise<void> {
+    return this.call('set_playback_loop', {
+      startMs: range ? Math.max(0, Math.round(range.start)) : null,
+      endMs: range ? Math.max(0, Math.round(range.end)) : null,
+    });
+  }
+
   // ---- Sessions, fragments and comments ----
   getSessions(): Promise<SessionSummaryDto[]> {
     return this.call('get_sessions');

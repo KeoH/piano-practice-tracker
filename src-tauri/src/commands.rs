@@ -362,6 +362,24 @@ pub async fn stop_midi_playback(state: State<'_, AppState>) -> Result<(), String
     state.audio.stop()
 }
 
+/// Playback speed (1.0 = original tempo). Returns the speed applied after clamping.
+#[tauri::command]
+pub async fn set_playback_rate(state: State<'_, AppState>, rate: f32) -> Result<f32, String> {
+    state.audio.set_playback_rate(rate);
+    Ok(state.audio.playback_rate())
+}
+
+/// A-B loop of the loaded file; without `start_ms` / `end_ms` the loop is removed.
+#[tauri::command]
+pub async fn set_playback_loop(
+    state: State<'_, AppState>,
+    start_ms: Option<u64>,
+    end_ms: Option<u64>,
+) -> Result<(), String> {
+    let range = start_ms.zip(end_ms);
+    state.audio.set_playback_loop(range)
+}
+
 // ---------------------------------------------------------------------------
 // Sessions, fragments and comments
 // ---------------------------------------------------------------------------

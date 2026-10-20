@@ -36,6 +36,11 @@ const MASTER_VOLUME: f32 = 0.6;
 const METRONOME_GAIN: f32 = 0.45;
 const CLICK_SECS: f32 = 0.05;
 const CLICK_DECAY_SECS: f32 = 0.012;
+/// Playback speed range (1.0 = original tempo).
+pub const MIN_PLAYBACK_RATE: f32 = 0.25;
+pub const MAX_PLAYBACK_RATE: f32 = 1.5;
+/// Shortest loop accepted.
+const MIN_LOOP_US: u64 = 100_000;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -51,8 +56,11 @@ struct Sequencer {
     events: Vec<TimedMidiEvent>,
     duration_us: u64,
     next_idx: usize,
-    pos_frames: u64,
+    /// Position in file time (µs). Fractional because it advances `rate` µs per real µs.
+    pos_us: f64,
     is_playing: bool,
+    /// A-B loop in file time (µs): on reaching the end it jumps back to the start.
+    loop_us: Option<(u64, u64)>,
 }
 
 struct Metronome {
@@ -84,6 +92,8 @@ struct AudioState {
     sound_font: Option<Arc<SoundFont>>,
     sample_rate: u32,
     seq: Sequencer,
+    /// Playback speed; kept across files.
+    rate: f32,
     metronome: Metronome,
     live_synth: bool,
     /// Asks the progress thread for an extra emission (pause/stop/end/seek).
@@ -134,6 +144,7 @@ impl AudioState {
             sound_font,
             sample_rate,
             seq: Sequencer::default(),
+            rate: 1.0,
             metronome: Metronome { enabled: false, bpm: 120, pos: 0 },
             live_synth: false,
             emit_pending: false,
@@ -147,18 +158,12 @@ impl AudioState {
         if sample_rate == self.sample_rate {
             return;
         }
-        let pos_us = self.pos_us();
         self.sample_rate = sample_rate;
         self.synth = self.sound_font.as_ref().and_then(|sf| new_synth(sf, sample_rate));
-        self.seq.pos_frames = self.us_to_frames(pos_us);
-    }
-
-    fn us_to_frames(&self, us: u64) -> u64 {
-        (us as u128 * self.sample_rate as u128 / 1_000_000) as u64
     }
 
     fn pos_us(&self) -> u64 {
-        (self.seq.pos_frames as u128 * 1_000_000 / self.sample_rate.max(1) as u128) as u64
+        self.seq.pos_us as u64
     }
 
     fn pos_ms(&self) -> u64 {
@@ -198,6 +203,23 @@ impl AudioState {
     fn position_at(&mut self, ms: u64) {
         let target_us = ms.saturating_mul(1000).min(self.seq.duration_us);
         self.reset_synth();
+        self.chase_to(target_us);
+    }
+
+    /// Jumps from the end of the loop back to its start. Unlike a seek, the sounding notes are
+    /// released (not cut) and the reverb tail is kept, so the jump doesn't click.
+    fn loop_back(&mut self, start_us: u64) {
+        if let Some(s) = self.synth.as_mut() {
+            for ch in 0..16 {
+                s.process_midi_message(ch, 0xB0, 64, 0);
+            }
+            s.note_off_all(false);
+        }
+        self.chase_to(start_us);
+    }
+
+    /// Sends the controller state before `target_us` and moves the sequencer there.
+    fn chase_to(&mut self, target_us: u64) {
         let idx = self.seq.events.partition_point(|e| e.time_us < target_us);
         let chase: Vec<Vec<u8>> = self.seq.events[..idx]
             .iter()
@@ -208,7 +230,7 @@ impl AudioState {
             self.send(&b);
         }
         self.seq.next_idx = idx;
-        self.seq.pos_frames = self.us_to_frames(target_us);
+        self.seq.pos_us = target_us as f64;
     }
 
     fn dispatch_until(&mut self, until_us: u64) {
@@ -246,11 +268,15 @@ impl AudioState {
                 out[o + 1] = (self.right[i] + click).clamp(-1.0, 1.0);
             }
             if self.seq.is_playing && self.seq.file_path.is_some() {
-                self.seq.pos_frames += n as u64;
-                if self.pos_us() >= self.seq.duration_us {
+                self.seq.pos_us += n as f64 * 1_000_000.0 / sr as f64 * self.rate as f64;
+                if let Some((start, end)) = self.seq.loop_us.filter(|(_, end)| self.pos_us() >= *end) {
+                    self.dispatch_until(end);
+                    self.loop_back(start);
+                    self.emit_pending = true;
+                } else if self.pos_us() >= self.seq.duration_us {
                     let end = self.seq.duration_us;
                     self.dispatch_until(end);
-                    self.seq.pos_frames = self.us_to_frames(end);
+                    self.seq.pos_us = end as f64;
                     self.seq.is_playing = false;
                     self.emit_pending = true;
                 }
@@ -415,13 +441,16 @@ impl AudioEngine {
         let (events, duration_ms) = read_timed_events(path)?;
         let duration_us = (duration_ms * 1000).max(events.last().map(|e| e.time_us).unwrap_or(0));
         let mut st = lock(&self.state);
+        // The loop belongs to the file: it survives replaying the same file from another position.
+        let loop_us = if st.seq.file_path.as_deref() == Some(path_str.as_str()) { st.seq.loop_us } else { None };
         st.seq = Sequencer {
             file_path: Some(path_str),
             events,
             duration_us,
             next_idx: 0,
-            pos_frames: 0,
+            pos_us: 0.0,
             is_playing: false,
+            loop_us: loop_us.filter(|(_, end)| *end <= duration_us),
         };
         let start = if start_ms.saturating_mul(1000) >= duration_us { 0 } else { start_ms };
         st.position_at(start);
@@ -459,8 +488,44 @@ impl AudioEngine {
         st.seq.is_playing = false;
         st.reset_synth();
         st.seq.next_idx = 0;
-        st.seq.pos_frames = 0;
+        st.seq.pos_us = 0.0;
         st.emit_pending = st.seq.file_path.is_some();
+        Ok(())
+    }
+
+    /// Playback speed (clamped to [`MIN_PLAYBACK_RATE`], [`MAX_PLAYBACK_RATE`]). It changes the
+    /// tempo, not the pitch: the events are synthesized later or earlier.
+    pub fn set_playback_rate(&self, rate: f32) {
+        let rate = if rate.is_finite() { rate.clamp(MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE) } else { 1.0 };
+        lock(&self.state).rate = rate;
+    }
+
+    pub fn playback_rate(&self) -> f32 {
+        lock(&self.state).rate
+    }
+
+    /// Loops `[start_ms, end_ms)` of the loaded file (`None` = no loop). If the position is
+    /// outside the loop, it moves to its start.
+    pub fn set_playback_loop(&self, range: Option<(u64, u64)>) -> Result<(), String> {
+        let mut st = lock(&self.state);
+        let Some((start_ms, end_ms)) = range else {
+            st.seq.loop_us = None;
+            return Ok(());
+        };
+        if st.seq.file_path.is_none() {
+            return Err(t!("backend.playback.noFile"));
+        }
+        let start = start_ms.saturating_mul(1000);
+        let end = end_ms.saturating_mul(1000).min(st.seq.duration_us);
+        if end < start + MIN_LOOP_US {
+            return Err(t!("backend.playback.loopTooShort"));
+        }
+        st.seq.loop_us = Some((start, end));
+        let pos = st.pos_us();
+        if pos < start || pos >= end {
+            st.position_at(start / 1000);
+            st.emit_pending = true;
+        }
         Ok(())
     }
 
@@ -878,6 +943,65 @@ mod tests {
         assert!(eng.position_ms() > 1_000);
         assert!(eng.seek(500).is_ok());
         assert!(eng.play_file(&dir.path().join("no_existe.mid"), 0).is_err());
+    }
+
+    #[test]
+    fn playback_rate_scales_the_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        eng.set_playback_rate(0.5);
+        eng.play_file(&mid, 0).unwrap();
+        eng.render_offline(44_100);
+        let pos = eng.position_ms();
+        assert!((495..=505).contains(&pos), "1 s at half speed: pos={pos}");
+        // The speed is kept when another file (or the same one) is played.
+        eng.play_file(&mid, 0).unwrap();
+        assert_eq!(eng.playback_rate(), 0.5);
+        eng.set_playback_rate(9.0);
+        assert_eq!(eng.playback_rate(), MAX_PLAYBACK_RATE);
+        eng.set_playback_rate(f32::NAN);
+        assert_eq!(eng.playback_rate(), 1.0);
+        eng.set_playback_rate(0.0);
+        assert_eq!(eng.playback_rate(), MIN_PLAYBACK_RATE);
+    }
+
+    #[test]
+    fn loop_wraps_inside_the_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        assert!(eng.set_playback_loop(Some((0, 1000))).is_err(), "no file loaded");
+        eng.play_file(&mid, 0).unwrap();
+        assert!(eng.set_playback_loop(Some((900, 950))).is_err(), "too short");
+        // Outside the loop: it moves to the start.
+        eng.set_playback_loop(Some((500, 1000))).unwrap();
+        assert_eq!(eng.position_ms(), 500);
+
+        let mut wrapped = false;
+        let mut last = 500;
+        let mut audio = Vec::new();
+        for _ in 0..30 {
+            audio.extend(eng.render_offline(4_410));
+            let pos = eng.position_ms();
+            assert!((500..1000).contains(&pos), "pos={pos}");
+            wrapped |= pos < last;
+            last = pos;
+        }
+        assert!(wrapped, "3 s of a 0.5 s loop must wrap");
+        assert!(eng.is_playing());
+        assert!(rms(&audio) > 0.01 && audio.iter().all(|v| v.is_finite()));
+
+        // Replaying the same file keeps the loop; without it, it plays to the end.
+        eng.play_file(&mid, 600).unwrap();
+        eng.render_offline(44_100);
+        assert!(eng.position_ms() < 1000);
+        eng.set_playback_loop(None).unwrap();
+        eng.render_offline(88_200);
+        assert!(!eng.is_playing());
+        assert_eq!(eng.position_ms(), 2_000);
     }
 
     #[test]

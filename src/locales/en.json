@@ -87,8 +87,12 @@
       "play": "Could not play",
       "pause": "Could not pause",
       "seek": "Could not seek",
-      "stop": "Could not stop"
-    }
+      "stop": "Could not stop",
+      "rate": "Could not change the speed",
+      "loop": "Could not set the loop"
+    },
+    "rate": "Speed",
+    "rateHint": "Playback speed: slower keeps the pitch"
   },
   "settings": {
     "sound": {
@@ -278,7 +282,12 @@
       "deleteComment": "Could not delete the comment",
       "save": "Could not save the fragment",
       "delete": "Could not delete the fragment"
-    }
+    },
+    "loop": "Loop",
+    "loopOn": "Loop on: drag on the timeline to change the passage",
+    "loopOff": "Repeat a passage in a loop",
+    "loopStart": "Start of the loop",
+    "loopEnd": "End of the loop"
   },
   "slicer": {
     "analyzing": "Analyzing…",
@@ -410,7 +419,8 @@
       "builtinName": "Built-in synthetic piano"
     },
     "playback": {
-      "noFile": "No file is loaded"
+      "noFile": "No file is loaded",
+      "loopTooShort": "The loop must be at least 0.1 s long"
     },
     "recorder": {
       "alreadyRunning": "A recording is already in progress",

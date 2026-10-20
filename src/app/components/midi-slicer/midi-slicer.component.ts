@@ -21,28 +21,17 @@ import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
+import { RangeHandlesComponent } from '../range-handles/range-handles.component';
+import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
-import { TimelineCanvasComponent, type TimeRange } from '../timeline-canvas/timeline-canvas.component';
-
-type DragMode = 'start' | 'end' | 'move' | 'create';
-
-interface DragState {
-  mode: DragMode;
-  pointerId: number;
-  x0: number;
-  ms0: number;
-  sel0: TimeRange | null;
-  moved: boolean;
-}
-
-const MIN_SELECTION_MS = 100;
-const DRAG_THRESHOLD_PX = 4;
+import { MIN_SELECTION_MS, TimelineDrag } from '../../core/timeline-drag';
+import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
 
 /** Visual slicer for the session's raw take (selection, preview, extract and discard). */
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, RichTextComponent, TranslatePipe],
+  imports: [IconComponent, TimelineCanvasComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -61,7 +50,6 @@ export class MidiSlicerComponent {
 
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly loading = signal(false);
-  protected readonly selection = signal<TimeRange | null>(null);
   protected readonly working = signal(false);
 
   // Extraction modal
@@ -70,7 +58,13 @@ export class MidiSlicerComponent {
   protected readonly extractExplanation = signal('');
 
   private readonly track = viewChild.required<ElementRef<HTMLElement>>('track');
-  private drag: DragState | null = null;
+  protected readonly drag = new TimelineDrag({
+    track: () => this.track().nativeElement,
+    durationMs: () => this.durationMs(),
+    locked: () => this.locked(),
+    onSeek: (ms) => void this.playback.seek(this.rawPath(), ms),
+  });
+  protected readonly selection = this.drag.selection;
 
   protected readonly rawPath = computed(() => this.session().raw_midi_path ?? '');
   protected readonly durationMs = computed(
@@ -125,109 +119,15 @@ export class MidiSlicerComponent {
     return d > 0 ? clamp((ms / d) * 100, 0, 100) : 0;
   }
 
-  private msAt(clientX: number): number {
-    const r = this.track().nativeElement.getBoundingClientRect();
-    const d = this.durationMs();
-    if (r.width <= 0 || d <= 0) return 0;
-    return Math.round(clamp((clientX - r.left) / r.width, 0, 1) * d);
-  }
-
-  // ---- Pointer interaction ----
-  protected onHandleDown(ev: PointerEvent, mode: 'start' | 'end'): void {
-    if (ev.button !== 0 || this.locked()) return;
-    ev.stopPropagation();
-    ev.preventDefault();
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    this.drag = { mode, pointerId: ev.pointerId, x0: ev.clientX, ms0: this.msAt(ev.clientX), sel0: this.selection(), moved: true };
-  }
-
-  protected onTrackDown(ev: PointerEvent): void {
-    if (ev.button !== 0 || this.durationMs() <= 0) return;
-    ev.preventDefault();
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    const ms = this.msAt(ev.clientX);
-    const sel = this.selection();
-    const inside = !!sel && ms >= sel.start && ms <= sel.end;
-    this.drag = { mode: inside ? 'move' : 'create', pointerId: ev.pointerId, x0: ev.clientX, ms0: ms, sel0: sel, moved: false };
-  }
-
-  protected onPointerMove(ev: PointerEvent): void {
-    const d = this.drag;
-    if (!d || d.pointerId !== ev.pointerId) return;
-    if (!d.moved) {
-      if (Math.abs(ev.clientX - d.x0) < DRAG_THRESHOLD_PX || this.locked()) return;
-      d.moved = true;
-    }
-    const ms = this.msAt(ev.clientX);
-    const dur = this.durationMs();
-    const sel = this.selection();
-    switch (d.mode) {
-      case 'start':
-        if (sel) this.selection.set({ start: clamp(ms, 0, sel.end - MIN_SELECTION_MS), end: sel.end });
-        break;
-      case 'end':
-        if (sel) this.selection.set({ start: sel.start, end: clamp(ms, sel.start + MIN_SELECTION_MS, dur) });
-        break;
-      case 'move':
-        if (d.sel0) {
-          const len = d.sel0.end - d.sel0.start;
-          const start = clamp(d.sel0.start + (ms - d.ms0), 0, Math.max(0, dur - len));
-          this.selection.set({ start, end: start + len });
-        }
-        break;
-      case 'create':
-        this.selection.set({ start: Math.min(d.ms0, ms), end: Math.max(d.ms0, ms) });
-        break;
-    }
-  }
-
-  protected onPointerUp(ev: PointerEvent): void {
-    const d = this.drag;
-    if (!d || d.pointerId !== ev.pointerId) return;
-    this.drag = null;
-    if (!d.moved) {
-      // Single click = seek
-      void this.playback.seek(this.rawPath(), this.msAt(ev.clientX));
-      return;
-    }
-    const sel = this.selection();
-    if (sel && sel.end - sel.start < MIN_SELECTION_MS) this.selection.set(d.mode === 'create' ? null : d.sel0);
-  }
-
-  protected onHandleKey(ev: KeyboardEvent, which: 'start' | 'end'): void {
-    const sel = this.selection();
-    if (!sel || this.locked()) return;
-    const step = ev.shiftKey ? 1000 : 100;
-    let delta = 0;
-    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') delta = -step;
-    else if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') delta = step;
-    else return;
-    ev.preventDefault();
-    if (which === 'start') this.setStart(sel.start + delta);
-    else this.setEnd(sel.end + delta);
-  }
-
   // ---- Inputs mm:ss ----
-  private setStart(ms: number): void {
-    const dur = this.durationMs();
-    const sel = this.selection() ?? { start: 0, end: dur };
-    this.selection.set({ start: clamp(ms, 0, Math.max(0, sel.end - MIN_SELECTION_MS)), end: sel.end });
-  }
-
-  private setEnd(ms: number): void {
-    const dur = this.durationMs();
-    const sel = this.selection() ?? { start: 0, end: dur };
-    this.selection.set({ start: sel.start, end: clamp(ms, sel.start + MIN_SELECTION_MS, dur) });
-  }
-
   protected onTimeInput(el: HTMLInputElement, which: 'start' | 'end'): void {
     const ms = parseTime(el.value);
     if (ms === null) {
       this.toast.warning(this.i18n.t('slicer.invalidTime'));
     } else if (which === 'start') {
-      this.setStart(ms);
+      this.drag.setStart(ms);
     } else {
-      this.setEnd(ms);
+      this.drag.setEnd(ms);
     }
     const sel = this.selection();
     el.value = sel ? formatMs(which === 'start' ? sel.start : sel.end, true) : '';

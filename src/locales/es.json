@@ -87,8 +87,12 @@
       "play": "No se pudo reproducir",
       "pause": "No se pudo pausar",
       "seek": "No se pudo posicionar",
-      "stop": "No se pudo detener"
-    }
+      "stop": "No se pudo detener",
+      "rate": "No se pudo cambiar la velocidad",
+      "loop": "No se pudo activar el bucle"
+    },
+    "rate": "Velocidad",
+    "rateHint": "Velocidad de reproducción: más lenta mantiene la afinación"
   },
   "settings": {
     "sound": {
@@ -278,7 +282,12 @@
       "deleteComment": "No se pudo borrar el comentario",
       "save": "No se pudo guardar el fragmento",
       "delete": "No se pudo borrar el fragmento"
-    }
+    },
+    "loop": "Bucle",
+    "loopOn": "Bucle activo: arrastra sobre la línea de tiempo para cambiar el pasaje",
+    "loopOff": "Repetir un pasaje en bucle",
+    "loopStart": "Inicio del bucle",
+    "loopEnd": "Fin del bucle"
   },
   "slicer": {
     "analyzing": "Analizando…",
@@ -410,7 +419,8 @@
       "builtinName": "Piano sintético integrado"
     },
     "playback": {
-      "noFile": "No hay ningún fichero cargado"
+      "noFile": "No hay ningún fichero cargado",
+      "loopTooShort": "El bucle debe durar al menos 0,1 s"
     },
     "recorder": {
       "alreadyRunning": "Ya hay una grabación en curso",

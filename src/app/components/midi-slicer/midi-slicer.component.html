@@ -20,10 +20,10 @@
     <div
       #track
       class="relative cursor-crosshair touch-none overflow-hidden rounded-xl border border-line select-none"
-      (pointerdown)="onTrackDown($event)"
-      (pointermove)="onPointerMove($event)"
-      (pointerup)="onPointerUp($event)"
-      (pointercancel)="onPointerUp($event)"
+      (pointerdown)="drag.trackDown($event)"
+      (pointermove)="drag.move($event)"
+      (pointerup)="drag.up($event)"
+      (pointercancel)="drag.up($event)"
     >
       <app-timeline-canvas [blocks]="activity()?.blocks ?? []" [durationMs]="durationMs()" [selection]="selection()" [height]="152" />
 
@@ -35,39 +35,13 @@
             [style.left.%]="(pct(sel.start) + pct(sel.end)) / 2"
           >{{ formatMs(sel.end - sel.start, true) }}</span>
         }
-        <!-- Start/end handles -->
-        <div
-          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
-          [style.left.%]="pct(sel.start)"
-          role="slider"
-          tabindex="0"
-          [attr.aria-label]="'slicer.selectionStart' | t"
-          [attr.aria-valuemin]="0"
-          [attr.aria-valuemax]="sel.end"
-          [attr.aria-valuenow]="sel.start"
-          [attr.aria-valuetext]="formatMs(sel.start, true)"
-          (pointerdown)="onHandleDown($event, 'start')"
-          (keydown)="onHandleKey($event, 'start')"
-        >
-          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
-          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
-        </div>
-        <div
-          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
-          [style.left.%]="pct(sel.end)"
-          role="slider"
-          tabindex="0"
-          [attr.aria-label]="'slicer.selectionEnd' | t"
-          [attr.aria-valuemin]="sel.start"
-          [attr.aria-valuemax]="durationMs()"
-          [attr.aria-valuenow]="sel.end"
-          [attr.aria-valuetext]="formatMs(sel.end, true)"
-          (pointerdown)="onHandleDown($event, 'end')"
-          (keydown)="onHandleKey($event, 'end')"
-        >
-          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
-          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
-        </div>
+        <app-range-handles
+          [range]="sel"
+          [durationMs]="durationMs()"
+          [drag]="drag"
+          [startLabel]="'slicer.selectionStart' | t"
+          [endLabel]="'slicer.selectionEnd' | t"
+        />
       }
 
       @if (showPlayhead()) {
@@ -96,6 +70,7 @@
         <span class="tabular ml-1.5 text-[15px]" [attr.aria-label]="'player.position' | t">
           <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
         </span>
+        <app-rate-select class="ml-3" />
       </div>
 
       <div class="flex flex-wrap items-end gap-2.5">
