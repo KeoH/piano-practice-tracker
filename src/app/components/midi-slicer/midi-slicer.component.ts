@@ -13,8 +13,8 @@ import {
 import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs, parseTime } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
-import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { MidiActivityDto, MidiNotesDto, SessionDto } from '../../core/models';
+import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
+import type { MidiActivityDto, MidiNotesDto, SessionDto, TimeRangeDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
@@ -33,7 +33,7 @@ import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mo
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe],
+  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -55,6 +55,11 @@ export class MidiSlicerComponent {
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly loading = signal(false);
   protected readonly working = signal(false);
+
+  // Cut suggestions (only valid for the raw take they were computed on)
+  protected readonly suggestGapS = signal(3);
+  protected readonly suggesting = signal(false);
+  private readonly suggestionsState = signal<{ key: string; segments: TimeRangeDto[] } | null>(null);
 
   // Extraction modal
   protected readonly extractOpen = signal(false);
@@ -81,6 +86,25 @@ export class MidiSlicerComponent {
   protected readonly showPlayhead = computed(
     () => this.playback.progress()?.file_path === this.rawPath() || this.position() > 0,
   );
+  private readonly rawKey = computed(() => `${this.session().raw_midi_path ?? ''}|${this.session().raw_duration_ms}`);
+  protected readonly suggestions = computed(() => {
+    const s = this.suggestionsState();
+    return s && s.key === this.rawKey() ? s.segments : null;
+  });
+  /** Silences between the suggested passages (and before the first / after the last). */
+  protected readonly silences = computed<TimeRangeDto[]>(() => {
+    const segs = this.suggestions();
+    const dur = this.durationMs();
+    if (!segs || !segs.length) return [];
+    const bounds = [0, ...segs.flatMap((s) => [s.start_ms, s.end_ms]), dur];
+    const out: TimeRangeDto[] = [];
+    for (let i = 0; i < bounds.length; i += 2) {
+      if (bounds[i + 1] - bounds[i] >= MIN_SELECTION_MS) out.push({ start_ms: bounds[i], end_ms: bounds[i + 1] });
+    }
+    return out;
+  });
+  protected readonly silenceMs = computed(() => this.silences().reduce((t, s) => t + s.end_ms - s.start_ms, 0));
+
   protected readonly validSelection = computed(() => {
     const s = this.selection();
     return !!s && s.end - s.start >= MIN_SELECTION_MS && s.start >= 0 && s.end <= this.durationMs() + 1;
@@ -88,9 +112,8 @@ export class MidiSlicerComponent {
 
   constructor() {
     // Reloads the activity when the raw take's path or duration changes
-    const rawKey = computed(() => `${this.session().raw_midi_path ?? ''}|${this.session().raw_duration_ms}`);
     effect(() => {
-      rawKey();
+      this.rawKey();
       untracked(() => void this.loadActivity(this.session().raw_midi_path, this.session().raw_duration_ms));
     });
   }
@@ -216,6 +239,65 @@ export class MidiSlicerComponent {
     } finally {
       this.working.set(false);
     }
+  }
+
+  // ---- Cut suggestions ----
+  protected async suggest(): Promise<void> {
+    const path = this.rawPath();
+    if (!path || this.suggesting()) return;
+    const key = this.rawKey();
+    this.suggesting.set(true);
+    try {
+      const segments = await this.api.suggestMidiSegments(path, this.suggestGapS() * 1000);
+      if (this.rawKey() === key) this.suggestionsState.set({ key, segments });
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('slicer.errors.suggest'));
+    } finally {
+      this.suggesting.set(false);
+    }
+  }
+
+  protected setSuggestGap(seconds: number): void {
+    this.suggestGapS.set(seconds);
+    void this.suggest();
+  }
+
+  protected closeSuggestions(): void {
+    this.suggestionsState.set(null);
+  }
+
+  protected pickSegment(s: TimeRangeDto): void {
+    if (this.locked()) return;
+    this.selection.set({ start: s.start_ms, end: s.end_ms });
+  }
+
+  protected async discardSilences(): Promise<void> {
+    const silences = this.silences();
+    if (!silences.length) return;
+    const ok = await this.confirm.ask({
+      title: this.i18n.t('slicer.suggest.discardTitle'),
+      message: this.i18n.plural('slicer.suggest.discardMessage', silences.length, {
+        duration: formatMs(this.silenceMs(), true),
+      }),
+      confirmLabel: this.i18n.t('slicer.discardConfirm'),
+    });
+    if (!ok) return;
+    this.working.set(true);
+    try {
+      await this.playback.stopIfActive(this.rawPath());
+      const s = await this.api.discardMidiRanges(this.session().id, silences);
+      this.selection.set(null);
+      this.store.applySession(s);
+      await this.store.reloadDetail();
+      void this.store.refreshList();
+      this.toast.success(this.i18n.plural('slicer.suggest.discarded', silences.length));
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('slicer.errors.discard'));
+    } finally {
+      this.working.set(false);
+    }
+    // The passages are now back to back: suggest them again on the new take.
+    await this.suggest();
   }
 
   protected async undo(): Promise<void> {

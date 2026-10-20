@@ -110,6 +110,8 @@ pub fn run() {
             commands::get_midi_notes,
             commands::extract_midi_fragment,
             commands::discard_midi_range,
+            commands::discard_midi_ranges,
+            commands::suggest_midi_segments,
             commands::undo_raw_trim,
             commands::play_midi_file,
             commands::pause_midi_playback,

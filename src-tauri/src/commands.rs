@@ -23,6 +23,9 @@ use crate::vault::{self, AppConfig, OpenOutcome, Vault};
 
 /// Maximum number of activity blocks returned to the frontend.
 const ACTIVITY_BLOCKS: usize = 200;
+/// Cut suggestions: silence that separates two passages, and the shortest passage kept apart.
+const DEFAULT_SEGMENT_GAP_MS: u64 = 3_000;
+const MIN_SEGMENT_MS: u64 = 4_000;
 
 pub struct AppState {
     /// App directories outside the vault (configuration and built-in SoundFont).
@@ -314,19 +317,36 @@ pub async fn discard_midi_range(
     start_ms: u64,
     end_ms: u64,
 ) -> Result<SessionDto, String> {
-    let vault = state.vault()?;
-    state.ensure_not_recording(&session_id)?;
     if end_ms <= start_ms {
         return Err(t!("backend.rangeEndBeforeStart"));
     }
-    let session = vault.db.get_session(&session_id)?;
+    discard_from_raw(&state, &session_id, vec![(start_ms, end_ms)]).await
+}
+
+/// Discards several ranges of the raw take at once (e.g. every silence), as a single undo step.
+#[tauri::command]
+pub async fn discard_midi_ranges(
+    state: State<'_, AppState>,
+    session_id: String,
+    ranges: Vec<TimeRangeDto>,
+) -> Result<SessionDto, String> {
+    if ranges.is_empty() || ranges.iter().any(|r| r.end_ms <= r.start_ms) {
+        return Err(t!("backend.rangeEndBeforeStart"));
+    }
+    discard_from_raw(&state, &session_id, ranges.iter().map(|r| (r.start_ms, r.end_ms)).collect()).await
+}
+
+async fn discard_from_raw(state: &AppState, session_id: &str, ranges: Vec<(u64, u64)>) -> Result<SessionDto, String> {
+    let vault = state.vault()?;
+    state.ensure_not_recording(session_id)?;
+    let session = vault.db.get_session(session_id)?;
     let raw = state.raw_path_of(&session)?;
     state.audio.stop()?;
 
-    let snapshot = vault.snapshot_raw(&session_id, &raw)?;
+    let snapshot = vault.snapshot_raw(session_id, &raw)?;
     let new_duration = {
         let (raw, bpm) = (raw.clone(), session.bpm);
-        tauri::async_runtime::spawn_blocking(move || midi_slicer::discard_range(&raw, start_ms, end_ms, bpm))
+        tauri::async_runtime::spawn_blocking(move || midi_slicer::discard_ranges(&raw, &ranges, bpm))
             .await
             .map_err(|e| t!("backend.internal", e = e))
             .and_then(|r| r)
@@ -338,9 +358,20 @@ pub async fn discard_midi_range(
             return Err(e);
         }
     };
-    let updated = vault.db.set_session_raw_midi(&session_id, &raw.to_string_lossy(), new_duration)?;
-    vault.record_trim(&session_id, &snapshot, session.raw_duration_ms, TrimAction::Discard, None);
+    let updated = vault.db.set_session_raw_midi(session_id, &raw.to_string_lossy(), new_duration)?;
+    vault.record_trim(session_id, &snapshot, session.raw_duration_ms, TrimAction::Discard, None);
     Ok(updated)
+}
+
+/// Passages of the take separated by at least `min_gap_ms` of silence (3 s by default).
+#[tauri::command]
+pub async fn suggest_midi_segments(file_path: String, min_gap_ms: Option<u64>) -> Result<Vec<TimeRangeDto>, String> {
+    let min_gap = min_gap_ms.unwrap_or(DEFAULT_SEGMENT_GAP_MS).clamp(500, 60_000);
+    tauri::async_runtime::spawn_blocking(move || {
+        midi_notes::suggest_segments(Path::new(&file_path), min_gap, MIN_SEGMENT_MS)
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
 }
 
 #[tauri::command]

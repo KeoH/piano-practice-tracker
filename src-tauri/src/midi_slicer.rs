@@ -499,13 +499,33 @@ pub fn extract_fragment_and_trim(
 
 /// Removes `[start_ms, end_ms)` from `source` without creating a fragment. Returns the new duration (ms).
 pub fn discard_range(source: &Path, start_ms: u64, end_ms: u64, bpm: u32) -> Result<u64, String> {
-    let (events, dur_us) = read_timed_events_us(source)?;
-    let duration_ms = us_to_ms(dur_us);
-    let (start_ms, end_ms) = validate_range(start_ms, end_ms, duration_ms)?;
-    let remaining_ms = duration_ms - (end_ms - start_ms);
-    let trimmed = build_trimmed(&events, start_ms * 1000, end_ms * 1000);
-    write_smf_with_end(source, &trimmed, bpm, Some(remaining_ms * 1000))?;
-    Ok(remaining_ms)
+    discard_ranges(source, &[(start_ms, end_ms)], bpm)
+}
+
+/// Removes several ranges (in the file's current times) in one read and one write. Overlapping
+/// ranges are merged; they are cut from the last to the first so the earlier times stay valid.
+/// Returns the new duration (ms).
+pub fn discard_ranges(source: &Path, ranges: &[(u64, u64)], bpm: u32) -> Result<u64, String> {
+    let (mut events, dur_us) = read_timed_events_us(source)?;
+    let mut duration_ms = us_to_ms(dur_us);
+    let mut valid = ranges
+        .iter()
+        .map(|&(s, e)| validate_range(s, e, duration_ms))
+        .collect::<Result<Vec<_>, String>>()?;
+    valid.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(valid.len());
+    for (s, e) in valid {
+        match merged.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    for &(s, e) in merged.iter().rev() {
+        events = build_trimmed(&events, s * 1000, e * 1000);
+        duration_ms -= e - s;
+    }
+    write_smf_with_end(source, &events, bpm, Some(duration_ms * 1000))?;
+    Ok(duration_ms)
 }
 
 #[cfg(test)]
@@ -625,6 +645,34 @@ mod tests {
         let (evs2, dur2) = read_timed_events(&raw).unwrap();
         assert!(approx(dur2, 40_000));
         assert_clean(&evs2);
+    }
+
+    #[test]
+    fn discard_ranges_cuts_several_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("raw.mid");
+        let one_by_one = dir.path().join("one.mid");
+        let original = build_test_track(&raw, 120);
+        build_test_track(&one_by_one, 120);
+        let at30 = original.iter().find(|e| e.time_us == 30_000_000 && as_note_on(&e.bytes).is_some()).unwrap().clone();
+
+        // Unordered and overlapping: [5, 12) ∪ [10, 15) = [5, 15), plus [20, 25) and [50, 60).
+        let d = discard_ranges(&raw, &[(20_000, 25_000), (10_000, 15_000), (5_000, 12_000), (50_000, 60_000)], 120).unwrap();
+        assert_eq!(d, 60_000 - 10_000 - 5_000 - 10_000);
+        let (evs, dur) = read_timed_events(&raw).unwrap();
+        assert!(approx(dur, 35_000), "{dur}");
+        assert_clean(&evs);
+        // The 30 s note moves back by the 15 s removed before it.
+        assert!(evs.iter().any(|e| e.bytes == at30.bytes && approx(e.time_us / 1000, 15_000)));
+
+        // Same result as cutting one by one from the end.
+        discard_range(&one_by_one, 50_000, 60_000, 120).unwrap();
+        discard_range(&one_by_one, 20_000, 25_000, 120).unwrap();
+        discard_range(&one_by_one, 5_000, 15_000, 120).unwrap();
+        assert_eq!(read_timed_events(&one_by_one).unwrap(), (evs, dur));
+
+        assert!(discard_ranges(&raw, &[(1_000, 2_000), (5, 1)], 120).is_err());
+        assert_eq!(midi_duration_ms(&raw).unwrap(), 35_000, "an invalid range changes nothing");
     }
 
     #[test]

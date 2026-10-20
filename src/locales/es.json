@@ -319,7 +319,8 @@
       "analyze": "No se pudo analizar la pista bruta",
       "extract": "No se pudo extraer el fragmento",
       "discard": "No se pudo descartar el tramo",
-      "undo": "No se pudo deshacer el recorte"
+      "undo": "No se pudo deshacer el recorte",
+      "suggest": "No se pudieron buscar los silencios"
     },
     "undo": "Deshacer",
     "undoHint": "Deshacer el último recorte (Ctrl+Z)",
@@ -328,7 +329,23 @@
     "undoMessage_one": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con su comentario.",
     "undoMessage_other": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con sus {n} comentarios.",
     "undone": "Recorte deshecho",
-    "undoneExtract": "Recorte deshecho: «{title}» ha vuelto a la pista bruta"
+    "undoneExtract": "Recorte deshecho: «{title}» ha vuelto a la pista bruta",
+    "suggest": {
+      "button": "Sugerir cortes",
+      "hint": "Buscar los pasajes separados por silencios",
+      "found_zero": "No se ha encontrado ningún silencio suficientemente largo",
+      "found_one": "{n} pasaje encontrado: haz clic para seleccionarlo",
+      "found_other": "{n} pasajes encontrados: haz clic en uno para seleccionarlo",
+      "minGap": "Silencio mínimo",
+      "discard": "Descartar los silencios ({duration})",
+      "discardTitle": "¿Descartar todos los silencios?",
+      "discardMessage_one": "Se quitará de la pista bruta {n} silencio ({duration} en total). Se puede deshacer de una vez.",
+      "discardMessage_other": "Se quitarán de la pista bruta {n} silencios ({duration} en total). Se puede deshacer de una vez.",
+      "discarded_one": "{n} silencio eliminado",
+      "discarded_other": "{n} silencios eliminados",
+      "close": "Ocultar las sugerencias",
+      "segment": "Pasaje {n}: {start} – {end}"
+    }
   },
   "timeline": {
     "noActivity": "Sin actividad de notas",

@@ -10,6 +10,15 @@
     }
     <span class="flex-1"></span>
     <span class="text-[13px] text-muted">{{ 'slicer.help' | t }}</span>
+    <button
+      type="button"
+      class="btn h-9 text-fg-soft"
+      [title]="'slicer.suggest.hint' | t"
+      [disabled]="!rawPath() || durationMs() <= 0 || suggesting() || locked()"
+      (click)="suggest()"
+    >
+      <app-icon name="wand" [size]="15" /> {{ 'slicer.suggest.button' | t }}
+    </button>
     <app-timeline-mode-toggle />
     <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" [attr.aria-label]="'slicer.reanalyze' | t" [title]="'slicer.reanalyze' | t">
       <app-icon name="refresh" [size]="17" [class.animate-spin]="loading()" />
@@ -17,6 +26,24 @@
   </header>
 
   <div class="px-6 pt-4 pb-6">
+    @if (suggestions(); as segs) {
+      <!-- Suggested passages: click to select -->
+      <div class="relative mb-1.5 h-7" role="group" [attr.aria-label]="'slicer.suggest.button' | t">
+        @for (s of segs; track s.start_ms; let n = $index) {
+          <button
+            type="button"
+            class="tabular absolute top-0 flex h-7 items-center justify-center overflow-hidden rounded-md border border-dashed border-ivory/35 bg-ivory/5 px-1.5 text-[11.5px] text-fg-soft transition-colors hover:border-accent hover:bg-accent/15 hover:text-accent"
+            [style.left.%]="pct(s.start_ms)"
+            [style.width.%]="pct(s.end_ms) - pct(s.start_ms)"
+            [attr.aria-label]="'slicer.suggest.segment' | t: { n: n + 1, start: formatMs(s.start_ms), end: formatMs(s.end_ms) }"
+            [title]="'slicer.suggest.segment' | t: { n: n + 1, start: formatMs(s.start_ms), end: formatMs(s.end_ms) }"
+            [disabled]="locked()"
+            (click)="pickSegment(s)"
+          >{{ n + 1 }}</button>
+        }
+      </div>
+    }
+
     <!-- Timeline -->
     <div
       #track
@@ -52,12 +79,50 @@
         />
       }
 
+      @for (s of suggestions() ?? []; track s.start_ms) {
+        <div
+          class="pointer-events-none absolute top-1 bottom-[22px] rounded-md border border-dashed border-ivory/25"
+          [style.left.%]="pct(s.start_ms)"
+          [style.width.%]="pct(s.end_ms) - pct(s.start_ms)"
+        ></div>
+      }
+
       @if (showPlayhead()) {
         <div class="pointer-events-none absolute top-0 bottom-[18px] z-20 -ml-px w-0.5 bg-ivory shadow-[0_0_8px] shadow-ivory/60" [style.left.%]="pct(position())">
           <span class="absolute top-0 -left-[5px] h-0 w-0 border-x-[6px] border-t-[8px] border-x-transparent border-t-ivory"></span>
         </div>
       }
     </div>
+
+    @if (suggestions(); as segs) {
+      <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-ink-850 px-4 py-2.5 text-[13px]" role="status">
+        <span class="inline-flex items-center gap-2 text-fg">
+          <app-icon name="wand" [size]="15" class="text-accent" />{{ 'slicer.suggest.found' | tp: segs.length }}
+        </span>
+        <label class="inline-flex items-center gap-2 text-muted">
+          {{ 'slicer.suggest.minGap' | t }}
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="0.5"
+            class="w-28 accent-accent"
+            [value]="suggestGapS()"
+            (change)="setSuggestGap(+$any($event.target).value)"
+          />
+          <span class="tabular w-10 text-fg-soft">{{ suggestGapS() }} s</span>
+        </label>
+        <span class="flex-1"></span>
+        @if (silences().length) {
+          <button type="button" class="btn btn-danger h-9" (click)="discardSilences()" [disabled]="locked()">
+            <app-icon name="trash" [size]="15" /> {{ 'slicer.suggest.discard' | t: { duration: formatMs(silenceMs(), true) } }}
+          </button>
+        }
+        <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="closeSuggestions()" [attr.aria-label]="'slicer.suggest.close' | t" [title]="'slicer.suggest.close' | t">
+          <app-icon name="close" [size]="16" />
+        </button>
+      </div>
+    }
 
     <!-- Controls -->
     <div class="mt-5 flex flex-wrap items-center gap-x-7 gap-y-4">

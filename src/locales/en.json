@@ -319,7 +319,8 @@
       "analyze": "Could not analyze the raw recording",
       "extract": "Could not extract the fragment",
       "discard": "Could not discard the section",
-      "undo": "Could not undo the trim"
+      "undo": "Could not undo the trim",
+      "suggest": "Could not look for the silences"
     },
     "undo": "Undo",
     "undoHint": "Undo the last trim (Ctrl+Z)",
@@ -328,7 +329,23 @@
     "undoMessage_one": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its comment.",
     "undoMessage_other": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its {n} comments.",
     "undone": "Trim undone",
-    "undoneExtract": "Trim undone: “{title}” is back in the raw recording"
+    "undoneExtract": "Trim undone: “{title}” is back in the raw recording",
+    "suggest": {
+      "button": "Suggest cuts",
+      "hint": "Find the passages separated by silences",
+      "found_zero": "No silence long enough was found",
+      "found_one": "{n} passage found: click it to select it",
+      "found_other": "{n} passages found: click one to select it",
+      "minGap": "Minimum silence",
+      "discard": "Discard the silences ({duration})",
+      "discardTitle": "Discard every silence?",
+      "discardMessage_one": "{n} silence ({duration} in total) will be removed from the raw recording. You can undo it in one step.",
+      "discardMessage_other": "{n} silences ({duration} in total) will be removed from the raw recording. You can undo it in one step.",
+      "discarded_one": "{n} silence removed",
+      "discarded_other": "{n} silences removed",
+      "close": "Hide the suggestions",
+      "segment": "Passage {n}: {start} – {end}"
+    }
   },
   "timeline": {
     "noActivity": "No note activity",

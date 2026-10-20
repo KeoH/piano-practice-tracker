@@ -18,6 +18,7 @@ import {
   type SessionDto,
   type SessionSummaryDto,
   type SoundfontInfo,
+  type TimeRangeDto,
   type TimelineCommentDto,
   type UndoTrimResult,
   type VaultInfo,
@@ -106,6 +107,17 @@ export class TauriApiService {
       startMs: Math.round(startMs),
       endMs: Math.round(endMs),
     });
+  }
+
+  /** Discards several ranges of the raw take at once (one undo step). */
+  discardMidiRanges(sessionId: string, ranges: TimeRangeDto[]): Promise<SessionDto> {
+    const rounded = ranges.map((r) => ({ start_ms: Math.round(r.start_ms), end_ms: Math.round(r.end_ms) }));
+    return this.call('discard_midi_ranges', { sessionId, ranges: rounded });
+  }
+
+  /** Passages of the take separated by at least `minGapMs` of silence. */
+  suggestMidiSegments(filePath: string, minGapMs: number): Promise<TimeRangeDto[]> {
+    return this.call('suggest_midi_segments', { filePath, minGapMs: Math.round(minGapMs) });
   }
 
   /** Restores the raw take as it was before its last trim. */
