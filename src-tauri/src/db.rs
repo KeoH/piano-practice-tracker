@@ -3,6 +3,8 @@
 //! - Schema versioned with `PRAGMA user_version`.
 //!   - v1: original schema from SPECIFICATIONS.md §3.1 (with Google Drive columns and queue).
 //!   - v2: no Drive sync, and paths relative to the vault.
+//!   - v3: repertoire (`pieces`, `piece_id` / `passage` on fragments), practice log and the undo
+//!     history of the raw takes.
 //! - File paths (`raw_midi_path`, `file_path`, `local_path`) are stored **relative to the vault
 //!   root** and the public API returns them absolute. That way the vault can be moved or synced
 //!   between computers (Dropbox, Syncthing…) without breaking references.
@@ -16,12 +18,18 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::{Local, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::models::{FragmentDto, SessionDetailDto, SessionDto, SessionMediaDto, SessionSummaryDto, TimelineCommentDto};
+use crate::models::{
+    FragmentDto, PieceDetailDto, PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto,
+    SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
+};
 use crate::paths::relative_to;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
+/// Trims of a raw take that can be undone; older snapshots are deleted.
+pub const RAW_HISTORY_LIMIT: usize = 10;
 
-const MIGRATION_V1: &str = r#"
+/// Also used by tests elsewhere to build a database from the previous version.
+pub(crate) const MIGRATION_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -101,6 +109,51 @@ ALTER TABLE session_media DROP COLUMN sync_status;
 DELETE FROM app_settings WHERE key LIKE 'google\_%' ESCAPE '\' OR key LIKE 'drive\_%' ESCAPE '\';
 "#;
 
+/// v3: repertoire, practice log and undo history of the raw takes.
+const MIGRATION_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS pieces (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    composer TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+ALTER TABLE midi_fragments ADD COLUMN piece_id TEXT REFERENCES pieces(id) ON DELETE SET NULL;
+ALTER TABLE midi_fragments ADD COLUMN passage TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_fragments_piece ON midi_fragments(piece_id);
+
+CREATE TABLE IF NOT EXISTS practice_log (
+    id TEXT PRIMARY KEY,
+    session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    practiced_on TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_practice_day ON practice_log(practiced_on);
+
+CREATE TABLE IF NOT EXISTS raw_history (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    file_path TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    fragment_id TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_history_session ON raw_history(session_id, created_at);
+
+-- Backfill: what each existing session kept (raw take + fragments) counts as practised on its
+-- date. Sections discarded before v3 are lost.
+INSERT INTO practice_log (id, session_id, practiced_on, duration_ms, recorded_at)
+SELECT lower(hex(randomblob(16))), id, session_date, total, updated_at FROM (
+    SELECT s.id, s.session_date, s.updated_at,
+           s.raw_duration_ms + COALESCE((SELECT SUM(f.duration_ms) FROM midi_fragments f WHERE f.session_id = s.id), 0) AS total
+    FROM sessions s
+) WHERE total > 0;
+"#;
+
 /// Vault sub-paths that identify each file type when converting old paths.
 const RAW_MARKER: &str = "/midi/raw/";
 const FRAGMENT_MARKER: &str = "/midi/fragments/";
@@ -109,7 +162,12 @@ const MEDIA_MARKER: &str = "/media/";
 const SESSION_COLS: &str =
     "id, title, session_date, bpm, raw_midi_path, raw_duration_ms, markdown_notes, updated_at";
 const FRAGMENT_COLS: &str =
-    "id, session_id, title, explanation, file_path, bpm, duration_ms, order_index, created_at";
+    "id, session_id, title, explanation, file_path, bpm, duration_ms, order_index, created_at, piece_id, passage";
+/// `FRAGMENT_COLS` qualified with the `f` alias, for joins.
+const FRAGMENT_COLS_F: &str = "f.id, f.session_id, f.title, f.explanation, f.file_path, f.bpm, f.duration_ms, \
+     f.order_index, f.created_at, f.piece_id, f.passage";
+const PIECE_COLS: &str = "id, title, composer, notes, archived, created_at, updated_at";
+const PIECE_COLS_P: &str = "p.id, p.title, p.composer, p.notes, p.archived, p.created_at, p.updated_at";
 const COMMENT_COLS: &str = "id, fragment_id, timestamp_ms, content, created_at";
 const MEDIA_COLS: &str = "id, session_id, local_path";
 
@@ -165,9 +223,37 @@ fn map_fragment(r: &Row) -> rusqlite::Result<FragmentDto> {
         duration_ms: to_u64(r.get(6)?),
         order_index: r.get(7)?,
         created_at: r.get(8)?,
+        piece_id: r.get(9)?,
+        passage: r.get(10)?,
         comments: Vec::new(),
     })
 }
+
+fn map_piece(r: &Row) -> rusqlite::Result<PieceDto> {
+    Ok(PieceDto {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        composer: r.get(2)?,
+        notes: r.get(3)?,
+        archived: r.get::<_, i64>(4)? != 0,
+        created_at: r.get(5)?,
+        updated_at: r.get(6)?,
+    })
+}
+
+fn map_history(r: &Row) -> rusqlite::Result<RawHistoryEntry> {
+    Ok(RawHistoryEntry {
+        id: r.get(0)?,
+        session_id: r.get(1)?,
+        file_path: r.get(2)?,
+        duration_ms: to_u64(r.get(3)?),
+        action: r.get(4)?,
+        fragment_id: r.get(5)?,
+        created_at: r.get(6)?,
+    })
+}
+
+const HISTORY_COLS: &str = "id, session_id, file_path, duration_ms, action, fragment_id, created_at";
 
 fn map_comment(r: &Row) -> rusqlite::Result<TimelineCommentDto> {
     Ok(TimelineCommentDto {
@@ -221,6 +307,19 @@ fn fetch_fragment(conn: &Connection, fragment_id: &str) -> Result<FragmentDto, S
         .ok_or_else(|| t!("backend.db.fragmentMissing", id = fragment_id))?;
     frag.comments = fetch_comments(conn, fragment_id)?;
     Ok(frag)
+}
+
+fn fetch_piece(conn: &Connection, piece_id: &str) -> Result<PieceDto, String> {
+    conn.query_row(&format!("SELECT {PIECE_COLS} FROM pieces WHERE id = ?1"), params![piece_id], map_piece)
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| t!("backend.db.pieceMissing", id = piece_id))
+}
+
+fn history_depth(conn: &Connection, session_id: &str) -> Result<u32, String> {
+    conn.query_row("SELECT COUNT(*) FROM raw_history WHERE session_id = ?1", params![session_id], |r| r.get(0))
+        .map(to_u32)
+        .map_err(db_err)
 }
 
 fn touch_session(conn: &Connection, session_id: &str) -> Result<(), String> {
@@ -322,6 +421,22 @@ fn rewrite_paths_to_relative(conn: &Connection, extra_bases: &[String]) -> Resul
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Snapshot of a raw take taken before a trim (`raw_history`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RawHistoryEntry {
+    pub id: String,
+    pub session_id: String,
+    /// Absolute path of the snapshot.
+    pub file_path: String,
+    /// Duration of the raw take when the snapshot was taken.
+    pub duration_ms: u64,
+    /// `"extract"` or `"discard"`.
+    pub action: String,
+    /// Fragment created by the trim (only for `"extract"`).
+    pub fragment_id: Option<String>,
+    pub created_at: String,
+}
+
 /// SQLite database shareable between threads (`Arc<Database>`).
 pub struct Database {
     conn: Mutex<Connection>,
@@ -383,6 +498,13 @@ impl Database {
             rewrite_paths_to_relative(&tx, &[root.to_string_lossy().into_owned()])
                 .map_err(|e| t!("backend.db.migrationFailed", version = 2, e = e))?;
             tx.execute_batch("PRAGMA user_version = 2;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
+        if version < 3 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V3)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 3, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 3;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
         Ok(())
@@ -515,8 +637,9 @@ impl Database {
             rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
         };
         let media = media.into_iter().map(|m| self.fix_media(m)).collect();
+        let undo_depth = history_depth(&conn, session_id)?;
 
-        Ok(SessionDetailDto { session, fragments, media })
+        Ok(SessionDetailDto { session, fragments, media, undo_depth })
     }
 
     pub fn update_session(&self, session_id: &str, title: &str, bpm: u32, markdown_notes: &str) -> Result<(), String> {
@@ -559,6 +682,7 @@ impl Database {
         for sql in [
             "SELECT file_path FROM midi_fragments WHERE session_id = ?1",
             "SELECT local_path FROM session_media WHERE session_id = ?1",
+            "SELECT file_path FROM raw_history WHERE session_id = ?1",
         ] {
             let mut stmt = tx.prepare(sql).map_err(db_err)?;
             let rows = stmt.query_map(params![session_id], |r| r.get::<_, String>(0)).map_err(db_err)?;
@@ -641,6 +765,222 @@ impl Database {
         touch_session(&tx, &frag.session_id)?;
         tx.commit().map_err(db_err)?;
         Ok(self.load_path(frag.file_path))
+    }
+
+    /// Files the fragment under a piece (or takes it out with `None`) and sets its passage.
+    pub fn set_fragment_piece(&self, fragment_id: &str, piece_id: Option<&str>, passage: &str) -> Result<FragmentDto, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let session_id = fragment_session_id(&tx, fragment_id)?;
+        if let Some(pid) = piece_id {
+            fetch_piece(&tx, pid)?;
+            tx.execute("UPDATE pieces SET updated_at = ?1 WHERE id = ?2", params![now_rfc3339(), pid])
+                .map_err(db_err)?;
+        }
+        tx.execute(
+            "UPDATE midi_fragments SET piece_id = ?1, passage = ?2 WHERE id = ?3",
+            params![piece_id, passage.trim(), fragment_id],
+        )
+        .map_err(db_err)?;
+        touch_session(&tx, &session_id)?;
+        let frag = fetch_fragment(&tx, fragment_id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(self.fix_fragment(frag))
+    }
+
+    // ----------------------------- Raw take history (undo) -----------------------------
+
+    /// Records a snapshot of the raw take taken before a trim. Keeps the newest
+    /// [`RAW_HISTORY_LIMIT`] entries of the session and returns the absolute paths of the pruned
+    /// snapshots so the caller can delete them.
+    pub fn push_raw_history(
+        &self,
+        session_id: &str,
+        file_path: &str,
+        duration_ms: u64,
+        action: &str,
+        fragment_id: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        fetch_session(&tx, session_id)?;
+        tx.execute(
+            &format!("INSERT INTO raw_history ({HISTORY_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+            params![
+                uuid::Uuid::new_v4().to_string(),
+                session_id,
+                self.store_path(file_path),
+                to_i64(duration_ms),
+                action,
+                fragment_id,
+                now_rfc3339()
+            ],
+        )
+        .map_err(db_err)?;
+        let pruned: Vec<(String, String)> = {
+            let mut stmt = tx
+                .prepare(
+                    "SELECT id, file_path FROM raw_history WHERE session_id = ?1 \
+                     ORDER BY created_at DESC, rowid DESC LIMIT -1 OFFSET ?2",
+                )
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map(params![session_id, RAW_HISTORY_LIMIT as i64], |r| Ok((r.get(0)?, r.get(1)?)))
+                .map_err(db_err)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+        };
+        for (id, _) in &pruned {
+            tx.execute("DELETE FROM raw_history WHERE id = ?1", params![id]).map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(pruned.into_iter().map(|(_, p)| self.load_path(p)).collect())
+    }
+
+    /// Newest snapshot of the session's raw take (with an absolute path), if any.
+    pub fn last_raw_history(&self, session_id: &str) -> Result<Option<RawHistoryEntry>, String> {
+        let conn = self.lock()?;
+        let entry = conn
+            .query_row(
+                &format!(
+                    "SELECT {HISTORY_COLS} FROM raw_history WHERE session_id = ?1 \
+                     ORDER BY created_at DESC, rowid DESC LIMIT 1"
+                ),
+                params![session_id],
+                map_history,
+            )
+            .optional()
+            .map_err(db_err)?;
+        Ok(entry.map(|mut e| {
+            e.file_path = self.load_path(e.file_path);
+            e
+        }))
+    }
+
+    pub fn delete_raw_history(&self, entry_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM raw_history WHERE id = ?1", params![entry_id]).map_err(db_err)?;
+        Ok(())
+    }
+
+    // ----------------------------- Practice log -----------------------------
+
+    /// Records `duration_ms` of practice today (local date) for the session.
+    pub fn add_practice_entry(&self, session_id: &str, duration_ms: u64) -> Result<(), String> {
+        if duration_ms == 0 {
+            return Ok(());
+        }
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO practice_log (id, session_id, practiced_on, duration_ms, recorded_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![uuid::Uuid::new_v4().to_string(), session_id, today(), to_i64(duration_ms), now_rfc3339()],
+        )
+        .map_err(db_err)?;
+        Ok(())
+    }
+
+    /// Practice per day in `[from, to]` (ISO dates, inclusive), only the days with practice.
+    pub fn practice_days(&self, from: &str, to: &str) -> Result<Vec<PracticeDayDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT practiced_on, SUM(duration_ms), COUNT(DISTINCT session_id) FROM practice_log \
+                 WHERE practiced_on >= ?1 AND practiced_on <= ?2 GROUP BY practiced_on ORDER BY practiced_on",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map(params![from, to], |r| {
+                Ok(PracticeDayDto { date: r.get(0)?, duration_ms: to_u64(r.get(1)?), sessions: to_u32(r.get(2)?) })
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+    }
+
+    // ----------------------------- Pieces -----------------------------
+
+    pub fn create_piece(&self, title: &str, composer: &str) -> Result<PieceDto, String> {
+        let conn = self.lock()?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_rfc3339();
+        conn.execute(
+            &format!("INSERT INTO pieces ({PIECE_COLS}) VALUES (?1, ?2, ?3, '', 0, ?4, ?4)"),
+            params![id, title, composer, now],
+        )
+        .map_err(db_err)?;
+        fetch_piece(&conn, &id)
+    }
+
+    pub fn update_piece(&self, piece_id: &str, title: &str, composer: &str, notes: &str, archived: bool) -> Result<PieceDto, String> {
+        let conn = self.lock()?;
+        let changed = conn
+            .execute(
+                "UPDATE pieces SET title = ?1, composer = ?2, notes = ?3, archived = ?4, updated_at = ?5 WHERE id = ?6",
+                params![title, composer, notes, i64::from(archived), now_rfc3339(), piece_id],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.db.pieceMissing", id = piece_id));
+        }
+        fetch_piece(&conn, piece_id)
+    }
+
+    /// Deletes the piece; its fragments stay in their sessions without a piece.
+    pub fn delete_piece(&self, piece_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        let changed = conn.execute("DELETE FROM pieces WHERE id = ?1", params![piece_id]).map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.db.pieceMissing", id = piece_id));
+        }
+        Ok(())
+    }
+
+    /// Active pieces first, most recently practised first, then by title.
+    pub fn list_pieces(&self) -> Result<Vec<PieceSummaryDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {PIECE_COLS_P}, COUNT(f.id), MAX(s.session_date) FROM pieces p \
+                 LEFT JOIN midi_fragments f ON f.piece_id = p.id \
+                 LEFT JOIN sessions s ON s.id = f.session_id \
+                 GROUP BY p.id \
+                 ORDER BY p.archived ASC, COALESCE(MAX(s.session_date), '') DESC, p.title COLLATE NOCASE ASC"
+            ))
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(PieceSummaryDto { piece: map_piece(r)?, take_count: to_u32(r.get(7)?), last_practiced: r.get(8)? })
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+    }
+
+    pub fn get_piece_detail(&self, piece_id: &str) -> Result<PieceDetailDto, String> {
+        let conn = self.lock()?;
+        let piece = fetch_piece(&conn, piece_id)?;
+        let takes = {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {FRAGMENT_COLS_F}, s.title, s.session_date FROM midi_fragments f \
+                     JOIN sessions s ON s.id = f.session_id WHERE f.piece_id = ?1 \
+                     ORDER BY f.passage COLLATE NOCASE ASC, s.session_date ASC, f.created_at ASC"
+                ))
+                .map_err(db_err)?;
+            let rows = stmt
+                .query_map(params![piece_id], |r| {
+                    Ok(PieceTakeDto { fragment: map_fragment(r)?, session_title: r.get(11)?, session_date: r.get(12)? })
+                })
+                .map_err(db_err)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+        };
+        let takes = takes
+            .into_iter()
+            .map(|mut t| {
+                t.fragment.comments = fetch_comments(&conn, &t.fragment.id)?;
+                t.fragment = self.fix_fragment(t.fragment);
+                Ok(t)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(PieceDetailDto { piece, takes })
     }
 
     // ----------------------------- Comments -----------------------------
@@ -993,6 +1333,132 @@ mod tests {
         // Reopening: idempotent migrations and data kept.
         let db = Database::open(&db_path, dir.path()).unwrap();
         assert_eq!(db.list_sessions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migration_v3_backfills_practice_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = dir.path().join("v");
+        std::fs::create_dir_all(&vault).unwrap();
+        let db_path = vault.join("piano_tracker.sqlite");
+        create_v1(&db_path, "/old");
+
+        let db = Database::open(&db_path, &vault).unwrap();
+        // Raw take (1000 ms) + fragment (500 ms) on the session's date.
+        let days = db.practice_days("2026-01-01", "2026-01-31").unwrap();
+        assert_eq!(days, vec![PracticeDayDto { date: "2026-01-01".into(), duration_ms: 1500, sessions: 1 }]);
+        let f = db.get_fragment("f1").unwrap();
+        assert_eq!((f.piece_id, f.passage.as_str()), (None, ""));
+        assert_eq!(db.get_session_detail("s1").unwrap().undo_depth, 0);
+        drop(db);
+
+        // Reopening does not backfill again.
+        let db = Database::open(&db_path, &vault).unwrap();
+        assert_eq!(db.practice_days("2026-01-01", "2026-01-31").unwrap()[0].duration_ms, 1500);
+    }
+
+    #[test]
+    fn raw_history_is_a_bounded_stack() {
+        let db = db();
+        let s = db.create_session("S", 100).unwrap();
+        assert!(db.last_raw_history(&s.id).unwrap().is_none());
+        assert!(db.push_raw_history("nope", "/vault/midi/history/x.mid", 1, "discard", None).is_err());
+
+        let mut pruned = Vec::new();
+        for i in 0..(RAW_HISTORY_LIMIT + 2) {
+            let path = format!("/vault/midi/history/{}/{i}.mid", s.id);
+            pruned.extend(db.push_raw_history(&s.id, &path, i as u64 * 100, "discard", None).unwrap());
+        }
+        // The two oldest were pruned.
+        assert_eq!(
+            pruned,
+            vec![format!("/vault/midi/history/{}/0.mid", s.id), format!("/vault/midi/history/{}/1.mid", s.id)]
+        );
+        assert_eq!(db.get_session_detail(&s.id).unwrap().undo_depth, RAW_HISTORY_LIMIT as u32);
+        assert!(stored(&db, "SELECT file_path FROM raw_history LIMIT 1").starts_with("midi/history/"));
+
+        let last = db.last_raw_history(&s.id).unwrap().unwrap();
+        assert_eq!(last.file_path, format!("/vault/midi/history/{}/{}.mid", s.id, RAW_HISTORY_LIMIT + 1));
+        assert_eq!(last.duration_ms, (RAW_HISTORY_LIMIT as u64 + 1) * 100);
+        db.delete_raw_history(&last.id).unwrap();
+        let next = db.last_raw_history(&s.id).unwrap().unwrap();
+        assert_eq!(next.duration_ms, RAW_HISTORY_LIMIT as u64 * 100);
+
+        db.push_raw_history(&s.id, "/vault/midi/history/e.mid", 5, "extract", Some("f9")).unwrap();
+        let e = db.last_raw_history(&s.id).unwrap().unwrap();
+        assert_eq!((e.action.as_str(), e.fragment_id.as_deref()), ("extract", Some("f9")));
+
+        // Deleting the session also hands back the snapshots.
+        let paths = db.delete_session(&s.id).unwrap();
+        assert_eq!(paths.iter().filter(|p| p.contains("/midi/history/")).count(), RAW_HISTORY_LIMIT);
+        let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM raw_history", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn practice_log_groups_by_day() {
+        let db = db();
+        let a = db.create_session("A", 100).unwrap();
+        let b = db.create_session("B", 100).unwrap();
+        db.add_practice_entry(&a.id, 60_000).unwrap();
+        db.add_practice_entry(&a.id, 30_000).unwrap();
+        db.add_practice_entry(&b.id, 10_000).unwrap();
+        db.add_practice_entry(&b.id, 0).unwrap();
+        let days = db.practice_days(&today(), &today()).unwrap();
+        assert_eq!(days, vec![PracticeDayDto { date: today(), duration_ms: 100_000, sessions: 2 }]);
+        assert!(db.practice_days("2000-01-01", "2000-12-31").unwrap().is_empty());
+
+        // Practice survives deleting the session.
+        db.delete_session(&a.id).unwrap();
+        assert_eq!(db.practice_days(&today(), &today()).unwrap()[0].duration_ms, 100_000);
+    }
+
+    #[test]
+    fn pieces_group_fragments_across_sessions() {
+        let db = db();
+        let s1 = db.create_session("Monday", 100).unwrap();
+        let s2 = db.create_session("Tuesday", 100).unwrap();
+        db.insert_fragment("a", &s1.id, "A", "", "/vault/midi/fragments/a.mid", 100, 1000).unwrap();
+        db.insert_fragment("b", &s2.id, "B", "", "/vault/midi/fragments/b.mid", 100, 2000).unwrap();
+        db.insert_fragment("c", &s2.id, "C", "", "/vault/midi/fragments/c.mid", 100, 3000).unwrap();
+        db.add_timeline_comment("b", 10, "rushed").unwrap();
+
+        let nocturne = db.create_piece("Nocturne op. 9 no. 2", "Chopin").unwrap();
+        let scales = db.create_piece("Scales", "").unwrap();
+        assert!(db.set_fragment_piece("a", Some("nope"), "").is_err());
+        assert!(db.set_fragment_piece("nope", Some(&nocturne.id), "").is_err());
+        let a = db.set_fragment_piece("a", Some(&nocturne.id), "  bars 1-4 ").unwrap();
+        assert_eq!((a.piece_id.as_deref(), a.passage.as_str()), (Some(nocturne.id.as_str()), "bars 1-4"));
+        db.set_fragment_piece("b", Some(&nocturne.id), "bars 1-4").unwrap();
+        db.set_fragment_piece("c", Some(&nocturne.id), "").unwrap();
+
+        let detail = db.get_piece_detail(&nocturne.id).unwrap();
+        let ids: Vec<&str> = detail.takes.iter().map(|t| t.fragment.id.as_str()).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+        assert_eq!(detail.takes[1].session_title, "Monday");
+        assert_eq!(detail.takes[2].fragment.comments.len(), 1);
+        assert_eq!(detail.takes[2].fragment.file_path, "/vault/midi/fragments/b.mid");
+
+        let list = db.list_pieces().unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!((list[0].piece.id.as_str(), list[0].take_count), (nocturne.id.as_str(), 3));
+        assert_eq!(list[0].last_practiced.as_deref(), Some(today().as_str()));
+        assert_eq!((list[1].take_count, list[1].last_practiced.as_deref()), (0, None));
+
+        let archived = db.update_piece(&nocturne.id, "Nocturne", "F. Chopin", "Rubato!", true).unwrap();
+        assert!(archived.archived);
+        assert_eq!(db.list_pieces().unwrap()[0].piece.id, scales.id);
+        assert!(db.update_piece("nope", "x", "", "", false).is_err());
+
+        // Deleting the piece keeps its fragments, without a piece.
+        db.delete_piece(&nocturne.id).unwrap();
+        assert!(db.delete_piece(&nocturne.id).is_err());
+        let a = db.get_fragment("a").unwrap();
+        assert_eq!(a.piece_id, None);
+        assert_eq!(a.passage, "bars 1-4");
+        // Taking a fragment out of a piece.
+        db.set_fragment_piece("b", Some(&scales.id), "").unwrap();
+        assert_eq!(db.set_fragment_piece("b", None, "").unwrap().piece_id, None);
     }
 
     #[test]

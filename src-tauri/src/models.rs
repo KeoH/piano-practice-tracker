@@ -60,6 +60,10 @@ pub struct FragmentDto {
     pub duration_ms: u64,
     pub order_index: i64,
     pub created_at: String,
+    /// Piece of the repertoire this take belongs to (if any).
+    pub piece_id: Option<String>,
+    /// Passage of the piece (free text, e.g. "bars 1-16"); empty = the whole piece.
+    pub passage: String,
     /// Sorted by ascending `timestamp_ms`.
     pub comments: Vec<TimelineCommentDto>,
 }
@@ -78,6 +82,8 @@ pub struct SessionDetailDto {
     /// Sorted by `order_index` and then `created_at`.
     pub fragments: Vec<FragmentDto>,
     pub media: Vec<SessionMediaDto>,
+    /// Number of raw-take trims that can be undone.
+    pub undo_depth: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,6 +109,11 @@ pub struct ExtractFragmentReq {
     pub end_ms: u64,
     pub title: String,
     pub explanation: String,
+    /// Piece to file the new fragment under.
+    #[serde(default)]
+    pub piece_id: Option<String>,
+    #[serde(default)]
+    pub passage: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,6 +121,97 @@ pub struct FragmentCreatedResponse {
     pub fragment: FragmentDto,
     /// Session after the destructive slice (new `raw_duration_ms`).
     pub session: SessionDto,
+}
+
+/// Result of undoing the last trim of a raw take.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UndoTrimResult {
+    /// Session with the restored raw take.
+    pub session: SessionDto,
+    /// Fragment deleted because the undone trim had extracted it.
+    pub removed_fragment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeRangeDto {
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+/// One note of a piano roll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteSpan {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub key: u8,
+    pub velocity: u8,
+}
+
+/// Notes and sustain pedal of a `.mid` file, for the piano roll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MidiNotesDto {
+    pub file_path: String,
+    pub duration_ms: u64,
+    /// Lowest and highest key played (0 and 127 if there are no notes).
+    pub min_key: u8,
+    pub max_key: u8,
+    /// Sorted by `start_ms`.
+    pub notes: Vec<NoteSpan>,
+    /// Intervals with the sustain pedal (CC64 >= 64) down.
+    pub pedal: Vec<TimeRangeDto>,
+}
+
+/// Time played on one day (local date).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeDayDto {
+    /// ISO date `YYYY-MM-DD`.
+    pub date: String,
+    pub duration_ms: u64,
+    /// Distinct sessions recorded that day.
+    pub sessions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeStatsDto {
+    /// Only the days with practice, sorted by date.
+    pub days: Vec<PracticeDayDto>,
+    /// Weekly goal in minutes (0 = no goal).
+    pub weekly_goal_minutes: u32,
+}
+
+/// A piece of the repertoire.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceDto {
+    pub id: String,
+    pub title: String,
+    pub composer: String,
+    pub notes: String,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceSummaryDto {
+    pub piece: PieceDto,
+    pub take_count: u32,
+    /// Date (`YYYY-MM-DD`) of the most recent session with a take of the piece.
+    pub last_practiced: Option<String>,
+}
+
+/// A fragment filed under a piece, with the session it comes from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceTakeDto {
+    pub fragment: FragmentDto,
+    pub session_title: String,
+    pub session_date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceDetailDto {
+    pub piece: PieceDto,
+    /// Sorted by passage and then chronologically.
+    pub takes: Vec<PieceTakeDto>,
 }
 
 /// Payload of the Tauri `playback-progress` event (emitted every 50 ms during playback).

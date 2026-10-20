@@ -384,7 +384,8 @@
     "openLinkFailed": "No se pudo abrir el enlace: {e}",
     "defaults": {
       "fragmentTitle": "Fragmento sin título",
-      "sessionTitle": "Sesión de práctica"
+      "sessionTitle": "Sesión de práctica",
+      "pieceTitle": "Obra sin título"
     },
     "image": {
       "invalidBase64": "Imagen en base64 inválida: {e}",
@@ -461,7 +462,12 @@
       "prepareFailed": "No se pudo preparar la base de datos {path}: {e}",
       "newerSchema": "La base de datos tiene una versión de esquema ({version}) más reciente que la aplicación ({supported})",
       "migrationFailed": "Error al migrar la base de datos (v{version}): {e}",
-      "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo"
+      "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo",
+      "pieceMissing": "La obra '{id}' no existe"
+    },
+    "undo": {
+      "empty": "No hay nada que deshacer en esta sesión",
+      "snapshotMissing": "Falta la copia guardada de la grabación: {path}"
     }
   }
 }

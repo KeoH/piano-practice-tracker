@@ -384,7 +384,8 @@
     "openLinkFailed": "Could not open the link: {e}",
     "defaults": {
       "fragmentTitle": "Untitled fragment",
-      "sessionTitle": "Practice session"
+      "sessionTitle": "Practice session",
+      "pieceTitle": "Untitled piece"
     },
     "image": {
       "invalidBase64": "Invalid base64 image: {e}",
@@ -461,7 +462,12 @@
       "prepareFailed": "Could not prepare the database {path}: {e}",
       "newerSchema": "The database schema version ({version}) is newer than this version of the app supports ({supported})",
       "migrationFailed": "Could not migrate the database (v{version}): {e}",
-      "poisoned": "The database connection was locked by a previous error"
+      "poisoned": "The database connection was locked by a previous error",
+      "pieceMissing": "Piece '{id}' does not exist"
+    },
+    "undo": {
+      "empty": "There is nothing to undo in this session",
+      "snapshotMissing": "The saved copy of the raw take is missing: {path}"
     }
   }
 }
