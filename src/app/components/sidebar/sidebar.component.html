@@ -15,13 +15,13 @@
     @let active = nav.view() === item.view;
     <button
       type="button"
-      class="flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-[7px] px-2 text-[13px] font-medium transition-colors"
+      class="flex h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-[7px] px-1 text-[11.5px] font-medium transition-colors"
       [class]="active ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
       [attr.aria-current]="active ? 'page' : null"
       [title]="item.label | t"
       (click)="nav.view.set(item.view)"
     >
-      <app-icon [name]="item.icon" [size]="15" class="shrink-0" /><span class="truncate">{{ item.label | t }}</span>
+      <app-icon [name]="item.icon" [size]="16" class="shrink-0" /><span class="max-w-full truncate">{{ item.label | t }}</span>
     </button>
   }
 </nav>

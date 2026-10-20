@@ -16,7 +16,7 @@ const WEEKS = 53;
 const BAR_DAYS = 30;
 const BAR_W = 900;
 const BAR_H = 190;
-const BAR_LEFT = 44;
+const BAR_LEFT = 62;
 const BAR_BOTTOM = 22;
 const BAR_TOP = 8;
 const BAR_MAX_THICK = 24;
@@ -148,9 +148,12 @@ export class StatsViewComponent {
     return this.barBaseline - (max > 0 ? (ms / max) * h : 0);
   }
 
+  /** Axis tick with its unit: "0", "30 min", "1 h", "1 h 30". */
   private axisLabel(minutes: number): string {
     if (minutes === 0) return '0';
-    return minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes}`;
+    if (minutes < 60) return `${minutes} min`;
+    const m = minutes % 60;
+    return m ? `${Math.floor(minutes / 60)} h ${m}` : `${minutes / 60} h`;
   }
 
   /** "45 min", "1 h 5 min", "2 h". */
@@ -169,7 +172,9 @@ export class StatsViewComponent {
   // ---- Tooltip (hover and keyboard focus) ----
   protected showTip(ev: Event, date: string, ms: number): void {
     const panel = this.panel()?.nativeElement;
-    const target = ev.target as Element | null;
+    // On a bar, the tooltip points at the bar's top, not at its (taller) hit area.
+    const hit = ev.currentTarget as Element | null;
+    const target = hit?.querySelector('path') ?? hit ?? (ev.target as Element | null);
     if (!panel || !target) return;
     const p = panel.getBoundingClientRect();
     const r = target.getBoundingClientRect();

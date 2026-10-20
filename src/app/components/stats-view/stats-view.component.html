@@ -144,7 +144,6 @@
           <line [attr.x1]="barLeft" [attr.x2]="barW" [attr.y1]="t.y" [attr.y2]="t.y" class="stroke-line" stroke-width="1" />
           <text [attr.x]="barLeft - 8" [attr.y]="t.y" text-anchor="end" dominant-baseline="middle" class="tabular fill-faint text-[11px]">{{ t.label }}</text>
         }
-        <text [attr.x]="barLeft - 8" y="0" text-anchor="end" dominant-baseline="hanging" class="fill-faint text-[10px]">min</text>
         @for (b of bars(); track b.date) {
           <!-- Hit target: the whole slot, taller than the bar -->
           <g

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import { PLAYBACK_RATES, PlaybackStore } from '../../core/playback.store';
 
@@ -9,7 +9,7 @@ import { PLAYBACK_RATES, PlaybackStore } from '../../core/playback.store';
   imports: [TranslatePipe],
   host: { class: 'inline-flex items-center gap-2' },
   template: `
-    <label class="text-xs font-semibold text-muted" [for]="id">{{ 'playback.rate' | t }}</label>
+    <label class="text-xs font-semibold text-muted" [class.sr-only]="!showLabel()" [for]="id">{{ 'playback.rate' | t }}</label>
     <select
       [id]="id"
       class="field tabular h-9 w-[84px] py-0 text-[13px]"
@@ -24,6 +24,8 @@ import { PLAYBACK_RATES, PlaybackStore } from '../../core/playback.store';
   `,
 })
 export class RateSelectComponent {
+  /** Without the visible label (it stays for screen readers) where space is short. */
+  readonly showLabel = input(true);
   protected readonly playback = inject(PlaybackStore);
   protected readonly rates = PLAYBACK_RATES;
   private static nextId = 0;

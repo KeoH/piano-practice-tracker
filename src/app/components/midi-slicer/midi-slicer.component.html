@@ -122,15 +122,16 @@
           />
           <span class="tabular w-10 text-fg-soft">{{ suggestGapS() }} s</span>
         </label>
-        <span class="flex-1"></span>
-        @if (silences().length) {
-          <button type="button" class="btn btn-danger h-9" (click)="discardSilences()" [disabled]="locked()">
-            <app-icon name="trash" [size]="15" /> {{ 'slicer.suggest.discard' | t: { duration: formatMs(silenceMs(), true) } }}
+        <span class="ml-auto flex items-center gap-1.5">
+          @if (silences().length) {
+            <button type="button" class="btn btn-danger h-9" (click)="discardSilences()" [disabled]="locked()">
+              <app-icon name="trash" [size]="15" /> {{ 'slicer.suggest.discard' | t: { duration: formatMs(silenceMs(), true) } }}
+            </button>
+          }
+          <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="closeSuggestions()" [attr.aria-label]="'slicer.suggest.close' | t" [title]="'slicer.suggest.close' | t">
+            <app-icon name="close" [size]="16" />
           </button>
-        }
-        <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="closeSuggestions()" [attr.aria-label]="'slicer.suggest.close' | t" [title]="'slicer.suggest.close' | t">
-          <app-icon name="close" [size]="16" />
-        </button>
+        </span>
       </div>
     }
 
