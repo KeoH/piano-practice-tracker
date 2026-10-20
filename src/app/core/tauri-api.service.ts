@@ -11,6 +11,7 @@ import {
   type FragmentCreatedResponse,
   type LanguageInfo,
   type MidiActivityDto,
+  type MidiNotesDto,
   type MidiPortInfo,
   type PlaybackProgress,
   type SessionDetailDto,
@@ -89,6 +90,10 @@ export class TauriApiService {
   // ---- Slicing and playback ----
   getMidiActivity(filePath: string): Promise<MidiActivityDto> {
     return this.call('get_midi_activity', { filePath });
+  }
+
+  getMidiNotes(filePath: string): Promise<MidiNotesDto> {
+    return this.call('get_midi_notes', { filePath });
   }
 
   extractMidiFragment(req: ExtractFragmentReq): Promise<FragmentCreatedResponse> {

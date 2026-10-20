@@ -14,24 +14,26 @@ import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs, parseTime } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { MidiActivityDto, SessionDto } from '../../core/models';
+import type { MidiActivityDto, MidiNotesDto, SessionDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
 import { RangeHandlesComponent } from '../range-handles/range-handles.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
 import { MIN_SELECTION_MS, TimelineDrag } from '../../core/timeline-drag';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
 
 /** Visual slicer for the session's raw take (selection, preview, extract and discard). */
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe],
+  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -48,7 +50,9 @@ export class MidiSlicerComponent {
 
   protected readonly formatMs = formatMs;
 
+  protected readonly prefs = inject(UiPrefsStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
+  protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly loading = signal(false);
   protected readonly working = signal(false);
 
@@ -94,12 +98,16 @@ export class MidiSlicerComponent {
   private async loadActivity(path: string | null, _dur: number): Promise<void> {
     if (!path) {
       this.activity.set(null);
+      this.notes.set(null);
       return;
     }
     this.loading.set(true);
     try {
-      const a = await this.api.getMidiActivity(path);
-      if (this.session().raw_midi_path === path) this.activity.set(a);
+      const [a, n] = await Promise.all([this.api.getMidiActivity(path), this.api.getMidiNotes(path)]);
+      if (this.session().raw_midi_path === path) {
+        this.activity.set(a);
+        this.notes.set(n);
+      }
       // Fits the selection to the new duration
       const sel = this.selection();
       if (sel && sel.end > a.duration_ms) this.selection.set(null);

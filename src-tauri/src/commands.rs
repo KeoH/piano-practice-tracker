@@ -12,6 +12,7 @@ use tauri::{Manager, State};
 
 use crate::audio_engine::AudioEngine;
 use crate::i18n;
+use crate::midi_notes;
 use crate::midi_recorder::{self, MidiRecorder, MidiSink};
 use crate::midi_slicer;
 use crate::models::*;
@@ -228,6 +229,14 @@ pub async fn get_midi_activity(file_path: String) -> Result<MidiActivityDto, Str
     })
     .await
     .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Notes and pedal of a `.mid` file, for the piano roll.
+#[tauri::command]
+pub async fn get_midi_notes(file_path: String) -> Result<MidiNotesDto, String> {
+    tauri::async_runtime::spawn_blocking(move || midi_notes::extract_notes(Path::new(&file_path)))
+        .await
+        .map_err(|e| t!("backend.internal", e = e))?
 }
 
 #[tauri::command]

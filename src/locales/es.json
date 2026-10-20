@@ -331,7 +331,9 @@
     "undoneExtract": "Recorte deshecho: «{title}» ha vuelto a la pista bruta"
   },
   "timeline": {
-    "noActivity": "Sin actividad de notas"
+    "noActivity": "Sin actividad de notas",
+    "showActivity": "Ver densidad de notas",
+    "showRoll": "Ver las notas (piano roll)"
   },
   "notes": {
     "title": "Notas de la sesión",

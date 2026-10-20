@@ -154,7 +154,7 @@ pub struct NoteSpan {
 pub struct MidiNotesDto {
     pub file_path: String,
     pub duration_ms: u64,
-    /// Lowest and highest key played (0 and 127 if there are no notes).
+    /// Lowest and highest key played (21 and 108, an 88-key piano, if there are no notes).
     pub min_key: u8,
     pub max_key: u8,
     /// Sorted by `start_ms`.

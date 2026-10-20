@@ -331,7 +331,9 @@
     "undoneExtract": "Trim undone: “{title}” is back in the raw recording"
   },
   "timeline": {
-    "noActivity": "No note activity"
+    "noActivity": "No note activity",
+    "showActivity": "Show note density",
+    "showRoll": "Show the notes (piano roll)"
   },
   "notes": {
     "title": "Session notes",

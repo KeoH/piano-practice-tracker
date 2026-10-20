@@ -107,6 +107,8 @@
             >
               <app-timeline-canvas
                 [blocks]="activity()?.blocks ?? []"
+                [notes]="notes()"
+                [mode]="prefs.timelineMode()"
                 [durationMs]="durationMs()"
                 [height]="102"
                 [selection]="loopDrag.selection()"
@@ -153,6 +155,7 @@
             }
           </button>
           <app-rate-select />
+          <app-timeline-mode-toggle />
           @if (activityLoading()) {
             <span class="text-[13px] text-faint" role="status">{{ 'slicer.analyzing' | t }}</span>
           }

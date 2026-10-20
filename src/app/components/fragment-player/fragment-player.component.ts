@@ -15,16 +15,18 @@ import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { FragmentDto, MidiActivityDto, TimelineCommentDto } from '../../core/models';
+import type { FragmentDto, MidiActivityDto, MidiNotesDto, TimelineCommentDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { TimelineDrag } from '../../core/timeline-drag';
 import { ToastService } from '../../core/toast.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
 import { RangeHandlesComponent } from '../range-handles/range-handles.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
 
 /** How long a comment's automatic popup stays visible. */
 const AUTO_POPUP_MS = 2500;
@@ -37,7 +39,7 @@ const LANDING_WINDOW_MS = 350;
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
+  imports: [IconComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
   templateUrl: './fragment-player.component.html',
 })
 export class FragmentPlayerComponent {
@@ -54,7 +56,9 @@ export class FragmentPlayerComponent {
   protected readonly formatMs = formatMs;
 
   protected readonly expanded = signal(false);
+  protected readonly prefs = inject(UiPrefsStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
+  protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly activityLoading = signal(false);
   protected readonly titleDraft = signal('');
   protected readonly explanationDraft = signal('');
@@ -169,8 +173,11 @@ export class FragmentPlayerComponent {
     this.loadedPath = path;
     this.activityLoading.set(true);
     try {
-      const a = await this.api.getMidiActivity(path);
-      if (this.file() === path) this.activity.set(a);
+      const [a, n] = await Promise.all([this.api.getMidiActivity(path), this.api.getMidiNotes(path)]);
+      if (this.file() === path) {
+        this.activity.set(a);
+        this.notes.set(n);
+      }
     } catch (err) {
       this.loadedPath = null;
       this.toast.error(err, this.i18n.t('fragments.errors.analyze'));

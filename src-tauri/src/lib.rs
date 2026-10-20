@@ -4,6 +4,7 @@ pub mod i18n;
 pub mod audio_engine;
 pub mod commands;
 pub mod db;
+pub mod midi_notes;
 pub mod midi_recorder;
 pub mod midi_slicer;
 pub mod models;
@@ -106,6 +107,7 @@ pub fn run() {
             commands::update_live_recording_settings,
             commands::stop_recording,
             commands::get_midi_activity,
+            commands::get_midi_notes,
             commands::extract_midi_fragment,
             commands::discard_midi_range,
             commands::undo_raw_trim,

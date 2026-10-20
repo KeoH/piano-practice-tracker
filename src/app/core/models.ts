@@ -121,6 +121,7 @@ export interface NoteSpan {
 export interface MidiNotesDto {
   file_path: string;
   duration_ms: number;
+  /** Lowest and highest key played (21 and 108, an 88-key piano, if there are no notes). */
   min_key: number;
   max_key: number;
   /** Sorted by `start_ms`. */
