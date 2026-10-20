@@ -67,6 +67,8 @@ export interface SessionDetailDto {
   media: SessionMediaDto[];
   /** Number of raw-take trims that can be undone. */
   undo_depth: number;
+  /** Fragment that the next undo would delete (it was extracted by the newest trim). */
+  undo_fragment_id: string | null;
 }
 
 export interface ActivityBlock {

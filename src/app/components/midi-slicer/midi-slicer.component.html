@@ -121,6 +121,18 @@
       </div>
 
       <div class="ml-auto flex flex-wrap gap-2.5">
+        <button
+          type="button"
+          class="btn btn-ghost btn-lg text-fg-soft"
+          (click)="undo()"
+          [disabled]="store.undoDepth() === 0 || locked()"
+          [title]="'slicer.undoHint' | t"
+        >
+          <app-icon name="undo" [size]="16" /> {{ 'slicer.undo' | t }}
+          @if (store.undoDepth() > 0) {
+            <span class="tabular text-xs text-faint">{{ store.undoDepth() }}</span>
+          }
+        </button>
         <button type="button" class="btn btn-danger btn-lg" (click)="discard()" [disabled]="!validSelection() || locked()">
           <app-icon name="trash" [size]="16" /> {{ 'slicer.discard' | t }}
         </button>

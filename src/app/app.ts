@@ -10,6 +10,7 @@ import { TranslatePipe } from './core/i18n/translate.pipe';
 import { LanguageStore } from './core/language.store';
 import { PlaybackStore } from './core/playback.store';
 import { RecordingStore } from './core/recording.store';
+import { SessionStore } from './core/session.store';
 import { TauriApiService } from './core/tauri-api.service';
 import { VaultStore } from './core/vault.store';
 
@@ -33,6 +34,7 @@ export class App implements OnInit {
   protected readonly vault = inject(VaultStore);
   private readonly playback = inject(PlaybackStore);
   private readonly recording = inject(RecordingStore);
+  private readonly sessions = inject(SessionStore);
   private readonly confirm = inject(ConfirmService);
   private readonly language = inject(LanguageStore);
 
@@ -46,12 +48,26 @@ export class App implements OnInit {
     void this.recording.refreshPorts();
   }
 
-  /** Space = play/pause of the active player (if focus is not on an editable field). */
+  /**
+   * Global shortcuts (only when focus is not on an editable field):
+   * - Space: play/pause of the active player.
+   * - Ctrl+Z: undo the last trim of the raw recording, on the "Record & trim" tab.
+   */
   protected onGlobalKey(ev: KeyboardEvent): void {
-    if (ev.code !== 'Space' || ev.repeat || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    if (ev.repeat || ev.altKey || ev.metaKey) return;
+    const isUndo = ev.ctrlKey && !ev.shiftKey && ev.key.toLowerCase() === 'z';
+    const isSpace = ev.code === 'Space' && !ev.ctrlKey;
+    if (!isUndo && !isSpace) return;
     if (this.confirm.current() || this.vault.settingsOpen() || !this.vault.isOpen()) return;
     const t = ev.target as HTMLElement | null;
-    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName) || t.getAttribute('role') === 'slider')) return;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (isUndo) {
+      if (this.sessions.tab() !== 'record' || this.sessions.undoDepth() === 0 || this.recording.isRecording()) return;
+      ev.preventDefault();
+      void this.sessions.undoTrim();
+      return;
+    }
+    if (t && (t.tagName === 'BUTTON' || t.getAttribute('role') === 'slider')) return;
     if (!this.playback.activeFile() && !this.playback.progress()) return;
     ev.preventDefault();
     void this.playback.toggleActive();

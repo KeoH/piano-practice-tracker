@@ -295,7 +295,7 @@
     "discard": "Discard",
     "extract": "Extract fragment",
     "extracting": "Extracting…",
-    "footer": "**Extract** saves the passage as a fragment and removes it from the raw recording. **Discard** deletes it without saving it.",
+    "footer": "**Extract** saves the passage as a fragment and removes it from the raw recording. **Discard** deletes it without saving it. Both can be **undone** (Ctrl+Z).",
     "extractNote": "The passage is saved as a separate fragment and removed from the raw recording.",
     "invalidTime": "Invalid time format (use mm:ss or mm:ss.d)",
     "invalidRange": "Select a valid range (start < end)",
@@ -309,8 +309,17 @@
     "errors": {
       "analyze": "Could not analyze the raw recording",
       "extract": "Could not extract the fragment",
-      "discard": "Could not discard the section"
-    }
+      "discard": "Could not discard the section",
+      "undo": "Could not undo the trim"
+    },
+    "undo": "Undo",
+    "undoHint": "Undo the last trim (Ctrl+Z)",
+    "undoTitle": "Undo the last trim?",
+    "undoMessage_zero": "The passage goes back into the raw recording and the fragment “{title}” is deleted, so it leaves its piece.",
+    "undoMessage_one": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its comment.",
+    "undoMessage_other": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its {n} comments.",
+    "undone": "Trim undone",
+    "undoneExtract": "Trim undone: “{title}” is back in the raw recording"
   },
   "timeline": {
     "noActivity": "No note activity"
@@ -467,7 +476,7 @@
     },
     "undo": {
       "empty": "There is nothing to undo in this session",
-      "snapshotMissing": "The saved copy of the raw take is missing: {path}"
+      "snapshotMissing": "The saved copy of the raw recording is missing: {path}"
     }
   }
 }

@@ -18,6 +18,7 @@ import {
   type SessionSummaryDto,
   type SoundfontInfo,
   type TimelineCommentDto,
+  type UndoTrimResult,
   type VaultInfo,
   type VaultOpenResult,
 } from './models';
@@ -100,6 +101,11 @@ export class TauriApiService {
       startMs: Math.round(startMs),
       endMs: Math.round(endMs),
     });
+  }
+
+  /** Restores the raw take as it was before its last trim. */
+  undoRawTrim(sessionId: string): Promise<UndoTrimResult> {
+    return this.call('undo_raw_trim', { sessionId });
   }
 
   playMidiFile(filePath: string, startMs: number): Promise<void> {

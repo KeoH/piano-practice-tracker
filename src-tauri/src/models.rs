@@ -84,6 +84,8 @@ pub struct SessionDetailDto {
     pub media: Vec<SessionMediaDto>,
     /// Number of raw-take trims that can be undone.
     pub undo_depth: u32,
+    /// Fragment that the next undo would delete (it was extracted by the newest trim).
+    pub undo_fragment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

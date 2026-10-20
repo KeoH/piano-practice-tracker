@@ -638,8 +638,18 @@ impl Database {
         };
         let media = media.into_iter().map(|m| self.fix_media(m)).collect();
         let undo_depth = history_depth(&conn, session_id)?;
+        let undo_fragment_id: Option<String> = conn
+            .query_row(
+                "SELECT fragment_id FROM raw_history WHERE session_id = ?1 \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(db_err)?
+            .flatten();
 
-        Ok(SessionDetailDto { session, fragments, media, undo_depth })
+        Ok(SessionDetailDto { session, fragments, media, undo_depth, undo_fragment_id })
     }
 
     pub fn update_session(&self, session_id: &str, title: &str, bpm: u32, markdown_notes: &str) -> Result<(), String> {
@@ -854,6 +864,20 @@ impl Database {
             e.file_path = self.load_path(e.file_path);
             e
         }))
+    }
+
+    /// Deletes the whole history of the session and returns the snapshots' absolute paths.
+    pub fn clear_raw_history(&self, session_id: &str) -> Result<Vec<String>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let paths = {
+            let mut stmt = tx.prepare("SELECT file_path FROM raw_history WHERE session_id = ?1").map_err(db_err)?;
+            let rows = stmt.query_map(params![session_id], |r| r.get::<_, String>(0)).map_err(db_err)?;
+            rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+        };
+        tx.execute("DELETE FROM raw_history WHERE session_id = ?1", params![session_id]).map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        Ok(paths.into_iter().map(|p| self.load_path(p)).collect())
     }
 
     pub fn delete_raw_history(&self, entry_id: &str) -> Result<(), String> {
@@ -1387,6 +1411,7 @@ mod tests {
         db.push_raw_history(&s.id, "/vault/midi/history/e.mid", 5, "extract", Some("f9")).unwrap();
         let e = db.last_raw_history(&s.id).unwrap().unwrap();
         assert_eq!((e.action.as_str(), e.fragment_id.as_deref()), ("extract", Some("f9")));
+        assert_eq!(db.get_session_detail(&s.id).unwrap().undo_fragment_id.as_deref(), Some("f9"));
 
         // Deleting the session also hands back the snapshots.
         let paths = db.delete_session(&s.id).unwrap();

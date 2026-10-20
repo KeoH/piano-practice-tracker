@@ -50,7 +50,7 @@ export class MidiSlicerComponent {
   readonly fragmentCount = input(0);
 
   private readonly api = inject(TauriApiService);
-  private readonly store = inject(SessionStore);
+  protected readonly store = inject(SessionStore);
   protected readonly playback = inject(PlaybackStore);
   private readonly rec = inject(RecordingStore);
   private readonly toast = inject(ToastService);
@@ -77,7 +77,7 @@ export class MidiSlicerComponent {
     () => this.activity()?.duration_ms || this.session().raw_duration_ms || 0,
   );
   protected readonly recordingHere = computed(() => this.rec.recordingSessionId() === this.session().id);
-  protected readonly locked = computed(() => this.recordingHere() || this.working());
+  protected readonly locked = computed(() => this.recordingHere() || this.working() || this.store.undoing());
   protected readonly position = computed(() => this.playback.positionFor(this.rawPath()));
   protected readonly isPlaying = computed(() => this.playback.isPlaying(this.rawPath()));
   protected readonly showPlayhead = computed(
@@ -308,6 +308,10 @@ export class MidiSlicerComponent {
     } finally {
       this.working.set(false);
     }
+  }
+
+  protected async undo(): Promise<void> {
+    if (await this.store.undoTrim()) this.selection.set(null);
   }
 
   protected async discard(): Promise<void> {

@@ -33,7 +33,19 @@ export type IconName =
   | 'comment'
   | 'folder'
   | 'globe'
-  | 'info';
+  | 'info'
+  | 'undo'
+  | 'repeat'
+  | 'wand'
+  | 'download'
+  | 'roll'
+  | 'bars'
+  | 'chart'
+  | 'book'
+  | 'calendar'
+  | 'flame'
+  | 'target'
+  | 'compare';
 
 /** Inline SVG icons (1.75 stroke, inherit `currentColor`). */
 @Component({
@@ -90,6 +102,18 @@ export type IconName =
         @case ('speaker') { <path d="M4 9v6h4l5 4V5L8 9H4Z" /><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" /> }
         @case ('arrow-right') { <path d="M5 12h14M13 6l6 6-6 6" /> }
         @case ('globe') { <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /> }
+        @case ('undo') { <path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /> }
+        @case ('repeat') { <path d="m17 2 4 4-4 4" /><path d="M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4" /><path d="M21 13v1a4 4 0 0 1-4 4H3" /> }
+        @case ('wand') { <path d="m15 4 5 5L9 20l-5-5L15 4ZM12.5 6.5l5 5M5 3v3M3.5 4.5h3M19 15v3M17.5 16.5h3" /> }
+        @case ('download') { <path d="M12 4v11M7 10l5 5 5-5M5 20h14" /> }
+        @case ('roll') { <path d="M4 6h5M11 10h6M6 14h4M13 18h7M15 6h3" /> }
+        @case ('bars') { <path d="M5 20v-6M9.5 20V8M14 20v-9M18.5 20V4" /> }
+        @case ('chart') { <path d="M4 4v16h16" /><path d="m8 15 3.5-4 3 2.5L19 8" /> }
+        @case ('book') { <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H19v14H5.5A1.5 1.5 0 0 0 4 19.5v-14Z" /><path d="M4 19.5A1.5 1.5 0 0 0 5.5 21H19v-3M9 8h6" /> }
+        @case ('calendar') { <rect x="4" y="5" width="16" height="15" rx="2" /><path d="M4 10h16M9 3v4M15 3v4" /> }
+        @case ('flame') { <path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-9-1.5 2-2 3.5-2 5-1-1-2-1.5-2.5-3C7.5 10 6 12.5 6 15a6 6 0 0 0 6 6Z" /> }
+        @case ('target') { <circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" fill="currentColor" /> }
+        @case ('compare') { <rect x="3" y="4" width="18" height="6" rx="1.5" /><rect x="3" y="14" width="18" height="6" rx="1.5" /> }
         @case ('comment') { <path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 20 12Z" /> }
       }
     </svg>

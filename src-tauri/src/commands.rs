@@ -16,6 +16,7 @@ use crate::midi_recorder::{self, MidiRecorder, MidiSink};
 use crate::midi_slicer;
 use crate::models::*;
 use crate::paths::AppDirs;
+use crate::raw_history::{remove_file_quietly, TrimAction};
 use crate::soundfont;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
 
@@ -127,14 +128,6 @@ impl AppState {
     }
 }
 
-fn remove_file_quietly(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("Could not delete {}: {e}", path.display());
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // MIDI devices and recording
 // ---------------------------------------------------------------------------
@@ -211,7 +204,16 @@ pub async fn stop_recording(state: State<'_, AppState>, session_id: String) -> R
     state.audio.set_live_synth(false);
 
     let duration_ms = result?;
+    // A resumed recording is appended: only the new part counts as practice.
+    let previous_ms = vault.db.get_session(&session_id).map(|s| s.raw_duration_ms).unwrap_or(0);
     let session = vault.db.set_session_raw_midi(&session_id, &output.to_string_lossy(), duration_ms)?;
+    if let Err(e) = vault.db.add_practice_entry(&session_id, duration_ms.saturating_sub(previous_ms)) {
+        log::error!("Could not record the practice time: {e}");
+    }
+    // The snapshots don't contain what was just recorded: undoing would lose it.
+    if let Err(e) = vault.clear_raw_history(&session_id) {
+        log::error!("{e}");
+    }
     Ok(session)
 }
 
@@ -240,17 +242,28 @@ pub async fn extract_midi_fragment(
     }
     let session = vault.db.get_session(&req.session_id)?;
     let raw = state.raw_path_of(&session)?;
+    let session_duration_before = session.raw_duration_ms;
     // The player could be reading the raw take we are about to rewrite.
     state.audio.stop()?;
 
     let fragment_id = uuid::Uuid::new_v4().to_string();
     let dest = vault.paths.fragment_file(&fragment_id);
+    let snapshot = vault.snapshot_raw(&req.session_id, &raw)?;
     let slice = {
         let (raw, dest) = (raw.clone(), dest.clone());
         let (start, end, bpm) = (req.start_ms, req.end_ms, session.bpm);
         tauri::async_runtime::spawn_blocking(move || midi_slicer::extract_fragment_and_trim(&raw, start, end, &dest, bpm))
             .await
-            .map_err(|e| t!("backend.internal", e = e))??
+            .map_err(|e| t!("backend.internal", e = e))
+            .and_then(|r| r)
+    };
+    let slice = match slice {
+        Ok(s) => s,
+        Err(e) => {
+            // The raw take is rewritten last, so a failure leaves it untouched.
+            remove_file_quietly(&snapshot);
+            return Err(e);
+        }
     };
 
     let title = if req.title.trim().is_empty() { t!("backend.defaults.fragmentTitle") } else { req.title.trim().to_string() };
@@ -265,13 +278,23 @@ pub async fn extract_midi_fragment(
     ) {
         Ok(f) => f,
         Err(e) => {
+            // Without the fragment the section would be lost: the raw take goes back as it was.
             remove_file_quietly(&dest);
+            vault.restore_snapshot(&snapshot, &raw);
             return Err(e);
         }
+    };
+    let fragment = match req.piece_id.as_deref().filter(|p| !p.is_empty()) {
+        Some(piece_id) => vault.db.set_fragment_piece(&fragment.id, Some(piece_id), &req.passage).unwrap_or_else(|e| {
+            log::error!("{e}");
+            fragment
+        }),
+        None => fragment,
     };
     let session = vault
         .db
         .set_session_raw_midi(&req.session_id, &raw.to_string_lossy(), slice.remaining_duration_ms)?;
+    vault.record_trim(&req.session_id, &snapshot, session_duration_before, TrimAction::Extract, Some(&fragment.id));
     Ok(FragmentCreatedResponse { fragment, session })
 }
 
@@ -291,14 +314,32 @@ pub async fn discard_midi_range(
     let raw = state.raw_path_of(&session)?;
     state.audio.stop()?;
 
+    let snapshot = vault.snapshot_raw(&session_id, &raw)?;
     let new_duration = {
         let (raw, bpm) = (raw.clone(), session.bpm);
         tauri::async_runtime::spawn_blocking(move || midi_slicer::discard_range(&raw, start_ms, end_ms, bpm))
             .await
-            .map_err(|e| t!("backend.internal", e = e))??
+            .map_err(|e| t!("backend.internal", e = e))
+            .and_then(|r| r)
     };
-    let session = vault.db.set_session_raw_midi(&session_id, &raw.to_string_lossy(), new_duration)?;
-    Ok(session)
+    let new_duration = match new_duration {
+        Ok(d) => d,
+        Err(e) => {
+            remove_file_quietly(&snapshot);
+            return Err(e);
+        }
+    };
+    let updated = vault.db.set_session_raw_midi(&session_id, &raw.to_string_lossy(), new_duration)?;
+    vault.record_trim(&session_id, &snapshot, session.raw_duration_ms, TrimAction::Discard, None);
+    Ok(updated)
+}
+
+#[tauri::command]
+pub async fn undo_raw_trim(state: State<'_, AppState>, session_id: String) -> Result<UndoTrimResult, String> {
+    let vault = state.vault()?;
+    state.ensure_not_recording(&session_id)?;
+    state.audio.stop()?;
+    vault.undo_trim(&session_id)
 }
 
 #[tauri::command]
@@ -366,6 +407,7 @@ pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> R
     for path in vault.db.delete_session(&session_id)? {
         remove_file_quietly(Path::new(&path));
     }
+    vault.remove_history_dir(&session_id);
     Ok(())
 }
 

@@ -8,6 +8,7 @@ pub mod midi_recorder;
 pub mod midi_slicer;
 pub mod models;
 pub mod paths;
+pub mod raw_history;
 pub mod sf2_builder;
 pub mod soundfont;
 pub mod vault;
@@ -107,6 +108,7 @@ pub fn run() {
             commands::get_midi_activity,
             commands::extract_midi_fragment,
             commands::discard_midi_range,
+            commands::undo_raw_trim,
             commands::play_midi_file,
             commands::pause_midi_playback,
             commands::seek_midi_playback,

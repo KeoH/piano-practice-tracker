@@ -295,7 +295,7 @@
     "discard": "Descartar",
     "extract": "Extraer fragmento",
     "extracting": "Extrayendo…",
-    "footer": "**Extraer** guarda el pasaje como fragmento y lo quita de la pista bruta. **Descartar** lo borra sin guardarlo.",
+    "footer": "**Extraer** guarda el pasaje como fragmento y lo quita de la pista bruta. **Descartar** lo borra sin guardarlo. Los dos se pueden **deshacer** (Ctrl+Z).",
     "extractNote": "El pasaje se guarda como fragmento independiente y desaparece de la pista bruta.",
     "invalidTime": "Formato de tiempo no válido (usa mm:ss o mm:ss.d)",
     "invalidRange": "Selecciona un rango válido (inicio < fin)",
@@ -309,8 +309,17 @@
     "errors": {
       "analyze": "No se pudo analizar la pista bruta",
       "extract": "No se pudo extraer el fragmento",
-      "discard": "No se pudo descartar el tramo"
-    }
+      "discard": "No se pudo descartar el tramo",
+      "undo": "No se pudo deshacer el recorte"
+    },
+    "undo": "Deshacer",
+    "undoHint": "Deshacer el último recorte (Ctrl+Z)",
+    "undoTitle": "¿Deshacer el último recorte?",
+    "undoMessage_zero": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», que sale de su obra.",
+    "undoMessage_one": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con su comentario.",
+    "undoMessage_other": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con sus {n} comentarios.",
+    "undone": "Recorte deshecho",
+    "undoneExtract": "Recorte deshecho: «{title}» ha vuelto a la pista bruta"
   },
   "timeline": {
     "noActivity": "Sin actividad de notas"
