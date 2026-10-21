@@ -166,9 +166,24 @@ fn folder_name(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-/// Canonical path if it exists (avoids duplicates in the recent list due to trailing `/` or `..`).
+/// Canonical path (avoids duplicates in the recent list due to trailing `/` or `..`). If it doesn't
+/// exist yet, its deepest existing ancestor is canonicalized and the rest appended, so symlinks
+/// (macOS's `/var` -> `/private/var`) resolve the same way for both sides of a comparison.
 pub fn normalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    let mut tail = Vec::new();
+    let mut cur = path;
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(cur) {
+            return tail.iter().rev().fold(canon, |p, name| p.join(name));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                tail.push(name);
+                cur = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// The folder is a vault: it has the marker or, like the previous version's folder, the
@@ -473,6 +488,19 @@ mod tests {
         let stale = LockInfo { host: hostname(), pid: u32::MAX - 1, opened_at: "x".into() };
         std::fs::write(paths.lock_file(), serde_json::to_string(&stale).unwrap()).unwrap();
         assert!(matches!(open_vault(&v, false).unwrap(), OpenOutcome::Opened(_)));
+    }
+
+    #[test]
+    fn normalize_resolves_symlinks_of_missing_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let canon = std::fs::canonicalize(&real).unwrap();
+        assert_eq!(normalize(&link), canon);
+        assert_eq!(normalize(&link.join("new").join("vault")), canon.join("new").join("vault"));
+        assert!(normalize(&link.join("new")).starts_with(normalize(&real)));
     }
 
     #[test]
