@@ -1,6 +1,6 @@
 [package]
 name = "piano-tracker"
-version = "0.5.0"
+version = "0.5.1"
 description = "Piano practice tracker: USB-MIDI recording, take slicing, timeline comments and local data vaults"
 authors = ["Francisco Manzano <keoh77@gmail.com>"]
 license = "MIT"
