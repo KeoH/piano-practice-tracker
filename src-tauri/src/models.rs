@@ -379,13 +379,14 @@ pub struct AppInfo {
     pub tauri_version: String,
 }
 
-/// Links the "About" tab can open. The webview never sends a URL: the backend builds it.
+/// Links the "About" tab and the SoundFont settings can open. The webview never sends a URL: the backend builds it.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AppLink {
     Homepage,
     Repository,
     License,
+    GmSoundfont,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

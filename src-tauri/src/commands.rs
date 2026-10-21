@@ -1023,12 +1023,13 @@ pub async fn forget_recent_vault(state: State<'_, AppState>, path: String) -> Re
 #[tauri::command]
 pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
     let vault = state.vault()?;
-    xdg_open(vault.paths.base.as_os_str()).map_err(|e| t!("backend.revealFailed", e = e))
+    open_with_desktop(vault.paths.base.as_os_str()).map_err(|e| t!("backend.revealFailed", e = e))
 }
 
-/// Opens a path or URL with the desktop's default application.
-fn xdg_open(arg: &OsStr) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open").arg(arg).spawn().map(|mut child| {
+/// Opens a path or URL with the desktop's default application (`open` on macOS, `xdg-open` elsewhere).
+fn open_with_desktop(arg: &OsStr) -> std::io::Result<()> {
+    let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(program).arg(arg).spawn().map(|mut child| {
         // Reaps the process when it exits so no zombies are left.
         std::thread::spawn(move || {
             let _ = child.wait();
@@ -1057,12 +1058,16 @@ fn app_info() -> AppInfo {
     }
 }
 
+/// A free General MIDI SoundFont suggested where the system has none to install (macOS).
+const GM_SOUNDFONT_URL: &str = "https://github.com/mrbumpy409/GeneralUser-GS";
+
 fn app_link_url(link: AppLink) -> String {
     let info = app_info();
     match link {
         AppLink::Homepage => info.homepage,
         AppLink::Repository => info.repository,
         AppLink::License => format!("{}/blob/main/LICENSE", info.repository),
+        AppLink::GmSoundfont => GM_SOUNDFONT_URL.into(),
     }
 }
 
@@ -1074,7 +1079,7 @@ pub async fn get_app_info() -> Result<AppInfo, String> {
 /// Opens one of the app's links in the browser.
 #[tauri::command]
 pub async fn open_app_link(target: AppLink) -> Result<(), String> {
-    xdg_open(OsStr::new(&app_link_url(target))).map_err(|e| t!("backend.openLinkFailed", e = e))
+    open_with_desktop(OsStr::new(&app_link_url(target))).map_err(|e| t!("backend.openLinkFailed", e = e))
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,7 +1122,7 @@ mod tests {
         assert!(!info.version.is_empty());
         assert_eq!(info.license, "MIT");
         assert_eq!(info.authors, ["Francisco Manzano"]);
-        for link in [AppLink::Homepage, AppLink::Repository, AppLink::License] {
+        for link in [AppLink::Homepage, AppLink::Repository, AppLink::License, AppLink::GmSoundfont] {
             assert!(app_link_url(link).starts_with("https://"), "{link:?}");
         }
         assert!(app_link_url(AppLink::License).ends_with("/blob/main/LICENSE"));

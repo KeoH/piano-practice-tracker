@@ -2,15 +2,17 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signa
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { SoundfontCandidate, SoundfontInfo } from '../../core/models';
+import { isMacOS } from '../../core/platform';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
+import { RichTextComponent } from '../rich-text/rich-text.component';
 
 /** Settings section to choose the SoundFont (.sf2) the synthesizer plays with. */
 @Component({
   selector: 'app-soundfont-settings',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TranslatePipe],
+  imports: [IconComponent, RichTextComponent, TranslatePipe],
   template: `
     <section class="flex flex-col gap-5" aria-labelledby="sf-h">
       <div>
@@ -57,8 +59,15 @@ import { IconComponent } from '../icon/icon.component';
         @if (onlyBuiltin()) {
           <div class="rounded-xl border border-line bg-ink-850 p-4 text-[13px] leading-relaxed text-muted">
             <strong class="mb-1 block font-semibold text-fg">{{ 'settings.sound.onlyBuiltinTitle' | t }}</strong>
-            {{ 'settings.sound.onlyBuiltinText' | t }}
-            <code class="mt-2 block rounded-lg bg-ink-925 px-3 py-2 font-mono text-[12.5px] text-fg select-all">sudo apt install fluid-soundfont-gm</code>
+            @if (isMac) {
+              <app-rich-text [text]="'settings.sound.onlyBuiltinTextMac' | t" />
+              <button type="button" class="btn mt-3" (click)="downloadGm()">
+                <app-icon name="external" [size]="15" /> {{ 'settings.sound.downloadGm' | t }}
+              </button>
+            } @else {
+              {{ 'settings.sound.onlyBuiltinText' | t }}
+              <code class="mt-2 block rounded-lg bg-ink-925 px-3 py-2 font-mono text-[12.5px] text-fg select-all">sudo apt install fluid-soundfont-gm</code>
+            }
           </div>
         }
         <p class="text-[13px] leading-normal text-faint">
@@ -76,6 +85,8 @@ export class SoundfontSettingsComponent {
   private readonly i18n = inject(I18nService);
 
   protected readonly info = signal<SoundfontInfo | null>(null);
+  /** macOS has no package with a GM SoundFont: the hint points to a download instead of apt. */
+  protected readonly isMac = isMacOS();
   private readonly choosing = signal(false);
   protected readonly busy = computed(() => this.choosing() || !!this.info()?.loading);
   protected readonly onlyBuiltin = computed(() => {
@@ -134,9 +145,18 @@ export class SoundfontSettingsComponent {
     }
   }
 
+  protected async downloadGm(): Promise<void> {
+    try {
+      await this.api.openAppLink('gm_soundfont');
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('settings.sound.errors.openLink'));
+    }
+  }
+
   protected describe(c: SoundfontCandidate): string {
     if (c.is_builtin) return this.i18n.t('settings.sound.builtinDescription');
-    return this.i18n.t(c.path.startsWith('/usr/') ? 'settings.sound.systemSamples' : 'settings.sound.samples');
+    const system = c.path.startsWith('/usr/') || c.path.startsWith('/Library/');
+    return this.i18n.t(system ? 'settings.sound.systemSamples' : 'settings.sound.samples');
   }
 
   protected fileName(path: string): string {
