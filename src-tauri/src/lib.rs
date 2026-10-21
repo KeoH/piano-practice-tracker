@@ -3,6 +3,7 @@
 pub mod i18n;
 pub mod audio_engine;
 pub mod commands;
+pub mod composition;
 pub mod db;
 pub mod midi_notes;
 pub mod midi_recorder;
@@ -127,6 +128,19 @@ pub fn run() {
             commands::update_piece,
             commands::delete_piece,
             commands::assign_fragment_piece,
+            commands::get_compositions,
+            commands::create_composition,
+            commands::get_composition,
+            commands::save_composition,
+            commands::delete_composition,
+            commands::get_library_fragments,
+            commands::count_composition_uses,
+            commands::play_composition,
+            commands::set_composition_mix,
+            commands::get_soundfont_programs,
+            commands::preview_instrument,
+            commands::export_composition_audio,
+            commands::export_composition_midi,
             commands::get_practice_stats,
             commands::set_weekly_goal,
             commands::get_sessions,

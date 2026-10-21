@@ -5,6 +5,7 @@ import type { VaultInfo } from './models';
 import { PlaybackStore } from './playback.store';
 import { RecordingStore } from './recording.store';
 import { NavStore } from './nav.store';
+import { CompositionStore } from './composition.store';
 import { PieceStore } from './piece.store';
 import { SessionStore } from './session.store';
 import { StatsStore } from './stats.store';
@@ -25,6 +26,7 @@ export class VaultStore {
   private readonly stats = inject(StatsStore);
   private readonly nav = inject(NavStore);
   private readonly pieces = inject(PieceStore);
+  private readonly compositions = inject(CompositionStore);
   private readonly playback = inject(PlaybackStore);
   private readonly recording = inject(RecordingStore);
 
@@ -170,6 +172,7 @@ export class VaultStore {
   private resetVaultData(): void {
     this.sessions.reset();
     this.pieces.reset();
+    this.compositions.reset();
     this.stats.reset();
     this.nav.view.set('sessions');
   }

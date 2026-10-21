@@ -8,6 +8,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use rustysynth::SoundFont;
+
 use crate::models::SoundfontCandidate;
 use crate::paths::AppDirs;
 
@@ -93,9 +95,33 @@ pub fn preferred(paths: &AppDirs, saved: Option<&str>) -> PathBuf {
         .unwrap_or_else(|| paths.sf2_file.clone())
 }
 
+/// General MIDI programs (bank 0) that the SoundFont has a preset for, sorted. The synthesizer
+/// can't play the others with their own sound.
+pub fn gm_programs(sf: &SoundFont) -> Vec<u8> {
+    let mut out: Vec<u8> = sf
+        .get_presets()
+        .iter()
+        .filter(|p| p.get_bank_number() == 0)
+        .filter_map(|p| u8::try_from(p.get_patch_number()).ok())
+        .filter(|p| *p < 128)
+        .collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_builtin_piano_only_has_program_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("piano.sf2");
+        crate::sf2_builder::ensure_soundfont(&path).unwrap();
+        let sf = SoundFont::new(&mut std::fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(gm_programs(&sf), vec![0]);
+    }
 
     #[test]
     fn saved_soundfont_wins_and_builtin_is_listed() {

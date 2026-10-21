@@ -3,7 +3,8 @@ import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { MessageKey } from '../../core/i18n/languages';
-import type { PieceSummaryDto, SessionSummaryDto } from '../../core/models';
+import type { CompositionSummaryDto, PieceSummaryDto, SessionSummaryDto } from '../../core/models';
+import { CompositionStore } from '../../core/composition.store';
 import { NavStore, type AppView } from '../../core/nav.store';
 import { PieceStore } from '../../core/piece.store';
 import { RecordingStore } from '../../core/recording.store';
@@ -16,6 +17,7 @@ import { IconComponent, type IconName } from '../icon/icon.component';
 const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
   { view: 'sessions', label: 'nav.sessions', icon: 'calendar' },
   { view: 'pieces', label: 'nav.pieces', icon: 'book' },
+  { view: 'compose', label: 'nav.compose', icon: 'layers' },
   { view: 'stats', label: 'nav.stats', icon: 'chart' },
 ];
 
@@ -35,6 +37,7 @@ export class SidebarComponent {
   protected readonly i18n = inject(I18nService);
   protected readonly nav = inject(NavStore);
   protected readonly pieces = inject(PieceStore);
+  protected readonly compositions = inject(CompositionStore);
   protected readonly navItems = NAV_ITEMS;
 
   protected readonly formatMs = formatMs;
@@ -50,6 +53,19 @@ export class SidebarComponent {
       const last = groups[groups.length - 1];
       if (last && last.label === label) last.items.push(s);
       else groups.push({ label, items: [s] });
+    }
+    return groups;
+  });
+
+  /** Compositions grouped by when they were last edited. */
+  protected readonly compositionGroups = computed(() => {
+    const now = new Date();
+    const groups: { label: string; items: CompositionSummaryDto[] }[] = [];
+    for (const c of this.compositions.filteredCompositions()) {
+      const label = this.i18n.dateGroup(c.updated_at, now);
+      const last = groups[groups.length - 1];
+      if (last && last.label === label) last.items.push(c);
+      else groups.push({ label, items: [c] });
     }
     return groups;
   });

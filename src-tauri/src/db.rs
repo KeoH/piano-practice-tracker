@@ -5,6 +5,7 @@
 //!   - v2: no Drive sync, and paths relative to the vault.
 //!   - v3: repertoire (`pieces`, `piece_id` / `passage` on fragments), practice log and the undo
 //!     history of the raw takes.
+//!   - v4: compositions (`compositions`, `composition_tracks`, `composition_clips`).
 //! - File paths (`raw_midi_path`, `file_path`, `local_path`) are stored **relative to the vault
 //!   root** and the public API returns them absolute. That way the vault can be moved or synced
 //!   between computers (Dropbox, Syncthing…) without breaking references.
@@ -19,14 +20,21 @@ use chrono::{Local, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::models::{
-    FragmentDto, PieceDetailDto, PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto,
+    CompositionClipDto, CompositionDto, CompositionSummaryDto, CompositionTrackDto, FragmentDto, LibraryFragmentDto,
+    PieceDetailDto, PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto,
     SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
 };
 use crate::paths::relative_to;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 /// Trims of a raw take that can be undone; older snapshots are deleted.
 pub const RAW_HISTORY_LIMIT: usize = 10;
+/// Tracks of a composition: one MIDI channel each, skipping channel 10 (GM percussion).
+pub const COMPOSITION_MAX_TRACKS: usize = 15;
+/// Times a clip can be played back to back.
+pub const CLIP_MAX_REPEATS: u32 = 16;
+/// Transposition of a clip, in semitones either way.
+pub const CLIP_MAX_TRANSPOSE: i32 = 24;
 
 /// Also used by tests elsewhere to build a database from the previous version.
 pub(crate) const MIGRATION_V1: &str = r#"
@@ -152,6 +160,41 @@ SELECT lower(hex(randomblob(16))), id, session_date, total, updated_at FROM (
            s.raw_duration_ms + COALESCE((SELECT SUM(f.duration_ms) FROM midi_fragments f WHERE f.session_id = s.id), 0) AS total
     FROM sessions s
 ) WHERE total > 0;
+"#;
+
+/// v4: compositions. A clip points to a fragment (its MIDI is never copied) and disappears with it.
+const MIGRATION_V4: &str = r#"
+CREATE TABLE IF NOT EXISTS compositions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS composition_tracks (
+    id TEXT PRIMARY KEY,
+    composition_id TEXT NOT NULL REFERENCES compositions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    program INTEGER NOT NULL DEFAULT 0,
+    volume INTEGER NOT NULL DEFAULT 100,
+    muted INTEGER NOT NULL DEFAULT 0,
+    solo INTEGER NOT NULL DEFAULT 0,
+    sustain INTEGER NOT NULL DEFAULT 1,
+    color INTEGER NOT NULL DEFAULT 0,
+    order_index INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tracks_composition ON composition_tracks(composition_id, order_index);
+CREATE TABLE IF NOT EXISTS composition_clips (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL REFERENCES composition_tracks(id) ON DELETE CASCADE,
+    fragment_id TEXT NOT NULL REFERENCES midi_fragments(id) ON DELETE CASCADE,
+    start_ms INTEGER NOT NULL,
+    trim_start_ms INTEGER NOT NULL DEFAULT 0,
+    length_ms INTEGER NOT NULL,
+    repeats INTEGER NOT NULL DEFAULT 1,
+    transpose INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_clips_track ON composition_clips(track_id, start_ms);
+CREATE INDEX IF NOT EXISTS idx_clips_fragment ON composition_clips(fragment_id);
 "#;
 
 /// Vault sub-paths that identify each file type when converting old paths.
@@ -314,6 +357,137 @@ fn fetch_piece(conn: &Connection, piece_id: &str) -> Result<PieceDto, String> {
         .optional()
         .map_err(db_err)?
         .ok_or_else(|| t!("backend.db.pieceMissing", id = piece_id))
+}
+
+fn to_u8(v: i64) -> u8 {
+    u8::try_from(v.clamp(0, i64::from(u8::MAX))).unwrap_or(0)
+}
+
+/// Clip columns with the fragment they point to (`c` = clip, `f` = fragment).
+const CLIP_COLS_C: &str = "c.id, c.fragment_id, c.start_ms, c.trim_start_ms, c.length_ms, c.repeats, c.transpose, \
+     f.title, f.file_path, f.duration_ms";
+
+fn map_clip(r: &Row) -> rusqlite::Result<CompositionClipDto> {
+    Ok(CompositionClipDto {
+        id: r.get(0)?,
+        fragment_id: r.get(1)?,
+        start_ms: to_u64(r.get(2)?),
+        trim_start_ms: to_u64(r.get(3)?),
+        length_ms: to_u64(r.get(4)?),
+        repeats: to_u32(r.get(5)?),
+        transpose: r.get(6)?,
+        fragment_title: r.get(7)?,
+        fragment_file_path: r.get(8)?,
+        fragment_duration_ms: to_u64(r.get(9)?),
+    })
+}
+
+fn map_track(r: &Row) -> rusqlite::Result<CompositionTrackDto> {
+    Ok(CompositionTrackDto {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        program: to_u8(r.get(2)?),
+        volume: to_u8(r.get(3)?),
+        muted: r.get::<_, i64>(4)? != 0,
+        solo: r.get::<_, i64>(5)? != 0,
+        sustain: r.get::<_, i64>(6)? != 0,
+        color: to_u8(r.get(7)?),
+        clips: Vec::new(),
+    })
+}
+
+/// End of the clip on the timeline, repeats included.
+pub fn clip_end_ms(clip: &CompositionClipDto) -> u64 {
+    clip.start_ms.saturating_add(clip.length_ms.saturating_mul(u64::from(clip.repeats)))
+}
+
+/// The composition with its tracks and clips (paths as stored).
+fn fetch_composition(conn: &Connection, composition_id: &str) -> Result<CompositionDto, String> {
+    let (title, created_at, updated_at) = conn
+        .query_row(
+            "SELECT title, created_at, updated_at FROM compositions WHERE id = ?1",
+            params![composition_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| t!("backend.composition.missing", id = composition_id))?;
+    let mut tracks = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, program, volume, muted, solo, sustain, color FROM composition_tracks \
+                 WHERE composition_id = ?1 ORDER BY order_index ASC",
+            )
+            .map_err(db_err)?;
+        let rows = stmt.query_map(params![composition_id], map_track).map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+    };
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {CLIP_COLS_C} FROM composition_clips c JOIN midi_fragments f ON f.id = c.fragment_id \
+             WHERE c.track_id = ?1 ORDER BY c.start_ms ASC"
+        ))
+        .map_err(db_err)?;
+    for track in &mut tracks {
+        let rows = stmt.query_map(params![track.id], map_clip).map_err(db_err)?;
+        track.clips = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+    }
+    Ok(CompositionDto { id: composition_id.to_string(), title, created_at, updated_at, tracks })
+}
+
+/// Checks a composition before saving it: track limit, instrument and volume ranges, clips inside
+/// their fragment and no overlapping clips on a track.
+fn validate_composition(conn: &Connection, doc: &CompositionDto) -> Result<(), String> {
+    if doc.tracks.len() > COMPOSITION_MAX_TRACKS {
+        return Err(t!("backend.composition.tooManyTracks", max = COMPOSITION_MAX_TRACKS));
+    }
+    for track in &doc.tracks {
+        if track.program > 127 {
+            return Err(t!("backend.composition.program", program = track.program));
+        }
+        if track.volume > 127 {
+            return Err(t!("backend.composition.volume", volume = track.volume));
+        }
+        let mut spans: Vec<(u64, u64)> = Vec::with_capacity(track.clips.len());
+        for clip in &track.clips {
+            let (title, duration_ms): (String, i64) = conn
+                .query_row(
+                    "SELECT title, duration_ms FROM midi_fragments WHERE id = ?1",
+                    params![clip.fragment_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .map_err(db_err)?
+                .ok_or_else(|| t!("backend.db.fragmentMissing", id = clip.fragment_id))?;
+            if clip.length_ms == 0 {
+                return Err(t!("backend.composition.emptyClip", fragment = title));
+            }
+            if clip.trim_start_ms.saturating_add(clip.length_ms) > to_u64(duration_ms) {
+                return Err(t!("backend.composition.clipOutside", fragment = title));
+            }
+            if !(1..=CLIP_MAX_REPEATS).contains(&clip.repeats) {
+                return Err(t!("backend.composition.repeats", max = CLIP_MAX_REPEATS));
+            }
+            if clip.transpose.abs() > CLIP_MAX_TRANSPOSE {
+                return Err(t!("backend.composition.transpose", max = CLIP_MAX_TRANSPOSE));
+            }
+            spans.push((clip.start_ms, clip_end_ms(clip)));
+        }
+        spans.sort_unstable();
+        if spans.windows(2).any(|w| w[1].0 < w[0].1) {
+            return Err(t!("backend.composition.overlap", track = track.name));
+        }
+    }
+    Ok(())
+}
+
+/// The id sent by the frontend, or a new one if it is empty.
+fn id_or_new(id: &str) -> String {
+    if id.trim().is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        id.to_string()
+    }
 }
 
 fn history_depth(conn: &Connection, session_id: &str) -> Result<u32, String> {
@@ -507,6 +681,13 @@ impl Database {
             tx.execute_batch("PRAGMA user_version = 3;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
+        if version < 4 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V4)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 4, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 4;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
         Ok(())
     }
 
@@ -547,6 +728,13 @@ impl Database {
     fn fix_media(&self, mut m: SessionMediaDto) -> SessionMediaDto {
         m.local_path = self.load_path(m.local_path);
         m
+    }
+
+    fn fix_composition(&self, mut c: CompositionDto) -> CompositionDto {
+        for clip in c.tracks.iter_mut().flat_map(|t| t.clips.iter_mut()) {
+            clip.fragment_file_path = self.load_path(std::mem::take(&mut clip.fragment_file_path));
+        }
+        c
     }
 
     // ----------------------------- Sessions -----------------------------
@@ -1029,6 +1217,196 @@ impl Database {
         Ok(PieceDetailDto { piece, takes })
     }
 
+    // ----------------------------- Compositions -----------------------------
+
+    /// Most recently edited first.
+    pub fn list_compositions(&self) -> Result<Vec<CompositionSummaryDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.id, c.title, c.updated_at, \
+                 (SELECT COUNT(*) FROM composition_tracks t WHERE t.composition_id = c.id), \
+                 (SELECT COUNT(*) FROM composition_clips k JOIN composition_tracks t ON t.id = k.track_id \
+                  WHERE t.composition_id = c.id), \
+                 (SELECT COALESCE(MAX(k.start_ms + k.length_ms * k.repeats), 0) FROM composition_clips k \
+                  JOIN composition_tracks t ON t.id = k.track_id WHERE t.composition_id = c.id) \
+                 FROM compositions c ORDER BY c.updated_at DESC",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(CompositionSummaryDto {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    updated_at: r.get(2)?,
+                    track_count: to_u32(r.get(3)?),
+                    clip_count: to_u32(r.get(4)?),
+                    duration_ms: to_u64(r.get(5)?),
+                })
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+    }
+
+    /// New composition with one empty piano track named `track_name`.
+    pub fn create_composition(&self, title: &str, track_name: &str) -> Result<CompositionDto, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_rfc3339();
+        tx.execute(
+            "INSERT INTO compositions (id, title, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+            params![id, title, now],
+        )
+        .map_err(db_err)?;
+        tx.execute(
+            "INSERT INTO composition_tracks (id, composition_id, name, order_index) VALUES (?1, ?2, ?3, 0)",
+            params![uuid::Uuid::new_v4().to_string(), id, track_name],
+        )
+        .map_err(db_err)?;
+        let created = fetch_composition(&tx, &id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(self.fix_composition(created))
+    }
+
+    pub fn get_composition(&self, composition_id: &str) -> Result<CompositionDto, String> {
+        let conn = self.lock()?;
+        fetch_composition(&conn, composition_id).map(|c| self.fix_composition(c))
+    }
+
+    /// Replaces the title, tracks and clips with `doc` in one transaction (the vector order is the
+    /// track order). Empty track or clip ids get a new one; the clips' `fragment_*` fields are ignored.
+    pub fn save_composition(&self, doc: &CompositionDto) -> Result<CompositionDto, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let changed = tx
+            .execute(
+                "UPDATE compositions SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                params![doc.title.trim(), now_rfc3339(), doc.id],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.composition.missing", id = doc.id));
+        }
+        validate_composition(&tx, doc)?;
+        tx.execute("DELETE FROM composition_tracks WHERE composition_id = ?1", params![doc.id])
+            .map_err(db_err)?;
+        for (i, track) in doc.tracks.iter().enumerate() {
+            let track_id = id_or_new(&track.id);
+            tx.execute(
+                "INSERT INTO composition_tracks (id, composition_id, name, program, volume, muted, solo, sustain, \
+                 color, order_index) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![
+                    track_id,
+                    doc.id,
+                    track.name.trim(),
+                    i64::from(track.program),
+                    i64::from(track.volume),
+                    i64::from(track.muted),
+                    i64::from(track.solo),
+                    i64::from(track.sustain),
+                    i64::from(track.color),
+                    i as i64
+                ],
+            )
+            .map_err(db_err)?;
+            for clip in &track.clips {
+                tx.execute(
+                    "INSERT INTO composition_clips (id, track_id, fragment_id, start_ms, trim_start_ms, length_ms, \
+                     repeats, transpose) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        id_or_new(&clip.id),
+                        track_id,
+                        clip.fragment_id,
+                        to_i64(clip.start_ms),
+                        to_i64(clip.trim_start_ms),
+                        to_i64(clip.length_ms),
+                        i64::from(clip.repeats),
+                        i64::from(clip.transpose)
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+        }
+        let saved = fetch_composition(&tx, &doc.id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(self.fix_composition(saved))
+    }
+
+    pub fn delete_composition(&self, composition_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        let changed = conn
+            .execute("DELETE FROM compositions WHERE id = ?1", params![composition_id])
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.composition.missing", id = composition_id));
+        }
+        Ok(())
+    }
+
+    /// Every fragment of the vault for the composer's library, newest session first.
+    pub fn list_library_fragments(&self) -> Result<Vec<LibraryFragmentDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT f.id, f.title, f.file_path, f.duration_ms, f.session_id, s.title, s.session_date, \
+                 f.piece_id, p.title, f.passage, f.created_at FROM midi_fragments f \
+                 JOIN sessions s ON s.id = f.session_id LEFT JOIN pieces p ON p.id = f.piece_id \
+                 ORDER BY s.session_date DESC, f.created_at DESC",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(LibraryFragmentDto {
+                    id: r.get(0)?,
+                    title: r.get(1)?,
+                    file_path: r.get(2)?,
+                    duration_ms: to_u64(r.get(3)?),
+                    session_id: r.get(4)?,
+                    session_title: r.get(5)?,
+                    session_date: r.get(6)?,
+                    piece_id: r.get(7)?,
+                    piece_title: r.get(8)?,
+                    passage: r.get(9)?,
+                    created_at: r.get(10)?,
+                })
+            })
+            .map_err(db_err)?;
+        let items = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+        Ok(items
+            .into_iter()
+            .map(|mut f| {
+                f.file_path = self.load_path(f.file_path);
+                f
+            })
+            .collect())
+    }
+
+    /// Compositions with a clip of one of `fragment_ids` or of a fragment of `session_id`: what
+    /// deleting them would change.
+    pub fn count_compositions_using(&self, fragment_ids: &[String], session_id: Option<&str>) -> Result<u32, String> {
+        let conn = self.lock()?;
+        let mut conds: Vec<String> = Vec::new();
+        let mut args: Vec<&str> = Vec::new();
+        if !fragment_ids.is_empty() {
+            conds.push(format!("k.fragment_id IN ({})", vec!["?"; fragment_ids.len()].join(", ")));
+            args.extend(fragment_ids.iter().map(String::as_str));
+        }
+        if let Some(sid) = session_id {
+            conds.push("k.fragment_id IN (SELECT id FROM midi_fragments WHERE session_id = ?)".into());
+            args.push(sid);
+        }
+        if conds.is_empty() {
+            return Ok(0);
+        }
+        let sql = format!(
+            "SELECT COUNT(DISTINCT t.composition_id) FROM composition_clips k \
+             JOIN composition_tracks t ON t.id = k.track_id WHERE {}",
+            conds.join(" OR ")
+        );
+        conn.query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0)).map(to_u32).map_err(db_err)
+    }
+
     // ----------------------------- Comments -----------------------------
 
     pub fn add_timeline_comment(&self, fragment_id: &str, timestamp_ms: u64, content: &str) -> Result<TimelineCommentDto, String> {
@@ -1396,6 +1774,9 @@ mod tests {
         let f = db.get_fragment("f1").unwrap();
         assert_eq!((f.piece_id, f.passage.as_str()), (None, ""));
         assert_eq!(db.get_session_detail("s1").unwrap().undo_depth, 0);
+        // v4: the composer's tables exist and the old fragments reach its library.
+        assert!(db.list_compositions().unwrap().is_empty());
+        assert_eq!(db.list_library_fragments().unwrap()[0].id, "f1");
         drop(db);
 
         // Reopening does not backfill again.
@@ -1507,6 +1888,164 @@ mod tests {
         // Taking a fragment out of a piece.
         db.set_fragment_piece("b", Some(&scales.id), "").unwrap();
         assert_eq!(db.set_fragment_piece("b", None, "").unwrap().piece_id, None);
+    }
+
+    fn clip(fragment_id: &str, start_ms: u64, length_ms: u64) -> CompositionClipDto {
+        CompositionClipDto {
+            id: String::new(),
+            fragment_id: fragment_id.into(),
+            start_ms,
+            trim_start_ms: 0,
+            length_ms,
+            repeats: 1,
+            transpose: 0,
+            fragment_title: String::new(),
+            fragment_file_path: String::new(),
+            fragment_duration_ms: 0,
+        }
+    }
+
+    /// A session with fragments `a` (10 s) and `b` (4 s), and a composition with one empty track.
+    fn composition_fixture() -> (Database, SessionDto, CompositionDto) {
+        let db = db();
+        let s = db.create_session("Monday", 100).unwrap();
+        db.insert_fragment("a", &s.id, "Theme A", "", "/vault/midi/fragments/a.mid", 100, 10_000).unwrap();
+        db.insert_fragment("b", &s.id, "Bass", "", "/vault/midi/fragments/b.mid", 100, 4_000).unwrap();
+        let c = db.create_composition("Arrangement", "Track 1").unwrap();
+        (db, s, c)
+    }
+
+    #[test]
+    fn compositions_save_and_reload_tracks_and_clips() {
+        let (db, _, mut doc) = composition_fixture();
+        assert_eq!(doc.tracks.len(), 1);
+        let t = &doc.tracks[0];
+        assert_eq!((t.name.as_str(), t.program, t.volume, t.sustain, t.muted), ("Track 1", 0, 100, true, false));
+
+        doc.title = "  Nocturne arrangement ".into();
+        doc.tracks[0].clips = vec![clip("a", 0, 8_000), CompositionClipDto { trim_start_ms: 1_000, ..clip("a", 8_000, 9_000) }];
+        doc.tracks.push(CompositionTrackDto {
+            id: String::new(),
+            name: "Bass".into(),
+            program: 32,
+            volume: 90,
+            muted: true,
+            solo: false,
+            sustain: false,
+            color: 2,
+            clips: vec![CompositionClipDto { repeats: 4, transpose: -12, ..clip("b", 0, 4_000) }],
+        });
+        let saved = db.save_composition(&doc).unwrap();
+        assert_eq!(saved.title, "Nocturne arrangement");
+        assert_eq!(saved.tracks.len(), 2);
+        assert_eq!(saved.tracks[0].id, doc.tracks[0].id, "existing ids are kept");
+        assert!(!saved.tracks[1].id.is_empty());
+        let a2 = &saved.tracks[0].clips[1];
+        assert_eq!((a2.start_ms, a2.trim_start_ms, a2.length_ms), (8_000, 1_000, 9_000));
+        assert_eq!(a2.fragment_title, "Theme A");
+        assert_eq!(a2.fragment_file_path, "/vault/midi/fragments/a.mid");
+        assert_eq!(a2.fragment_duration_ms, 10_000);
+        let bass = &saved.tracks[1];
+        assert_eq!((bass.program, bass.volume, bass.muted, bass.sustain, bass.color), (32, 90, true, false, 2));
+        assert_eq!((bass.clips[0].repeats, bass.clips[0].transpose), (4, -12));
+        assert_eq!(db.get_composition(&doc.id).unwrap(), saved);
+
+        let list = db.list_compositions().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].track_count, list[0].clip_count, list[0].duration_ms), (2, 3, 17_000));
+
+        // Reordering tracks.
+        let mut reordered = saved.clone();
+        reordered.tracks.reverse();
+        let r = db.save_composition(&reordered).unwrap();
+        assert_eq!(r.tracks[0].name, "Bass");
+
+        db.delete_composition(&doc.id).unwrap();
+        assert!(db.get_composition(&doc.id).is_err());
+        assert!(db.delete_composition(&doc.id).is_err());
+        let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM composition_clips", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn compositions_reject_invalid_documents() {
+        let (db, _, doc) = composition_fixture();
+        let with = |clips: Vec<CompositionClipDto>| {
+            let mut d = doc.clone();
+            d.tracks[0].clips = clips;
+            d
+        };
+        // Overlap on the same track; touching is fine.
+        assert!(db.save_composition(&with(vec![clip("a", 0, 5_000), clip("b", 4_999, 1_000)])).is_err());
+        assert!(db.save_composition(&with(vec![clip("a", 0, 5_000), clip("b", 5_000, 1_000)])).is_ok());
+        // Repeats count towards the clip's end.
+        let repeated = CompositionClipDto { repeats: 2, ..clip("b", 0, 4_000) };
+        assert!(db.save_composition(&with(vec![repeated, clip("a", 7_000, 1_000)])).is_err());
+        // The window must stay inside the fragment.
+        assert!(db.save_composition(&with(vec![CompositionClipDto { trim_start_ms: 1, ..clip("b", 0, 4_000) }])).is_err());
+        assert!(db.save_composition(&with(vec![clip("b", 0, 0)])).is_err());
+        assert!(db.save_composition(&with(vec![CompositionClipDto { repeats: 0, ..clip("b", 0, 1_000) }])).is_err());
+        assert!(db.save_composition(&with(vec![CompositionClipDto { repeats: 17, ..clip("b", 0, 1_000) }])).is_err());
+        assert!(db.save_composition(&with(vec![CompositionClipDto { transpose: 25, ..clip("b", 0, 1_000) }])).is_err());
+        assert!(db.save_composition(&with(vec![clip("nope", 0, 1_000)])).is_err());
+
+        let mut bad = doc.clone();
+        bad.tracks[0].program = 128;
+        assert!(db.save_composition(&bad).is_err());
+        let mut many = doc.clone();
+        many.tracks = (0..=COMPOSITION_MAX_TRACKS)
+            .map(|i| CompositionTrackDto { id: String::new(), name: format!("T{i}"), ..doc.tracks[0].clone() })
+            .collect();
+        assert!(db.save_composition(&many).is_err());
+        let mut missing = doc.clone();
+        missing.id = "nope".into();
+        assert!(db.save_composition(&missing).is_err());
+
+        // A rejected save leaves the composition as it was.
+        assert_eq!(db.get_composition(&doc.id).unwrap().tracks[0].clips.len(), 2);
+    }
+
+    #[test]
+    fn deleting_a_fragment_or_its_session_removes_its_clips() {
+        let (db, s, mut doc) = composition_fixture();
+        doc.tracks[0].clips = vec![clip("a", 0, 5_000), clip("b", 6_000, 4_000)];
+        db.save_composition(&doc).unwrap();
+        let other = db.create_composition("Other", "Track 1").unwrap();
+        let mut other_doc = other.clone();
+        other_doc.tracks[0].clips = vec![clip("b", 0, 4_000)];
+        db.save_composition(&other_doc).unwrap();
+
+        assert_eq!(db.count_compositions_using(&["a".into()], None).unwrap(), 1);
+        assert_eq!(db.count_compositions_using(&["b".into()], None).unwrap(), 2);
+        assert_eq!(db.count_compositions_using(&[], Some(&s.id)).unwrap(), 2);
+        assert_eq!(db.count_compositions_using(&["zzz".into()], None).unwrap(), 0);
+        assert_eq!(db.count_compositions_using(&[], None).unwrap(), 0);
+
+        db.delete_fragment("b").unwrap();
+        let ids: Vec<String> = db.get_composition(&doc.id).unwrap().tracks[0].clips.iter().map(|c| c.fragment_id.clone()).collect();
+        assert_eq!(ids, vec!["a".to_string()]);
+        assert!(db.get_composition(&other.id).unwrap().tracks[0].clips.is_empty());
+
+        db.delete_session(&s.id).unwrap();
+        let after = db.get_composition(&doc.id).unwrap();
+        assert_eq!(after.tracks.len(), 1, "tracks stay, only clips go");
+        assert!(after.tracks[0].clips.is_empty());
+    }
+
+    #[test]
+    fn library_lists_every_fragment_with_its_piece() {
+        let (db, s, _) = composition_fixture();
+        let piece = db.create_piece("Nocturne", "Chopin").unwrap();
+        db.set_fragment_piece("a", Some(&piece.id), "Theme A").unwrap();
+        let lib = db.list_library_fragments().unwrap();
+        assert_eq!(lib.len(), 2);
+        let a = lib.iter().find(|f| f.id == "a").unwrap();
+        assert_eq!(a.piece_title.as_deref(), Some("Nocturne"));
+        assert_eq!((a.passage.as_str(), a.session_title.as_str()), ("Theme A", "Monday"));
+        assert_eq!((a.file_path.as_str(), a.duration_ms), ("/vault/midi/fragments/a.mid", 10_000));
+        assert_eq!(a.session_id, s.id);
+        let b = lib.iter().find(|f| f.id == "b").unwrap();
+        assert_eq!(b.piece_title, None);
     }
 
     #[test]

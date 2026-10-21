@@ -7,10 +7,13 @@ import {
   EVENT_PLAYBACK_PROGRESS,
   type AppInfo,
   type AppLink,
+  type CompositionDto,
+  type CompositionSummaryDto,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
   type FragmentDto,
   type LanguageInfo,
+  type LibraryFragmentDto,
   type MidiActivityDto,
   type MidiNotesDto,
   type MidiPortInfo,
@@ -25,6 +28,7 @@ import {
   type SoundfontInfo,
   type TimeRangeDto,
   type TimelineCommentDto,
+  type TrackMixDto,
   type UndoTrimResult,
   type VaultInfo,
   type VaultOpenResult,
@@ -185,6 +189,58 @@ export class TauriApiService {
     return this.call('assign_fragment_piece', { fragmentId, pieceId, passage });
   }
 
+  // ---- Compositions ----
+  getCompositions(): Promise<CompositionSummaryDto[]> {
+    return this.call('get_compositions');
+  }
+
+  /** New composition with one empty piano track (an empty title gets the default one). */
+  createComposition(title: string): Promise<CompositionDto> {
+    return this.call('create_composition', { title });
+  }
+
+  getComposition(compositionId: string): Promise<CompositionDto> {
+    return this.call('get_composition', { compositionId });
+  }
+
+  /** Saves the whole document and resolves with it as stored (new tracks and clips get their ids). */
+  saveComposition(composition: CompositionDto): Promise<CompositionDto> {
+    return this.call('save_composition', { composition });
+  }
+
+  deleteComposition(compositionId: string): Promise<void> {
+    return this.call('delete_composition', { compositionId });
+  }
+
+  getLibraryFragments(): Promise<LibraryFragmentDto[]> {
+    return this.call('get_library_fragments');
+  }
+
+  /** Compositions that would lose clips if these fragments (or the session's) were deleted. */
+  countCompositionUses(fragmentIds: string[], sessionId: string | null = null): Promise<number> {
+    return this.call('count_composition_uses', { fragmentIds, sessionId });
+  }
+
+  /** Plays the composition from `startMs`; progress reports it as `composition:<id>`. */
+  playComposition(compositionId: string, startMs: number): Promise<void> {
+    return this.call('play_composition', { compositionId, startMs: Math.max(0, Math.round(startMs)) });
+  }
+
+  /** General MIDI programs the active SoundFont has (empty while none is loaded). */
+  getSoundfontPrograms(): Promise<number[]> {
+    return this.call('get_soundfont_programs');
+  }
+
+  /** Plays a short phrase with a General MIDI instrument (it replaces what was playing). */
+  previewInstrument(program: number): Promise<void> {
+    return this.call('preview_instrument', { program });
+  }
+
+  /** Applies the mixer live (track order) if the composition is the one loaded in the player. */
+  setCompositionMix(compositionId: string, mix: TrackMixDto[]): Promise<void> {
+    return this.call('set_composition_mix', { compositionId, mix });
+  }
+
   // ---- Practice statistics ----
   getPracticeStats(from: string, to: string): Promise<PracticeStatsDto> {
     return this.call('get_practice_stats', { from, to });
@@ -279,12 +335,27 @@ export class TauriApiService {
     return this.call('export_audio', { filePath, destPath });
   }
 
+  /** Renders a composition (as heard) to WAV; resolves with the path written. */
+  exportCompositionAudio(compositionId: string, destPath: string): Promise<string> {
+    return this.call('export_composition_audio', { compositionId, destPath });
+  }
+
+  /** Writes a composition as a multitrack MIDI file; resolves with the path written. */
+  exportCompositionMidi(compositionId: string, destPath: string): Promise<string> {
+    return this.call('export_composition_midi', { compositionId, destPath });
+  }
+
   /** Native "save as" dialog for a WAV file; returns null if cancelled. */
-  async pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+  pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+    return this.pickSavePath(title, defaultName, { name: 'WAV', extensions: ['wav'] });
+  }
+
+  /** Native "save as" dialog with one file type; returns null if cancelled. */
+  async pickSavePath(title: string, defaultName: string, filter: { name: string; extensions: string[] }): Promise<string | null> {
     if (!this.available) return null;
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const picked = await save({ title, defaultPath: defaultName, filters: [{ name: 'WAV', extensions: ['wav'] }] });
+      const picked = await save({ title, defaultPath: defaultName, filters: [filter] });
       return typeof picked === 'string' ? picked : null;
     } catch (err) {
       throw new IpcError('dialog.save', errorMessage(err));

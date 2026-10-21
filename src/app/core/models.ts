@@ -175,6 +175,86 @@ export interface PieceDetailDto {
   takes: PieceTakeDto[];
 }
 
+/** A composition in the list of the composer. */
+export interface CompositionSummaryDto {
+  id: string;
+  title: string;
+  track_count: number;
+  clip_count: number;
+  /** End of the last clip (repeats included). */
+  duration_ms: number;
+  updated_at: string;
+}
+
+/** A clip: a window of a fragment placed on a track. The fragment's MIDI is never copied. */
+export interface CompositionClipDto {
+  /** Empty for a clip the backend has not stored yet. */
+  id: string;
+  fragment_id: string;
+  /** Position on the composition's timeline. */
+  start_ms: number;
+  /** Start of the window inside the fragment. */
+  trim_start_ms: number;
+  /** Length of one repetition of the window. */
+  length_ms: number;
+  /** Times the window is played back to back (1 = once). */
+  repeats: number;
+  /** Semitones. */
+  transpose: number;
+  /** Read only: filled in from the fragment when loading, ignored when saving. */
+  fragment_title: string;
+  fragment_file_path: string;
+  fragment_duration_ms: number;
+}
+
+/** A track: one MIDI channel with a General MIDI instrument. The array order is the track order. */
+export interface CompositionTrackDto {
+  id: string;
+  name: string;
+  /** General MIDI program (0-127). */
+  program: number;
+  /** MIDI channel volume (0-127). */
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+  /** Whether the recorded sustain pedal (CC64) is played. */
+  sustain: boolean;
+  /** Index into the track palette. */
+  color: number;
+  /** Sorted by `start_ms`. */
+  clips: CompositionClipDto[];
+}
+
+export interface CompositionDto {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  tracks: CompositionTrackDto[];
+}
+
+/** Mixer state of a track, applied live while a composition plays. */
+export interface TrackMixDto {
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+}
+
+/** A fragment as the composer's library shows it. */
+export interface LibraryFragmentDto {
+  id: string;
+  title: string;
+  file_path: string;
+  duration_ms: number;
+  session_id: string;
+  session_title: string;
+  session_date: string;
+  piece_id: string | null;
+  piece_title: string | null;
+  passage: string;
+  created_at: string;
+}
+
 export interface SoundfontCandidate {
   path: string;
   name: string;

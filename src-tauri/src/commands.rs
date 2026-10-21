@@ -11,6 +11,7 @@ use base64::Engine as _;
 use tauri::{Manager, State};
 
 use crate::audio_engine::{self, AudioEngine};
+use crate::composition::{self, MixMode};
 use crate::i18n;
 use crate::midi_notes;
 use crate::midi_recorder::{self, MidiRecorder, MidiSink};
@@ -405,16 +406,24 @@ pub async fn stop_midi_playback(state: State<'_, AppState>) -> Result<(), String
 
 /// Sample rate of the exported audio.
 const EXPORT_SAMPLE_RATE: u32 = 44_100;
+/// Nominal tempo of exported compositions: they are timed in seconds, not bars.
+const EXPORT_MIDI_BPM: u32 = 120;
 
 /// Renders a `.mid` file to a 16-bit stereo WAV with the current SoundFont. Returns the path
 /// written (with a `.wav` extension added if it had none).
+/// `dest_path` with the `ext` extension (added if it has another one or none).
+fn with_extension(dest_path: String, ext: &str) -> PathBuf {
+    let mut dest = PathBuf::from(dest_path);
+    if !dest.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext)) {
+        dest.as_mut_os_string().push(format!(".{ext}"));
+    }
+    dest
+}
+
 #[tauri::command]
 pub async fn export_audio(state: State<'_, AppState>, file_path: String, dest_path: String) -> Result<String, String> {
     let sound_font = state.audio.sound_font().ok_or_else(|| t!("backend.export.noSoundfont"))?;
-    let mut dest = PathBuf::from(dest_path);
-    if !dest.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
-        dest.as_mut_os_string().push(".wav");
-    }
+    let dest = with_extension(dest_path, "wav");
     tauri::async_runtime::spawn_blocking(move || {
         let mut wav = WavWriter::create(&dest, EXPORT_SAMPLE_RATE, 2)?;
         audio_engine::render_file_offline(sound_font, Path::new(&file_path), EXPORT_SAMPLE_RATE, |b| wav.write(b))?;
@@ -493,6 +502,157 @@ pub async fn assign_fragment_piece(
     let piece_id = piece_id.filter(|p| !p.is_empty());
     let passage = if piece_id.is_some() { passage } else { String::new() };
     state.vault()?.db.set_fragment_piece(&fragment_id, piece_id.as_deref(), &passage)
+}
+
+// ---------------------------------------------------------------------------
+// Compositions
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_compositions(state: State<'_, AppState>) -> Result<Vec<CompositionSummaryDto>, String> {
+    state.vault()?.db.list_compositions()
+}
+
+#[tauri::command]
+pub async fn create_composition(state: State<'_, AppState>, title: String) -> Result<CompositionDto, String> {
+    let title = if title.trim().is_empty() { t!("backend.defaults.compositionTitle") } else { title.trim().to_string() };
+    state.vault()?.db.create_composition(&title, &t!("backend.defaults.trackName", n = 1))
+}
+
+#[tauri::command]
+pub async fn get_composition(state: State<'_, AppState>, composition_id: String) -> Result<CompositionDto, String> {
+    state.vault()?.db.get_composition(&composition_id)
+}
+
+/// Saves the whole document (title, tracks and clips) and returns it as stored. If the
+/// composition is loaded in the player, it carries on playing the new version.
+#[tauri::command]
+pub async fn save_composition(state: State<'_, AppState>, composition: CompositionDto) -> Result<CompositionDto, String> {
+    let mut doc = composition;
+    if doc.title.trim().is_empty() {
+        doc.title = t!("backend.defaults.compositionTitle");
+    }
+    let saved = state.vault()?.db.save_composition(&doc)?;
+    let key = composition::playback_key(&saved.id);
+    if state.audio.active_key().as_deref() == Some(key.as_str()) {
+        let mix = composition::channel_mix(&composition::track_mix(&saved));
+        let (events, duration_us) = composition_events(saved.clone(), MixMode::Live).await?;
+        state.audio.set_channel_mix(&mix);
+        state.audio.replace_sequence(&key, events, duration_us);
+    }
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn delete_composition(state: State<'_, AppState>, composition_id: String) -> Result<(), String> {
+    if state.audio.active_key() == Some(composition::playback_key(&composition_id)) {
+        state.audio.stop()?;
+    }
+    state.vault()?.db.delete_composition(&composition_id)
+}
+
+/// Mixdown of a composition on a blocking thread (it reads the fragments' MIDI).
+async fn composition_events(doc: CompositionDto, mode: MixMode) -> Result<(Vec<midi_slicer::TimedMidiEvent>, u64), String> {
+    tauri::async_runtime::spawn_blocking(move || composition::build_events(&doc, mode))
+        .await
+        .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Plays the composition from `start_ms` in the global player; progress reports it as
+/// `composition:<id>`. Pause, seek, loop and speed are the usual playback commands.
+#[tauri::command]
+pub async fn play_composition(state: State<'_, AppState>, composition_id: String, start_ms: u64) -> Result<(), String> {
+    let doc = state.vault()?.db.get_composition(&composition_id)?;
+    let key = composition::playback_key(&doc.id);
+    let mix = composition::channel_mix(&composition::track_mix(&doc));
+    let (events, duration_us) = composition_events(doc, MixMode::Live).await?;
+    state.audio.set_channel_mix(&mix);
+    state.audio.play_sequence(&key, events, duration_us, start_ms)
+}
+
+/// The composition to export, refusing an empty one.
+fn exportable_composition(state: &AppState, composition_id: &str) -> Result<CompositionDto, String> {
+    let doc = state.vault()?.db.get_composition(composition_id)?;
+    if doc.tracks.iter().all(|t| t.clips.is_empty()) {
+        return Err(t!("backend.export.emptyComposition"));
+    }
+    Ok(doc)
+}
+
+/// Renders the composition as heard (mute, solo and volume included) to a 16-bit stereo WAV.
+/// Returns the path written.
+#[tauri::command]
+pub async fn export_composition_audio(state: State<'_, AppState>, composition_id: String, dest_path: String) -> Result<String, String> {
+    let sound_font = state.audio.sound_font().ok_or_else(|| t!("backend.export.noSoundfont"))?;
+    let doc = exportable_composition(&state, &composition_id)?;
+    let dest = with_extension(dest_path, "wav");
+    tauri::async_runtime::spawn_blocking(move || {
+        let (events, duration_us) = composition::build_events(&doc, MixMode::Export)?;
+        let mut wav = WavWriter::create(&dest, EXPORT_SAMPLE_RATE, 2)?;
+        audio_engine::render_events_offline(sound_font, events, duration_us, EXPORT_SAMPLE_RATE, |b| wav.write(b))?;
+        wav.finish(EXPORT_SAMPLE_RATE).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Writes the composition as a MIDI file (format 1) with one named track per track that sounds,
+/// its instrument and volume. Returns the path written.
+#[tauri::command]
+pub async fn export_composition_midi(state: State<'_, AppState>, composition_id: String, dest_path: String) -> Result<String, String> {
+    let doc = exportable_composition(&state, &composition_id)?;
+    let dest = with_extension(dest_path, "mid");
+    tauri::async_runtime::spawn_blocking(move || {
+        let (tracks, duration_us) = composition::build_named_tracks(&doc)?;
+        midi_slicer::write_smf_multitrack(&dest, &tracks, EXPORT_MIDI_BPM, duration_us)?;
+        Ok(dest.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// General MIDI programs the active SoundFont has (empty while none is loaded).
+#[tauri::command]
+pub async fn get_soundfont_programs(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    Ok(state.audio.sound_font().map(|sf| soundfont::gm_programs(&sf)).unwrap_or_default())
+}
+
+/// Plays a short phrase with a General MIDI instrument (it replaces what was playing).
+#[tauri::command]
+pub async fn preview_instrument(state: State<'_, AppState>, program: u8) -> Result<(), String> {
+    let program = program.min(127);
+    let (events, duration_us) = composition::preview_events(program);
+    state.audio.set_channel_mix(&[(0, 100, false)]);
+    state.audio.play_sequence(&composition::preview_key(program), events, duration_us, 0)
+}
+
+/// Applies the mixer (volume, mute and solo of each track, in track order) right away if the
+/// composition is the one loaded in the player. Storing it is `save_composition`'s job.
+#[tauri::command]
+pub async fn set_composition_mix(
+    state: State<'_, AppState>,
+    composition_id: String,
+    mix: Vec<TrackMixDto>,
+) -> Result<(), String> {
+    if state.audio.active_key() == Some(composition::playback_key(&composition_id)) {
+        state.audio.set_channel_mix(&composition::channel_mix(&mix));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_library_fragments(state: State<'_, AppState>) -> Result<Vec<LibraryFragmentDto>, String> {
+    state.vault()?.db.list_library_fragments()
+}
+
+/// Compositions that would lose clips if these fragments (or the session's) were deleted.
+#[tauri::command]
+pub async fn count_composition_uses(
+    state: State<'_, AppState>,
+    fragment_ids: Vec<String>,
+    session_id: Option<String>,
+) -> Result<u32, String> {
+    state.vault()?.db.count_compositions_using(&fragment_ids, session_id.as_deref())
 }
 
 // ---------------------------------------------------------------------------

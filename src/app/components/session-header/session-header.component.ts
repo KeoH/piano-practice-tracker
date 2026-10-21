@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { CompositionStore } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
@@ -20,6 +21,7 @@ export class SessionHeaderComponent {
   protected readonly store = inject(SessionStore);
   protected readonly rec = inject(RecordingStore);
   private readonly confirm = inject(ConfirmService);
+  private readonly compositions = inject(CompositionStore);
   private readonly toast = inject(ToastService);
   protected readonly i18n = inject(I18nService);
 
@@ -95,9 +97,10 @@ export class SessionHeaderComponent {
       this.toast.warning(this.i18n.t('header.stopToDelete'));
       return;
     }
+    const usage = await this.compositions.usageWarning([], s.id);
     const ok = await this.confirm.ask({
       title: this.i18n.t('header.deleteTitle'),
-      message: this.i18n.t('header.deleteMessage', { title: s.title }),
+      message: [this.i18n.t('header.deleteMessage', { title: s.title }), usage].filter(Boolean).join(' '),
       confirmLabel: this.i18n.t('header.deleteTitle'),
     });
     if (ok) await this.store.remove(s.id);

@@ -158,3 +158,19 @@ This document breaks down the sequential and parallelizable tasks needed to buil
   - Export a WAV and open it in an external player.
   - Create a piece, file two fragments from different sessions under the same passage and compare them in Repertoire.
   - Switch to English and check there is no untranslated text.
+
+## Phase 15: Composer
+- [x] **15.1. Schema v4 (`db.rs`):** `compositions`, `composition_tracks` and `composition_clips` (clips point to fragments and disappear with them), whole-document save with validation, the fragment library and `count_composition_uses`.
+- [x] **15.2. Mixdown and playback (`composition.rs`, `audio_engine.rs`):** clips flattened into one event list with a channel and program per track, `play_sequence` / `replace_sequence` for sequences built in memory, and a live per-channel mix (volume, mute, solo).
+- [x] **15.3. Composer view:** `CompositionStore` (undo history, delayed save), `core/composition.ts` (snap, fit, trim, split), the timeline with clip drag / trim / repeat, the fragment library, the clip inspector, the sidebar list and the shortcuts. The view is loaded with `@defer`.
+- [x] **15.4. Instruments:** the General MIDI names in the locales, `get_soundfont_programs`, `preview_instrument` and the instrument dialog with the sustain switch.
+- [x] **15.5. Export:** `export_composition_audio` (WAV as heard) and `export_composition_midi` (SMF format 1, one named track per voice).
+- [x] **15.6. Deleting with a warning:** the confirmation to delete a fragment or a session says how many compositions use it.
+- [ ] **15.7. Manual check with `npm run tauri dev`:**
+  - Create a composition, drag three fragments onto two tracks, and set the second one to Flute.
+  - Play it and, while it sounds, mute, solo and move a volume: no note is cut.
+  - Trim a clip, repeat it ×4, split it with S and undo with Ctrl+Z.
+  - Loop a range dragged on the ruler.
+  - Export the WAV and the MIDI and open the `.mid` in another program (one track per voice).
+  - Delete a fragment used in the composition: the confirmation says so and its clip disappears.
+  - Reopen the vault: the composition is still there.

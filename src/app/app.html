@@ -16,6 +16,13 @@
           <app-stats-view />
         } @else if (nav.view() === 'pieces') {
           <app-pieces-view />
+        } @else if (nav.view() === 'compose') {
+          <!-- Loaded on demand: the composer is the largest view -->
+          @defer (on immediate) {
+            <app-composer-view />
+          } @loading (minimum 200ms) {
+            <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
+          }
         }
       </main>
     </div>
