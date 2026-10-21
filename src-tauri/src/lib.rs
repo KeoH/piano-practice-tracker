@@ -139,6 +139,8 @@ pub fn run() {
             commands::set_composition_mix,
             commands::get_soundfont_programs,
             commands::preview_instrument,
+            commands::export_composition_audio,
+            commands::export_composition_midi,
             commands::get_practice_stats,
             commands::set_weekly_goal,
             commands::get_sessions,

@@ -511,7 +511,8 @@
     },
     "export": {
       "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
-      "tooLong": "La grabación es demasiado larga para un archivo WAV"
+      "tooLong": "La grabación es demasiado larga para un archivo WAV",
+      "emptyComposition": "La composición no tiene clips que exportar"
     },
     "invalidDate": "Fecha no válida: {date}",
     "composition": {
@@ -533,8 +534,11 @@
     "pickTitle": "Exportar audio",
     "done": "Audio guardado en {path}",
     "errors": {
-      "failed": "No se pudo exportar el audio"
-    }
+      "failed": "No se pudo exportar el audio",
+      "midiFailed": "No se pudo exportar el archivo MIDI"
+    },
+    "midiPickTitle": "Exportar MIDI",
+    "midiDone": "MIDI guardado en {path}"
   },
   "nav": {
     "label": "Vistas",
@@ -933,6 +937,10 @@
       "soundfont": "SoundFont:",
       "changeInSettings": "cámbialo en Ajustes",
       "use": "Usar en la pista"
-    }
+    },
+    "exportWav": "Exportar WAV",
+    "exportWavHint": "Guarda la composición tal como suena (con silencios, solos y volúmenes) en un archivo WAV",
+    "exportMidi": "Exportar MIDI",
+    "exportMidiHint": "Guarda la composición como archivo MIDI con una pista por voz, para abrirla en otros programas"
   }
 }

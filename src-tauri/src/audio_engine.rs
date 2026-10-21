@@ -1270,6 +1270,28 @@ mod tests {
     }
 
     #[test]
+    fn renders_events_built_in_memory() {
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        let mut evs = chords(0);
+        evs.extend(chords(1).into_iter().map(|mut e| {
+            e.time_us += 1_000_000;
+            e
+        }));
+        let mut out = Vec::new();
+        let frames = render_events_offline(eng.sound_font().unwrap(), evs, 2_500_000, 22_050, |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        })
+        .unwrap();
+        // 2.5 s of composition (rounded up to a block) + 2 s of tail.
+        let secs = frames as f64 / 22_050.0;
+        assert!((4.5..4.7).contains(&secs), "{secs} s");
+        // The second voice sounds in its second.
+        assert!(rms(&out[22_050 * 2..22_050 * 4]) > 0.01);
+    }
+
+    #[test]
     fn metronome_clicks_with_empty_synth() {
         let (em, _) = collecting_emitter();
         let eng = AudioEngine::new_headless(sf2_path(), em);

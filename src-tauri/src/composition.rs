@@ -129,18 +129,16 @@ fn adapt(bytes: &[u8], channel: u8, transpose: i32, sustain: bool) -> Option<Vec
     Some(out)
 }
 
-/// Flattens the composition. `load` returns a fragment's events (each file is read once).
-/// Returns the events sorted by time and the composition's length (µs).
-pub fn build_events_with(
+/// The events of each track that sounds in `mode` (`(track index, events sorted by time)`) and
+/// the composition's length (µs). `load` returns a fragment's events (each file is read once).
+pub fn build_tracks_with(
     doc: &CompositionDto,
     mode: MixMode,
     mut load: impl FnMut(&str) -> Result<Vec<TimedMidiEvent>, String>,
-) -> Result<(Vec<TimedMidiEvent>, u64), String> {
+) -> Result<(Vec<(usize, Vec<TimedMidiEvent>)>, u64), String> {
     let sounds = audible(&track_mix(doc));
     let mut cache: HashMap<&str, Vec<TimedMidiEvent>> = HashMap::new();
-    // Sorted by (time, priority) with a stable sort: simultaneous events of the same priority
-    // keep their original order.
-    let mut out: Vec<(TimedMidiEvent, u8)> = Vec::new();
+    let mut tracks = Vec::with_capacity(doc.tracks.len());
     let mut duration_ms = 0u64;
 
     for (i, track) in doc.tracks.iter().enumerate() {
@@ -149,9 +147,9 @@ pub fn build_events_with(
             continue;
         }
         let ch = track_channel(i);
-        out.push((TimedMidiEvent::new(0, vec![0xC0 | ch, track.program.min(127)]), 1));
+        let mut out = vec![TimedMidiEvent::new(0, vec![0xC0 | ch, track.program.min(127)])];
         if mode == MixMode::Export {
-            out.push((TimedMidiEvent::new(0, vec![0xB0 | ch, CC_VOLUME, track.volume.min(127)]), 1));
+            out.push(TimedMidiEvent::new(0, vec![0xB0 | ch, CC_VOLUME, track.volume.min(127)]));
         }
         for clip in &track.clips {
             let path = clip.fragment_file_path.as_str();
@@ -165,20 +163,43 @@ pub fn build_events_with(
                 let offset = clip.start_ms.saturating_mul(1000) + rep * length_us;
                 for ev in &window {
                     if let Some(bytes) = adapt(&ev.bytes, ch, clip.transpose, track.sustain) {
-                        let p = priority(&bytes);
-                        out.push((TimedMidiEvent::new(offset + ev.time_us, bytes), p));
+                        out.push(TimedMidiEvent::new(offset + ev.time_us, bytes));
                     }
                 }
             }
         }
+        // Stable: simultaneous events of the same priority keep their original order.
+        out.sort_by_key(|ev| (ev.time_us, priority(&ev.bytes)));
+        tracks.push((i, out));
     }
-    out.sort_by_key(|(ev, p)| (ev.time_us, *p));
-    Ok((out.into_iter().map(|(ev, _)| ev).collect(), duration_ms.saturating_mul(1000)))
+    Ok((tracks, duration_ms.saturating_mul(1000)))
+}
+
+/// Flattens the composition into one list sorted by time, and returns its length (µs).
+pub fn build_events_with(
+    doc: &CompositionDto,
+    mode: MixMode,
+    load: impl FnMut(&str) -> Result<Vec<TimedMidiEvent>, String>,
+) -> Result<(Vec<TimedMidiEvent>, u64), String> {
+    let (tracks, duration_us) = build_tracks_with(doc, mode, load)?;
+    let mut events: Vec<TimedMidiEvent> = tracks.into_iter().flat_map(|(_, evs)| evs).collect();
+    events.sort_by_key(|ev| (ev.time_us, priority(&ev.bytes)));
+    Ok((events, duration_us))
+}
+
+fn load_fragment(path: &str) -> Result<Vec<TimedMidiEvent>, String> {
+    read_timed_events(Path::new(path)).map(|(events, _)| events)
 }
 
 /// [`build_events_with`] reading the fragments from disk.
 pub fn build_events(doc: &CompositionDto, mode: MixMode) -> Result<(Vec<TimedMidiEvent>, u64), String> {
-    build_events_with(doc, mode, |path| read_timed_events(Path::new(path)).map(|(events, _)| events))
+    build_events_with(doc, mode, load_fragment)
+}
+
+/// One `(name, events)` per track that sounds, as exported to a MIDI file, and the length (µs).
+pub fn build_named_tracks(doc: &CompositionDto) -> Result<(Vec<(String, Vec<TimedMidiEvent>)>, u64), String> {
+    let (tracks, duration_us) = build_tracks_with(doc, MixMode::Export, load_fragment)?;
+    Ok((tracks.into_iter().map(|(i, evs)| (doc.tracks[i].name.clone(), evs)).collect(), duration_us))
 }
 
 #[cfg(test)]
@@ -347,6 +368,19 @@ mod tests {
         assert!(export.iter().all(|e| e.bytes[0] & 0x0F == 0));
         assert!(export.iter().any(|e| e.bytes == vec![0xB0, 7, 80]));
         assert_eq!(notes(&export).len(), 4);
+    }
+
+    #[test]
+    fn tracks_are_built_apart_for_a_midi_file() {
+        let mut solo = track(vec![clip(0, 0, 2_000)]);
+        solo.solo = true;
+        let d = doc(vec![track(vec![clip(0, 0, 2_000)]), solo, track(vec![clip(500, 0, 1_000)])]);
+        let (tracks, duration) = build_tracks_with(&d, MixMode::Export, |_| Ok(fragment())).unwrap();
+        assert_eq!(duration, 2_000_000);
+        assert_eq!(tracks.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1], "only the soloed track is exported");
+        assert!(tracks[0].1.iter().all(|e| e.bytes[0] & 0x0F == 1));
+        let (live, _) = build_tracks_with(&d, MixMode::Live, |_| Ok(fragment())).unwrap();
+        assert_eq!(live.len(), 3);
     }
 
     #[test]

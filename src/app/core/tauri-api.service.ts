@@ -335,12 +335,27 @@ export class TauriApiService {
     return this.call('export_audio', { filePath, destPath });
   }
 
+  /** Renders a composition (as heard) to WAV; resolves with the path written. */
+  exportCompositionAudio(compositionId: string, destPath: string): Promise<string> {
+    return this.call('export_composition_audio', { compositionId, destPath });
+  }
+
+  /** Writes a composition as a multitrack MIDI file; resolves with the path written. */
+  exportCompositionMidi(compositionId: string, destPath: string): Promise<string> {
+    return this.call('export_composition_midi', { compositionId, destPath });
+  }
+
   /** Native "save as" dialog for a WAV file; returns null if cancelled. */
-  async pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+  pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+    return this.pickSavePath(title, defaultName, { name: 'WAV', extensions: ['wav'] });
+  }
+
+  /** Native "save as" dialog with one file type; returns null if cancelled. */
+  async pickSavePath(title: string, defaultName: string, filter: { name: string; extensions: string[] }): Promise<string | null> {
     if (!this.available) return null;
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const picked = await save({ title, defaultPath: defaultName, filters: [{ name: 'WAV', extensions: ['wav'] }] });
+      const picked = await save({ title, defaultPath: defaultName, filters: [filter] });
       return typeof picked === 'string' ? picked : null;
     } catch (err) {
       throw new IpcError('dialog.save', errorMessage(err));

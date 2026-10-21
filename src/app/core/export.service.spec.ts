@@ -1,4 +1,4 @@
-import { wavFileName } from './export.service';
+import { exportFileName, wavFileName } from './export.service';
 
 describe('wavFileName', () => {
   it('keeps readable titles and adds the extension', () => {
@@ -12,5 +12,9 @@ describe('wavFileName', () => {
 
   it('falls back to a default name', () => {
     expect(wavFileName('  //  ')).toBe('piano.wav');
+  });
+
+  it('takes the extension of the export', () => {
+    expect(exportFileName('Nocturne: arrangement', 'mid')).toBe('Nocturne arrangement.mid');
   });
 });

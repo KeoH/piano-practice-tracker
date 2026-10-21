@@ -511,7 +511,8 @@
     },
     "export": {
       "noSoundfont": "No SoundFont is loaded; choose one in Settings → Sound",
-      "tooLong": "The recording is too long for a WAV file"
+      "tooLong": "The recording is too long for a WAV file",
+      "emptyComposition": "The composition has no clips to export"
     },
     "invalidDate": "Invalid date: {date}",
     "composition": {
@@ -533,8 +534,11 @@
     "pickTitle": "Export audio",
     "done": "Audio saved to {path}",
     "errors": {
-      "failed": "Could not export the audio"
-    }
+      "failed": "Could not export the audio",
+      "midiFailed": "Could not export the MIDI file"
+    },
+    "midiPickTitle": "Export MIDI",
+    "midiDone": "MIDI saved to {path}"
   },
   "nav": {
     "label": "Views",
@@ -933,6 +937,10 @@
       "soundfont": "SoundFont:",
       "changeInSettings": "change it in Settings",
       "use": "Use on the track"
-    }
+    },
+    "exportWav": "Export WAV",
+    "exportWavHint": "Save the composition as you hear it (mute, solo and volume included) as a WAV file",
+    "exportMidi": "Export MIDI",
+    "exportMidiHint": "Save the composition as a MIDI file with one track per voice, to open it in other programs"
   }
 }

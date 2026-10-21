@@ -19,6 +19,13 @@
         </span>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="btn" [disabled]="!clips() || !api.available || exporting('mid')" [title]="'composer.exportMidiHint' | t" (click)="export('mid')">
+          {{ (exporting('mid') ? 'export.exporting' : 'composer.exportMidi') | t }}
+        </button>
+        <button type="button" class="btn btn-primary" [disabled]="!clips() || !api.available || exporting('wav')" [title]="'composer.exportWavHint' | t" (click)="export('wav')">
+          <app-icon name="download" [size]="16" /> {{ (exporting('wav') ? 'export.exporting' : 'composer.exportWav') | t }}
+        </button>
+        <span class="h-6 w-px bg-line-strong" aria-hidden="true"></span>
         <button type="button" class="btn btn-ghost btn-icon" [disabled]="!store.canUndo()" (click)="store.undo()" [attr.aria-label]="'composer.undo' | t" [title]="'composer.undo' | t">
           <app-icon name="undo" [size]="17" />
         </button>

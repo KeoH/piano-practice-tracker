@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signa
 import { type SnapMode, clipCount, clipEnd } from '../../core/composition';
 import { CompositionStore, ZOOM_STEPS } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
+import { type CompositionExport, ExportService } from '../../core/export.service';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import type { MessageKey } from '../../core/i18n/languages';
@@ -50,6 +51,7 @@ export class ComposerViewComponent {
   protected readonly api = inject(TauriApiService);
   private readonly i18n = inject(I18nService);
   private readonly confirm = inject(ConfirmService);
+  private readonly exporter = inject(ExportService);
 
   protected readonly formatMs = formatMs;
   protected readonly snapOptions = SNAP_OPTIONS;
@@ -100,6 +102,19 @@ export class ComposerViewComponent {
       confirmLabel: this.i18n.t('composer.delete'),
     });
     if (ok) await this.store.remove(d.id);
+  }
+
+  protected exporting(kind: CompositionExport): boolean {
+    const key = this.store.key();
+    return !!key && this.exporter.isBusy(`${key}.${kind}`);
+  }
+
+  /** Saves pending edits first: the backend exports what is stored. */
+  protected async export(kind: CompositionExport): Promise<void> {
+    const d = this.store.doc();
+    if (!d) return;
+    await this.store.flush();
+    await this.exporter.exportComposition(d.id, d.title, kind);
   }
 
   protected zoom(direction: 1 | -1): void {
