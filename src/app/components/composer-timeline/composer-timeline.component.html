@@ -72,23 +72,16 @@
                   S
                 </button>
               </div>
-              <div class="flex items-center gap-1.5">
+              <button
+                type="button"
+                class="flex h-7 min-w-0 items-center gap-[7px] rounded-[7px] border border-line-strong bg-ink-900 px-2 text-left text-[12.5px] text-fg-soft transition-colors hover:border-line-hover hover:text-fg-strong"
+                [attr.aria-label]="'composer.instrumentButton' | t: { name: row.track.name, instrument: (programKey(row.track.program) | t) }"
+                (click)="store.pickerTrack.set(row.index)"
+              >
                 <app-icon name="music" [size]="14" class="shrink-0" [style.color]="'rgb(' + row.rgb + ')'" />
-                <label class="sr-only" [for]="'track-inst-' + row.track.id">{{ 'composer.instrument' | t: { name: row.track.name } }}</label>
-                <select
-                  [id]="'track-inst-' + row.track.id"
-                  class="field h-7 min-w-0 flex-1 truncate rounded-[7px] px-1.5 py-0 text-[12.5px] text-fg-soft"
-                  (change)="store.setProgram(row.index, +$any($event.target).value)"
-                >
-                  @for (fam of families; track fam.key) {
-                    <optgroup [label]="fam.key | t">
-                      @for (p of fam.programs; track p) {
-                        <option [value]="p" [selected]="p === row.track.program">{{ programKey(p) | t }}</option>
-                      }
-                    </optgroup>
-                  }
-                </select>
-              </div>
+                <span class="min-w-0 flex-1 truncate">{{ programKey(row.track.program) | t }}</span>
+                <app-icon name="chevron" [size]="13" class="shrink-0 rotate-90 text-faint" />
+              </button>
               <div class="flex items-center gap-2 text-faint">
                 <app-icon name="speaker" [size]="14" />
                 <input

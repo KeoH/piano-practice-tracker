@@ -107,6 +107,10 @@
   </div>
 }
 
+@if (store.pickerTrack() !== null) {
+  <app-instrument-picker />
+}
+
 @if (store.libraryDrag(); as frag) {
   @if (pointer(); as p) {
     <div

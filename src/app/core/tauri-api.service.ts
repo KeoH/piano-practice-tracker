@@ -226,6 +226,16 @@ export class TauriApiService {
     return this.call('play_composition', { compositionId, startMs: Math.max(0, Math.round(startMs)) });
   }
 
+  /** General MIDI programs the active SoundFont has (empty while none is loaded). */
+  getSoundfontPrograms(): Promise<number[]> {
+    return this.call('get_soundfont_programs');
+  }
+
+  /** Plays a short phrase with a General MIDI instrument (it replaces what was playing). */
+  previewInstrument(program: number): Promise<void> {
+    return this.call('preview_instrument', { program });
+  }
+
   /** Applies the mixer live (track order) if the composition is the one loaded in the player. */
   setCompositionMix(compositionId: string, mix: TrackMixDto[]): Promise<void> {
     return this.call('set_composition_mix', { compositionId, mix });

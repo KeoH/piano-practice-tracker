@@ -63,6 +63,8 @@ export class CompositionStore {
   readonly snap = signal<SnapMode>('edges');
   /** Fragment being dragged from the library onto the timeline. */
   readonly libraryDrag = signal<LibraryFragmentDto | null>(null);
+  /** Track whose instrument is being chosen (null = picker closed). */
+  readonly pickerTrack = signal<number | null>(null);
 
   private readonly past = signal<CompositionDto[]>([]);
   private readonly future = signal<CompositionDto[]>([]);
@@ -394,13 +396,10 @@ export class CompositionStore {
     if (n) this.updateTrack(index, (t) => (t.name === n ? null : { ...t, name: n }));
   }
 
-  setProgram(index: number, program: number): void {
+  /** Instrument and pedal of a track, in one undo step. */
+  setInstrument(index: number, program: number, sustain: boolean): void {
     const p = clamp(Math.round(program), 0, 127);
-    this.updateTrack(index, (t) => (t.program === p ? null : { ...t, program: p }));
-  }
-
-  setSustain(index: number, sustain: boolean): void {
-    this.updateTrack(index, (t) => (t.sustain === sustain ? null : { ...t, sustain }));
+    this.updateTrack(index, (t) => (t.program === p && t.sustain === sustain ? null : { ...t, program: p, sustain }));
   }
 
   toggleMute(index: number): void {

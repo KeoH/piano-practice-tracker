@@ -137,6 +137,8 @@ pub fn run() {
             commands::count_composition_uses,
             commands::play_composition,
             commands::set_composition_mix,
+            commands::get_soundfont_programs,
+            commands::preview_instrument,
             commands::get_practice_stats,
             commands::set_weekly_goal,
             commands::get_sessions,

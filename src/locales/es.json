@@ -916,6 +916,23 @@
       "save": "No se pudo guardar la composición",
       "delete": "No se pudo borrar la composición",
       "library": "No se pudieron cargar los fragmentos"
+    },
+    "instrumentButton": "Instrumento de {name}: {instrument}. Cambiarlo",
+    "picker": {
+      "title": "Instrumento de «{name}»",
+      "current": "Ahora:",
+      "close": "Cerrar",
+      "search": "Buscar: violonchelo, flauta, órgano…",
+      "families": "Familias de instrumentos",
+      "preview": "Escuchar {name}",
+      "previewError": "No se pudo reproducir el instrumento",
+      "unavailable": "El SoundFont activo no tiene este instrumento",
+      "noMatches": "Ningún instrumento coincide con la búsqueda.",
+      "sustain": "Respetar el pedal de resonancia",
+      "sustainHint": "Desactívalo si las notas se emborronan en instrumentos que no son de teclado.",
+      "soundfont": "SoundFont:",
+      "changeInSettings": "cámbialo en Ajustes",
+      "use": "Usar en la pista"
     }
   }
 }

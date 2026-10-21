@@ -22,6 +22,30 @@ const CC_VOLUME: u8 = 7;
 const CC_PAN: u8 = 10;
 const CC_SUSTAIN: u8 = 64;
 
+/// Key of an instrument preview in the player.
+pub fn preview_key(program: u8) -> String {
+    format!("preview:{program}")
+}
+
+/// A short phrase to hear an instrument on channel 1: an ascending arpeggio and a chord.
+/// Returns the events and their length (µs).
+pub fn preview_events(program: u8) -> (Vec<TimedMidiEvent>, u64) {
+    const VELOCITY: u8 = 90;
+    let mut events = vec![TimedMidiEvent::new(0, vec![0xC0, program.min(127)])];
+    let mut note = |key: u8, start_ms: u64, length_ms: u64| {
+        events.push(TimedMidiEvent::new(start_ms * 1000, vec![0x90, key, VELOCITY]));
+        events.push(TimedMidiEvent::new((start_ms + length_ms) * 1000, vec![0x80, key, 0]));
+    };
+    for (i, key) in [60u8, 64, 67, 72].into_iter().enumerate() {
+        note(key, i as u64 * 250, 240);
+    }
+    for key in [60u8, 64, 67] {
+        note(key, 1_000, 900);
+    }
+    events.sort_by_key(|e| (e.time_us, priority(&e.bytes)));
+    (events, 2_200_000)
+}
+
 /// Key of a composition in the player (`PlaybackProgress::file_path`).
 pub fn playback_key(composition_id: &str) -> String {
     format!("composition:{composition_id}")
@@ -323,6 +347,15 @@ mod tests {
         assert!(export.iter().all(|e| e.bytes[0] & 0x0F == 0));
         assert!(export.iter().any(|e| e.bytes == vec![0xB0, 7, 80]));
         assert_eq!(notes(&export).len(), 4);
+    }
+
+    #[test]
+    fn the_preview_plays_the_instrument() {
+        let (evs, duration) = preview_events(73);
+        assert_eq!(evs[0].bytes, vec![0xC0, 73]);
+        assert_eq!(notes(&evs).iter().filter(|n| n.1 == 0x90).count(), 7);
+        assert!(evs.last().unwrap().time_us <= duration);
+        assert_eq!(preview_key(73), "preview:73");
     }
 
     #[test]

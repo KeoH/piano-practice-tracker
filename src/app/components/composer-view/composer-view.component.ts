@@ -12,6 +12,7 @@ import { ClipInspectorComponent } from '../clip-inspector/clip-inspector.compone
 import { ComposerTimelineComponent } from '../composer-timeline/composer-timeline.component';
 import { FragmentLibraryComponent } from '../fragment-library/fragment-library.component';
 import { IconComponent } from '../icon/icon.component';
+import { InstrumentPickerComponent } from '../instrument-picker/instrument-picker.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 
 const SNAP_OPTIONS: { value: SnapMode; label: MessageKey }[] = [
@@ -27,7 +28,16 @@ const SNAP_OPTIONS: { value: SnapMode; label: MessageKey }[] = [
 @Component({
   selector: 'app-composer-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, RateSelectComponent, ComposerTimelineComponent, FragmentLibraryComponent, ClipInspectorComponent, TranslatePipe, PluralPipe],
+  imports: [
+    IconComponent,
+    RateSelectComponent,
+    ComposerTimelineComponent,
+    FragmentLibraryComponent,
+    ClipInspectorComponent,
+    InstrumentPickerComponent,
+    TranslatePipe,
+    PluralPipe,
+  ],
   host: {
     class: 'block min-h-full',
     '(window:pointermove)': 'trackPointer($event)',

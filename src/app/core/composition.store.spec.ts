@@ -177,6 +177,16 @@ describe('CompositionStore', () => {
     expect(mock.mixes.at(-1)).toEqual([{ volume: 100, muted: false, solo: true }]);
   });
 
+  it('changes instrument and pedal in one undo step', () => {
+    store.setInstrument(0, 73, false);
+    expect(store.doc()!.tracks[0]).toMatchObject({ program: 73, sustain: false });
+    store.setInstrument(0, 200, false);
+    expect(store.doc()!.tracks[0].program).toBe(127);
+    store.undo();
+    store.undo();
+    expect(store.doc()!.tracks[0]).toMatchObject({ program: 0, sustain: true });
+  });
+
   it('removes a track and keeps the active one in range', () => {
     store.addTrack();
     store.addTrack();

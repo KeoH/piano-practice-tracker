@@ -562,6 +562,21 @@ pub async fn play_composition(state: State<'_, AppState>, composition_id: String
     state.audio.play_sequence(&key, events, duration_us, start_ms)
 }
 
+/// General MIDI programs the active SoundFont has (empty while none is loaded).
+#[tauri::command]
+pub async fn get_soundfont_programs(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    Ok(state.audio.sound_font().map(|sf| soundfont::gm_programs(&sf)).unwrap_or_default())
+}
+
+/// Plays a short phrase with a General MIDI instrument (it replaces what was playing).
+#[tauri::command]
+pub async fn preview_instrument(state: State<'_, AppState>, program: u8) -> Result<(), String> {
+    let program = program.min(127);
+    let (events, duration_us) = composition::preview_events(program);
+    state.audio.set_channel_mix(&[(0, 100, false)]);
+    state.audio.play_sequence(&composition::preview_key(program), events, duration_us, 0)
+}
+
 /// Applies the mixer (volume, mute and solo of each track, in track order) right away if the
 /// composition is the one loaded in the player. Storing it is `save_composition`'s job.
 #[tauri::command]

@@ -916,6 +916,23 @@
       "save": "Could not save the composition",
       "delete": "Could not delete the composition",
       "library": "Could not load the fragments"
+    },
+    "instrumentButton": "Instrument of {name}: {instrument}. Change it",
+    "picker": {
+      "title": "Instrument of \"{name}\"",
+      "current": "Now:",
+      "close": "Close",
+      "search": "Search: cello, flute, organ…",
+      "families": "Instrument families",
+      "preview": "Listen to {name}",
+      "previewError": "Could not play the instrument",
+      "unavailable": "The active SoundFont doesn't have this instrument",
+      "noMatches": "No instrument matches the search.",
+      "sustain": "Play the sustain pedal",
+      "sustainHint": "Turn it off if the notes blur on instruments that are not keyboards.",
+      "soundfont": "SoundFont:",
+      "changeInSettings": "change it in Settings",
+      "use": "Use on the track"
     }
   }
 }

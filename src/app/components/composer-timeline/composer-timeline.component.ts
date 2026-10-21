@@ -28,7 +28,7 @@ import {
 import { CompositionStore } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs } from '../../core/format';
-import { GM_FAMILY_COUNT, GM_FAMILY_SIZE, familyKey, programKey } from '../../core/gm';
+import { programKey } from '../../core/gm';
 import { I18nService } from '../../core/i18n/i18n.service';
 import type { MessageKey } from '../../core/i18n/languages';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -119,10 +119,6 @@ export class ComposerTimelineComponent {
   protected readonly RULER_H = RULER_H;
   protected readonly ROW_H = ROW_H;
   protected readonly MAX_TRACKS = MAX_TRACKS;
-  protected readonly families = Array.from({ length: GM_FAMILY_COUNT }, (_, f) => ({
-    key: familyKey(f),
-    programs: Array.from({ length: GM_FAMILY_SIZE }, (_, i) => f * GM_FAMILY_SIZE + i),
-  }));
   protected readonly programKey = programKey;
   protected readonly emptySteps: { title: MessageKey; body: MessageKey }[] = [
     { title: 'composer.empty.step1Title', body: 'composer.empty.step1Body' },
