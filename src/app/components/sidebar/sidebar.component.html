@@ -9,6 +9,86 @@
   </div>
 </div>
 
+<!-- Views -->
+<nav class="mx-4 mb-3 grid grid-flow-col gap-1 rounded-[10px] border border-line bg-ink-900 p-1" [attr.aria-label]="'nav.label' | t">
+  @for (item of navItems; track item.view) {
+    @let active = nav.view() === item.view;
+    <button
+      type="button"
+      class="flex h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-[7px] px-1 text-[11.5px] font-medium transition-colors"
+      [class]="active ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+      [attr.aria-current]="active ? 'page' : null"
+      [title]="item.label | t"
+      (click)="nav.view.set(item.view)"
+    >
+      <app-icon [name]="item.icon" [size]="16" class="shrink-0" /><span class="max-w-full truncate">{{ item.label | t }}</span>
+    </button>
+  }
+</nav>
+
+@if (nav.view() === 'pieces') {
+<div class="flex flex-col gap-2.5 px-4 pb-4">
+  <button type="button" class="btn btn-primary btn-lg w-full" (click)="newPiece()" [disabled]="!api.available">
+    <app-icon name="plus" [size]="18" /> {{ 'pieces.new' | t }}
+  </button>
+  <div class="relative">
+    <app-icon name="search" [size]="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+    <label for="piece-filter" class="sr-only">{{ 'pieces.searchLabel' | t }}</label>
+    <input
+      id="piece-filter"
+      type="search"
+      class="field bg-ink-850 pl-9"
+      [placeholder]="'pieces.searchPlaceholder' | t"
+      [value]="pieces.filter()"
+      (input)="pieces.filter.set($any($event.target).value)"
+    />
+  </div>
+</div>
+
+<nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" [attr.aria-label]="'nav.pieces' | t">
+  @for (g of pieceGroups(); track g.label) {
+    <section>
+      <h2 class="px-2.5 pb-1.5 text-xs font-semibold text-faint">{{ g.label | t }}</h2>
+      <ul class="flex flex-col gap-0.5">
+        @for (p of g.items; track p.piece.id) {
+          @let active = pieces.selectedId() === p.piece.id;
+          <li>
+            <button
+              type="button"
+              class="flex min-h-[52px] w-full items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-colors"
+              [class]="active ? 'border-line-hover bg-ink-700' : 'border-transparent hover:bg-ink-800'"
+              [attr.aria-current]="active ? 'page' : null"
+              (click)="pieces.select(p.piece.id)"
+            >
+              <span class="flex min-w-0 flex-1 flex-col gap-[3px]">
+                <span class="truncate text-sm font-medium" [class]="active ? 'text-fg-strong' : 'text-fg-soft'">{{ p.piece.title }}</span>
+                <span class="flex gap-1.5 truncate text-xs whitespace-nowrap text-faint">
+                  @if (p.piece.composer) {
+                    <span class="truncate">{{ p.piece.composer }}</span>
+                    <span aria-hidden="true">·</span>
+                  }
+                  <span>{{ 'pieces.takes' | tp: p.take_count }}</span>
+                  @if (p.last_practiced) {
+                    <span aria-hidden="true">·</span>
+                    <span>{{ i18n.shortDate(p.last_practiced) }}</span>
+                  }
+                </span>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    </section>
+  } @empty {
+    @if (!pieces.listLoading()) {
+      <p class="px-2.5 py-6 text-center text-[13px] text-faint">
+        {{ (pieces.filter() ? 'pieces.noMatches' : 'pieces.noPieces') | t }}
+      </p>
+    }
+  }
+</nav>
+
+} @else {
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="newSession()" [disabled]="!api.available">
     <app-icon name="plus" [size]="18" /> {{ 'sidebar.newSession' | t }}
@@ -73,6 +153,8 @@
     }
   }
 </nav>
+
+}
 
 <!-- Footer: keyboard and settings -->
 <div class="flex flex-col gap-0.5 border-t border-line p-2.5">

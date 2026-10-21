@@ -9,15 +9,23 @@ import {
   type AppLink,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
+  type FragmentDto,
   type LanguageInfo,
   type MidiActivityDto,
+  type MidiNotesDto,
   type MidiPortInfo,
+  type PieceDetailDto,
+  type PieceDto,
+  type PieceSummaryDto,
   type PlaybackProgress,
+  type PracticeStatsDto,
   type SessionDetailDto,
   type SessionDto,
   type SessionSummaryDto,
   type SoundfontInfo,
+  type TimeRangeDto,
   type TimelineCommentDto,
+  type UndoTrimResult,
   type VaultInfo,
   type VaultOpenResult,
 } from './models';
@@ -90,6 +98,10 @@ export class TauriApiService {
     return this.call('get_midi_activity', { filePath });
   }
 
+  getMidiNotes(filePath: string): Promise<MidiNotesDto> {
+    return this.call('get_midi_notes', { filePath });
+  }
+
   extractMidiFragment(req: ExtractFragmentReq): Promise<FragmentCreatedResponse> {
     return this.call('extract_midi_fragment', { req });
   }
@@ -100,6 +112,22 @@ export class TauriApiService {
       startMs: Math.round(startMs),
       endMs: Math.round(endMs),
     });
+  }
+
+  /** Discards several ranges of the raw take at once (one undo step). */
+  discardMidiRanges(sessionId: string, ranges: TimeRangeDto[]): Promise<SessionDto> {
+    const rounded = ranges.map((r) => ({ start_ms: Math.round(r.start_ms), end_ms: Math.round(r.end_ms) }));
+    return this.call('discard_midi_ranges', { sessionId, ranges: rounded });
+  }
+
+  /** Passages of the take separated by at least `minGapMs` of silence. */
+  suggestMidiSegments(filePath: string, minGapMs: number): Promise<TimeRangeDto[]> {
+    return this.call('suggest_midi_segments', { filePath, minGapMs: Math.round(minGapMs) });
+  }
+
+  /** Restores the raw take as it was before its last trim. */
+  undoRawTrim(sessionId: string): Promise<UndoTrimResult> {
+    return this.call('undo_raw_trim', { sessionId });
   }
 
   playMidiFile(filePath: string, startMs: number): Promise<void> {
@@ -116,6 +144,55 @@ export class TauriApiService {
 
   stopMidiPlayback(): Promise<void> {
     return this.call('stop_midi_playback');
+  }
+
+  /** Playback speed (1 = original tempo); resolves with the speed applied. */
+  setPlaybackRate(rate: number): Promise<number> {
+    return this.call('set_playback_rate', { rate });
+  }
+
+  /** A-B loop of the loaded file; `null` removes it. */
+  setPlaybackLoop(range: { start: number; end: number } | null): Promise<void> {
+    return this.call('set_playback_loop', {
+      startMs: range ? Math.max(0, Math.round(range.start)) : null,
+      endMs: range ? Math.max(0, Math.round(range.end)) : null,
+    });
+  }
+
+  // ---- Repertoire ----
+  getPieces(): Promise<PieceSummaryDto[]> {
+    return this.call('get_pieces');
+  }
+
+  getPieceDetail(pieceId: string): Promise<PieceDetailDto> {
+    return this.call('get_piece_detail', { pieceId });
+  }
+
+  createPiece(title: string, composer: string): Promise<PieceDto> {
+    return this.call('create_piece', { title, composer });
+  }
+
+  updatePiece(pieceId: string, title: string, composer: string, notes: string, archived: boolean): Promise<PieceDto> {
+    return this.call('update_piece', { pieceId, title, composer, notes, archived });
+  }
+
+  deletePiece(pieceId: string): Promise<void> {
+    return this.call('delete_piece', { pieceId });
+  }
+
+  /** Files a fragment under a piece and passage (`null` takes it out of its piece). */
+  assignFragmentPiece(fragmentId: string, pieceId: string | null, passage: string): Promise<FragmentDto> {
+    return this.call('assign_fragment_piece', { fragmentId, pieceId, passage });
+  }
+
+  // ---- Practice statistics ----
+  getPracticeStats(from: string, to: string): Promise<PracticeStatsDto> {
+    return this.call('get_practice_stats', { from, to });
+  }
+
+  /** Weekly goal in minutes (0 = none); resolves with the value stored. */
+  setWeeklyGoal(minutes: number): Promise<number> {
+    return this.call('set_weekly_goal', { minutes: Math.max(0, Math.round(minutes)) });
   }
 
   // ---- Sessions, fragments and comments ----
@@ -195,6 +272,23 @@ export class TauriApiService {
   /** Opens the vault folder in the file manager. */
   revealVault(): Promise<void> {
     return this.call('reveal_vault');
+  }
+
+  /** Renders a `.mid` file to WAV with the current SoundFont; resolves with the path written. */
+  exportAudio(filePath: string, destPath: string): Promise<string> {
+    return this.call('export_audio', { filePath, destPath });
+  }
+
+  /** Native "save as" dialog for a WAV file; returns null if cancelled. */
+  async pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
+    if (!this.available) return null;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const picked = await save({ title, defaultPath: defaultName, filters: [{ name: 'WAV', extensions: ['wav'] }] });
+      return typeof picked === 'string' ? picked : null;
+    } catch (err) {
+      throw new IpcError('dialog.save', errorMessage(err));
+    }
   }
 
   /** Native dialog to choose a folder; returns null if cancelled. */

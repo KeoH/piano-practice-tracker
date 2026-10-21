@@ -87,8 +87,12 @@
       "play": "No se pudo reproducir",
       "pause": "No se pudo pausar",
       "seek": "No se pudo posicionar",
-      "stop": "No se pudo detener"
-    }
+      "stop": "No se pudo detener",
+      "rate": "No se pudo cambiar la velocidad",
+      "loop": "No se pudo activar el bucle"
+    },
+    "rate": "Velocidad",
+    "rateHint": "Velocidad de reproducción: más lenta mantiene la afinación"
   },
   "settings": {
     "sound": {
@@ -259,7 +263,7 @@
     "commentAtLabel": "Comentar en",
     "commentPlaceholder": "Qué quieres recordar de este momento",
     "add": "Añadir",
-    "editMeta": "Editar título y explicación",
+    "editMeta": "Editar título, obra y explicación",
     "explanationPlaceholder2": "Notas generales del pasaje…",
     "commentsOf": "Comentarios de {title}",
     "goTo": "Ir a {time}: {text}",
@@ -278,7 +282,12 @@
       "deleteComment": "No se pudo borrar el comentario",
       "save": "No se pudo guardar el fragmento",
       "delete": "No se pudo borrar el fragmento"
-    }
+    },
+    "loop": "Bucle",
+    "loopOn": "Bucle activo: arrastra sobre la línea de tiempo para cambiar el pasaje",
+    "loopOff": "Repetir un pasaje en bucle",
+    "loopStart": "Inicio del bucle",
+    "loopEnd": "Fin del bucle"
   },
   "slicer": {
     "analyzing": "Analizando…",
@@ -295,7 +304,7 @@
     "discard": "Descartar",
     "extract": "Extraer fragmento",
     "extracting": "Extrayendo…",
-    "footer": "**Extraer** guarda el pasaje como fragmento y lo quita de la pista bruta. **Descartar** lo borra sin guardarlo.",
+    "footer": "**Extraer** guarda el pasaje como fragmento y lo quita de la pista bruta. **Descartar** lo borra sin guardarlo. Los dos se pueden **deshacer** (Ctrl+Z).",
     "extractNote": "El pasaje se guarda como fragmento independiente y desaparece de la pista bruta.",
     "invalidTime": "Formato de tiempo no válido (usa mm:ss o mm:ss.d)",
     "invalidRange": "Selecciona un rango válido (inicio < fin)",
@@ -309,11 +318,39 @@
     "errors": {
       "analyze": "No se pudo analizar la pista bruta",
       "extract": "No se pudo extraer el fragmento",
-      "discard": "No se pudo descartar el tramo"
+      "discard": "No se pudo descartar el tramo",
+      "undo": "No se pudo deshacer el recorte",
+      "suggest": "No se pudieron buscar los silencios"
+    },
+    "undo": "Deshacer",
+    "undoHint": "Deshacer el último recorte (Ctrl+Z)",
+    "undoTitle": "¿Deshacer el último recorte?",
+    "undoMessage_zero": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», que sale de su obra.",
+    "undoMessage_one": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con su comentario.",
+    "undoMessage_other": "El pasaje vuelve a la pista bruta y se borra el fragmento «{title}», con sus {n} comentarios.",
+    "undone": "Recorte deshecho",
+    "undoneExtract": "Recorte deshecho: «{title}» ha vuelto a la pista bruta",
+    "suggest": {
+      "button": "Sugerir cortes",
+      "hint": "Buscar los pasajes separados por silencios",
+      "found_zero": "No se ha encontrado ningún silencio suficientemente largo",
+      "found_one": "{n} pasaje encontrado: haz clic para seleccionarlo",
+      "found_other": "{n} pasajes encontrados: haz clic en uno para seleccionarlo",
+      "minGap": "Silencio mínimo",
+      "discard": "Descartar los silencios ({duration})",
+      "discardTitle": "¿Descartar todos los silencios?",
+      "discardMessage_one": "Se quitará de la pista bruta {n} silencio ({duration} en total). Se puede deshacer de una vez.",
+      "discardMessage_other": "Se quitarán de la pista bruta {n} silencios ({duration} en total). Se puede deshacer de una vez.",
+      "discarded_one": "{n} silencio eliminado",
+      "discarded_other": "{n} silencios eliminados",
+      "close": "Ocultar las sugerencias",
+      "segment": "Pasaje {n}: {start} – {end}"
     }
   },
   "timeline": {
-    "noActivity": "Sin actividad de notas"
+    "noActivity": "Sin actividad de notas",
+    "showActivity": "Ver densidad de notas",
+    "showRoll": "Ver las notas (piano roll)"
   },
   "notes": {
     "title": "Notas de la sesión",
@@ -384,7 +421,8 @@
     "openLinkFailed": "No se pudo abrir el enlace: {e}",
     "defaults": {
       "fragmentTitle": "Fragmento sin título",
-      "sessionTitle": "Sesión de práctica"
+      "sessionTitle": "Sesión de práctica",
+      "pieceTitle": "Obra sin título"
     },
     "image": {
       "invalidBase64": "Imagen en base64 inválida: {e}",
@@ -400,7 +438,8 @@
       "builtinName": "Piano sintético integrado"
     },
     "playback": {
-      "noFile": "No hay ningún fichero cargado"
+      "noFile": "No hay ningún fichero cargado",
+      "loopTooShort": "El bucle debe durar al menos 0,1 s"
     },
     "recorder": {
       "alreadyRunning": "Ya hay una grabación en curso",
@@ -461,7 +500,135 @@
       "prepareFailed": "No se pudo preparar la base de datos {path}: {e}",
       "newerSchema": "La base de datos tiene una versión de esquema ({version}) más reciente que la aplicación ({supported})",
       "migrationFailed": "Error al migrar la base de datos (v{version}): {e}",
-      "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo"
+      "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo",
+      "pieceMissing": "La obra '{id}' no existe"
+    },
+    "undo": {
+      "empty": "No hay nada que deshacer en esta sesión",
+      "snapshotMissing": "Falta la copia guardada de la grabación: {path}"
+    },
+    "export": {
+      "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
+      "tooLong": "La grabación es demasiado larga para un archivo WAV"
+    },
+    "invalidDate": "Fecha no válida: {date}"
+  },
+  "export": {
+    "wav": "Exportar WAV",
+    "wavHint": "Guardar el audio en un archivo WAV, con el sonido de piano actual",
+    "exporting": "Exportando…",
+    "pickTitle": "Exportar audio",
+    "done": "Audio guardado en {path}",
+    "errors": {
+      "failed": "No se pudo exportar el audio"
     }
+  },
+  "nav": {
+    "label": "Vistas",
+    "sessions": "Sesiones",
+    "pieces": "Repertorio",
+    "stats": "Estadísticas"
+  },
+  "stats": {
+    "title": "Estadísticas de práctica",
+    "subtitle": "Tiempo realmente grabado, aunque después lo hayas recortado",
+    "summary": "Resumen",
+    "today": "Hoy",
+    "thisWeek": "Esta semana",
+    "currentStreak": "Racha actual",
+    "bestStreak": "Mejor racha",
+    "days_zero": "0 días",
+    "days_one": "{n} día",
+    "days_other": "{n} días",
+    "duration": {
+      "minutes": "{m} min",
+      "hours": "{h} h",
+      "hoursMinutes": "{h} h {m} min"
+    },
+    "goal": {
+      "label": "Objetivo semanal en minutos",
+      "unit": "min / semana",
+      "edit": "Cambiar el objetivo semanal",
+      "set": "Fijar un objetivo semanal",
+      "save": "Guardar",
+      "of": "de un objetivo de {goal}",
+      "reached": "Objetivo de {goal} cumplido"
+    },
+    "heat": {
+      "title": "Último año",
+      "summary": "{time} en {days} días",
+      "aria": "Práctica por día durante el último año",
+      "none": "Sin práctica"
+    },
+    "last30": {
+      "title": "Últimos 30 días",
+      "total": "{time} en total",
+      "aria": "Minutos de práctica por día en los últimos 30 días"
+    },
+    "table": {
+      "show": "Ver como tabla",
+      "day": "Día",
+      "time": "Tiempo"
+    },
+    "errors": {
+      "load": "No se pudieron cargar las estadísticas",
+      "goal": "No se pudo guardar el objetivo"
+    }
+  },
+  "pieces": {
+    "picker": {
+      "piece": "Obra",
+      "none": "Sin obra",
+      "new": "+ Nueva obra…",
+      "newPlaceholder": "Título de la obra",
+      "create": "Crear",
+      "passage": "Pasaje",
+      "passagePlaceholder": "p. ej. cc. 1-16"
+    },
+    "errors": {
+      "loadList": "No se pudo cargar el repertorio",
+      "load": "No se pudo cargar la obra",
+      "create": "No se pudo crear la obra",
+      "save": "No se pudo guardar la obra",
+      "delete": "No se pudo borrar la obra",
+      "assign": "No se pudo asignar el fragmento a la obra"
+    },
+    "deleted": "Obra borrada",
+    "filedUnder": "Obra y pasaje de esta toma",
+    "defaultTitle": "Nueva obra",
+    "new": "Nueva obra",
+    "titleLabel": "Título de la obra",
+    "composer": "Compositor",
+    "composerPlaceholder": "Compositor (opcional)",
+    "notes": "Notas de la obra",
+    "notesPlaceholder": "Digitaciones, tempos objetivo, lo que dijo el profesor…",
+    "archive": "Archivar",
+    "unarchive": "Recuperar",
+    "archived": "Archivada",
+    "archivedGroup": "Archivadas",
+    "activeGroup": "Repertorio",
+    "delete": "Borrar obra",
+    "deleteMessage_zero": "Se borrará la obra «{title}».",
+    "deleteMessage_one": "Se borrará la obra «{title}». Su toma se queda en su sesión, sin obra.",
+    "deleteMessage_other": "Se borrará la obra «{title}». Sus {n} tomas se quedan en sus sesiones, sin obra.",
+    "takes_zero": "sin tomas",
+    "takes_one": "{n} toma",
+    "takes_other": "{n} tomas",
+    "lastPracticed": "Practicada por última vez el {date}",
+    "wholePiece": "Obra completa",
+    "noTakes": "Todavía no hay tomas. Asigna fragmentos a esta obra desde su tarjeta («Editar título, obra y explicación») o al extraerlos.",
+    "empty": "Elige una obra a la izquierda, o crea una para agrupar las tomas de una misma pieza entre sesiones.",
+    "noPieces": "Todavía no hay obras",
+    "noMatches": "Ninguna obra coincide",
+    "compare": "Comparar",
+    "compareHint": "Elige dos tomas para compararlas en la misma escala de tiempo",
+    "compareTitle": "Comparando dos tomas",
+    "comparePickOne": "Elige una toma más para comparar",
+    "clearCompare": "Dejar de comparar",
+    "openSession": "Abrir la sesión",
+    "playTake": "Reproducir la toma del {date}",
+    "pauseTake": "Pausar la toma del {date}",
+    "searchPlaceholder": "Buscar obras",
+    "searchLabel": "Buscar en el repertorio"
   }
 }

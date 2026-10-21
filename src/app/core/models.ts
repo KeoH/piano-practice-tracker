@@ -47,6 +47,10 @@ export interface FragmentDto {
   duration_ms: number;
   order_index: number;
   created_at: string;
+  /** Piece of the repertoire this take belongs to (if any). */
+  piece_id: string | null;
+  /** Passage of the piece (free text); empty = the whole piece. */
+  passage: string;
   comments: TimelineCommentDto[];
 }
 
@@ -61,6 +65,10 @@ export interface SessionDetailDto {
   session: SessionDto;
   fragments: FragmentDto[];
   media: SessionMediaDto[];
+  /** Number of raw-take trims that can be undone. */
+  undo_depth: number;
+  /** Fragment that the next undo would delete (it was extracted by the newest trim). */
+  undo_fragment_id: string | null;
 }
 
 export interface ActivityBlock {
@@ -82,11 +90,89 @@ export interface ExtractFragmentReq {
   end_ms: number;
   title: string;
   explanation: string;
+  piece_id?: string | null;
+  passage?: string;
 }
 
 export interface FragmentCreatedResponse {
   fragment: FragmentDto;
   session: SessionDto;
+}
+
+export interface UndoTrimResult {
+  session: SessionDto;
+  /** Fragment deleted because the undone trim had extracted it. */
+  removed_fragment_id: string | null;
+}
+
+export interface TimeRangeDto {
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface NoteSpan {
+  start_ms: number;
+  end_ms: number;
+  key: number;
+  velocity: number;
+}
+
+/** Notes and sustain pedal of a `.mid` file, for the piano roll. */
+export interface MidiNotesDto {
+  file_path: string;
+  duration_ms: number;
+  /** Lowest and highest key played (21 and 108, an 88-key piano, if there are no notes). */
+  min_key: number;
+  max_key: number;
+  /** Sorted by `start_ms`. */
+  notes: NoteSpan[];
+  /** Intervals with the sustain pedal down. */
+  pedal: TimeRangeDto[];
+}
+
+export interface PracticeDayDto {
+  /** ISO date `YYYY-MM-DD`. */
+  date: string;
+  duration_ms: number;
+  sessions: number;
+}
+
+export interface PracticeStatsDto {
+  /** Only the days with practice, sorted by date. */
+  days: PracticeDayDto[];
+  /** Weekly goal in minutes (0 = no goal). */
+  weekly_goal_minutes: number;
+}
+
+export interface PieceDto {
+  id: string;
+  title: string;
+  composer: string;
+  notes: string;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PieceSummaryDto {
+  piece: PieceDto;
+  take_count: number;
+  /** Date of the most recent session with a take of the piece. */
+  last_practiced: string | null;
+  /** Passages already used in the piece's takes (sorted, without the empty one). */
+  passages: string[];
+}
+
+export interface PieceTakeDto {
+  fragment: FragmentDto;
+  session_title: string;
+  session_date: string;
+}
+
+export interface PieceDetailDto {
+  piece: PieceDto;
+  /** Sorted by passage and then chronologically. */
+  takes: PieceTakeDto[];
 }
 
 export interface SoundfontCandidate {

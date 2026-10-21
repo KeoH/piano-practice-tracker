@@ -87,8 +87,12 @@
       "play": "Could not play",
       "pause": "Could not pause",
       "seek": "Could not seek",
-      "stop": "Could not stop"
-    }
+      "stop": "Could not stop",
+      "rate": "Could not change the speed",
+      "loop": "Could not set the loop"
+    },
+    "rate": "Speed",
+    "rateHint": "Playback speed: slower keeps the pitch"
   },
   "settings": {
     "sound": {
@@ -259,7 +263,7 @@
     "commentAtLabel": "Comment at",
     "commentPlaceholder": "What do you want to remember about this moment?",
     "add": "Add",
-    "editMeta": "Edit title and explanation",
+    "editMeta": "Edit title, piece and explanation",
     "explanationPlaceholder2": "General notes about the passage…",
     "commentsOf": "Comments on {title}",
     "goTo": "Go to {time}: {text}",
@@ -278,7 +282,12 @@
       "deleteComment": "Could not delete the comment",
       "save": "Could not save the fragment",
       "delete": "Could not delete the fragment"
-    }
+    },
+    "loop": "Loop",
+    "loopOn": "Loop on: drag on the timeline to change the passage",
+    "loopOff": "Repeat a passage in a loop",
+    "loopStart": "Start of the loop",
+    "loopEnd": "End of the loop"
   },
   "slicer": {
     "analyzing": "Analyzing…",
@@ -295,7 +304,7 @@
     "discard": "Discard",
     "extract": "Extract fragment",
     "extracting": "Extracting…",
-    "footer": "**Extract** saves the passage as a fragment and removes it from the raw recording. **Discard** deletes it without saving it.",
+    "footer": "**Extract** saves the passage as a fragment and removes it from the raw recording. **Discard** deletes it without saving it. Both can be **undone** (Ctrl+Z).",
     "extractNote": "The passage is saved as a separate fragment and removed from the raw recording.",
     "invalidTime": "Invalid time format (use mm:ss or mm:ss.d)",
     "invalidRange": "Select a valid range (start < end)",
@@ -309,11 +318,39 @@
     "errors": {
       "analyze": "Could not analyze the raw recording",
       "extract": "Could not extract the fragment",
-      "discard": "Could not discard the section"
+      "discard": "Could not discard the section",
+      "undo": "Could not undo the trim",
+      "suggest": "Could not look for the silences"
+    },
+    "undo": "Undo",
+    "undoHint": "Undo the last trim (Ctrl+Z)",
+    "undoTitle": "Undo the last trim?",
+    "undoMessage_zero": "The passage goes back into the raw recording and the fragment “{title}” is deleted, so it leaves its piece.",
+    "undoMessage_one": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its comment.",
+    "undoMessage_other": "The passage goes back into the raw recording and the fragment “{title}” is deleted, with its {n} comments.",
+    "undone": "Trim undone",
+    "undoneExtract": "Trim undone: “{title}” is back in the raw recording",
+    "suggest": {
+      "button": "Suggest cuts",
+      "hint": "Find the passages separated by silences",
+      "found_zero": "No silence long enough was found",
+      "found_one": "{n} passage found: click it to select it",
+      "found_other": "{n} passages found: click one to select it",
+      "minGap": "Minimum silence",
+      "discard": "Discard the silences ({duration})",
+      "discardTitle": "Discard every silence?",
+      "discardMessage_one": "{n} silence ({duration} in total) will be removed from the raw recording. You can undo it in one step.",
+      "discardMessage_other": "{n} silences ({duration} in total) will be removed from the raw recording. You can undo it in one step.",
+      "discarded_one": "{n} silence removed",
+      "discarded_other": "{n} silences removed",
+      "close": "Hide the suggestions",
+      "segment": "Passage {n}: {start} – {end}"
     }
   },
   "timeline": {
-    "noActivity": "No note activity"
+    "noActivity": "No note activity",
+    "showActivity": "Show note density",
+    "showRoll": "Show the notes (piano roll)"
   },
   "notes": {
     "title": "Session notes",
@@ -384,7 +421,8 @@
     "openLinkFailed": "Could not open the link: {e}",
     "defaults": {
       "fragmentTitle": "Untitled fragment",
-      "sessionTitle": "Practice session"
+      "sessionTitle": "Practice session",
+      "pieceTitle": "Untitled piece"
     },
     "image": {
       "invalidBase64": "Invalid base64 image: {e}",
@@ -400,7 +438,8 @@
       "builtinName": "Built-in synthetic piano"
     },
     "playback": {
-      "noFile": "No file is loaded"
+      "noFile": "No file is loaded",
+      "loopTooShort": "The loop must be at least 0.1 s long"
     },
     "recorder": {
       "alreadyRunning": "A recording is already in progress",
@@ -461,7 +500,135 @@
       "prepareFailed": "Could not prepare the database {path}: {e}",
       "newerSchema": "The database schema version ({version}) is newer than this version of the app supports ({supported})",
       "migrationFailed": "Could not migrate the database (v{version}): {e}",
-      "poisoned": "The database connection was locked by a previous error"
+      "poisoned": "The database connection was locked by a previous error",
+      "pieceMissing": "Piece '{id}' does not exist"
+    },
+    "undo": {
+      "empty": "There is nothing to undo in this session",
+      "snapshotMissing": "The saved copy of the raw recording is missing: {path}"
+    },
+    "export": {
+      "noSoundfont": "No SoundFont is loaded; choose one in Settings → Sound",
+      "tooLong": "The recording is too long for a WAV file"
+    },
+    "invalidDate": "Invalid date: {date}"
+  },
+  "export": {
+    "wav": "Export WAV",
+    "wavHint": "Save the audio as a WAV file, with the current piano sound",
+    "exporting": "Exporting…",
+    "pickTitle": "Export audio",
+    "done": "Audio saved to {path}",
+    "errors": {
+      "failed": "Could not export the audio"
     }
+  },
+  "nav": {
+    "label": "Views",
+    "sessions": "Sessions",
+    "pieces": "Repertoire",
+    "stats": "Statistics"
+  },
+  "stats": {
+    "title": "Practice statistics",
+    "subtitle": "Time actually recorded, even if you trimmed it later",
+    "summary": "Summary",
+    "today": "Today",
+    "thisWeek": "This week",
+    "currentStreak": "Current streak",
+    "bestStreak": "Best streak",
+    "days_zero": "0 days",
+    "days_one": "{n} day",
+    "days_other": "{n} days",
+    "duration": {
+      "minutes": "{m} min",
+      "hours": "{h} h",
+      "hoursMinutes": "{h} h {m} min"
+    },
+    "goal": {
+      "label": "Weekly goal in minutes",
+      "unit": "min / week",
+      "edit": "Change the weekly goal",
+      "set": "Set a weekly goal",
+      "save": "Save",
+      "of": "of a {goal} goal",
+      "reached": "Goal of {goal} reached"
+    },
+    "heat": {
+      "title": "Last year",
+      "summary": "{time} over {days} days",
+      "aria": "Practice per day over the last year",
+      "none": "No practice"
+    },
+    "last30": {
+      "title": "Last 30 days",
+      "total": "{time} in total",
+      "aria": "Minutes of practice per day over the last 30 days"
+    },
+    "table": {
+      "show": "Show as a table",
+      "day": "Day",
+      "time": "Time"
+    },
+    "errors": {
+      "load": "Could not load the statistics",
+      "goal": "Could not save the goal"
+    }
+  },
+  "pieces": {
+    "picker": {
+      "piece": "Piece",
+      "none": "No piece",
+      "new": "+ New piece…",
+      "newPlaceholder": "Title of the piece",
+      "create": "Create",
+      "passage": "Passage",
+      "passagePlaceholder": "e.g. bars 1-16"
+    },
+    "errors": {
+      "loadList": "Could not load the repertoire",
+      "load": "Could not load the piece",
+      "create": "Could not create the piece",
+      "save": "Could not save the piece",
+      "delete": "Could not delete the piece",
+      "assign": "Could not file the fragment under the piece"
+    },
+    "deleted": "Piece deleted",
+    "filedUnder": "Piece and passage of this take",
+    "defaultTitle": "New piece",
+    "new": "New piece",
+    "titleLabel": "Title of the piece",
+    "composer": "Composer",
+    "composerPlaceholder": "Composer (optional)",
+    "notes": "Notes on the piece",
+    "notesPlaceholder": "Fingerings, tempo targets, what the teacher said…",
+    "archive": "Archive",
+    "unarchive": "Restore",
+    "archived": "Archived",
+    "archivedGroup": "Archived",
+    "activeGroup": "Repertoire",
+    "delete": "Delete piece",
+    "deleteMessage_zero": "The piece “{title}” will be deleted.",
+    "deleteMessage_one": "The piece “{title}” will be deleted. Its take stays in its session, without a piece.",
+    "deleteMessage_other": "The piece “{title}” will be deleted. Its {n} takes stay in their sessions, without a piece.",
+    "takes_zero": "no takes",
+    "takes_one": "{n} take",
+    "takes_other": "{n} takes",
+    "lastPracticed": "Last practised {date}",
+    "wholePiece": "Whole piece",
+    "noTakes": "No takes yet. File fragments under this piece from their card (“Edit title, piece and explanation”) or when you extract them.",
+    "empty": "Pick a piece on the left, or create one to group the takes of the same work across sessions.",
+    "noPieces": "No pieces yet",
+    "noMatches": "No piece matches",
+    "compare": "Compare",
+    "compareHint": "Choose two takes to compare them on the same time scale",
+    "compareTitle": "Comparing two takes",
+    "comparePickOne": "Choose one more take to compare",
+    "clearCompare": "Stop comparing",
+    "openSession": "Open the session",
+    "playTake": "Play the take of {date}",
+    "pauseTake": "Pause the take of {date}",
+    "searchPlaceholder": "Search pieces",
+    "searchLabel": "Search the repertoire"
   }
 }

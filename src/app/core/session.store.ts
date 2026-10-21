@@ -1,5 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
+import { ConfirmService } from './confirm.service';
 import type { FragmentDto, SessionDetailDto, SessionDto, SessionSummaryDto } from './models';
+import { PlaybackStore } from './playback.store';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 import { I18nService } from './i18n/i18n.service';
@@ -19,6 +21,8 @@ export class SessionStore {
   private readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
   private readonly i18n = inject(I18nService);
+  private readonly playback = inject(PlaybackStore);
+  private readonly confirm = inject(ConfirmService);
 
   readonly sessions = signal<SessionSummaryDto[]>([]);
   readonly listLoading = signal(false);
@@ -30,6 +34,9 @@ export class SessionStore {
   readonly savingCount = signal(0);
   /** Visible session tab (kept when switching sessions). */
   readonly tab = signal<SessionTab>('record');
+  /** An undo of the raw take is in progress. */
+  readonly undoing = signal(false);
+  readonly undoDepth = computed(() => this.detail()?.undo_depth ?? 0);
 
   readonly session = computed<SessionDto | null>(() => this.detail()?.session ?? null);
   readonly fragments = computed<FragmentDto[]>(() =>
@@ -160,6 +167,44 @@ export class SessionStore {
     const p = this.saveChain.then(run, run);
     this.saveChain = p;
     return p;
+  }
+
+  /**
+   * Undoes the last trim of the selected session's raw take. If that trim extracted a fragment,
+   * asks first when the fragment has comments or a piece, because undoing deletes it.
+   */
+  async undoTrim(): Promise<boolean> {
+    const d = this.detail();
+    if (!d || d.undo_depth <= 0 || this.undoing()) return false;
+    const frag = d.fragments.find((f) => f.id === d.undo_fragment_id);
+    if (frag && (frag.comments.length > 0 || frag.piece_id)) {
+      const ok = await this.confirm.ask({
+        title: this.i18n.t('slicer.undoTitle'),
+        message: this.i18n.plural('slicer.undoMessage', frag.comments.length, { title: frag.title }),
+        confirmLabel: this.i18n.t('slicer.undo'),
+      });
+      if (!ok) return false;
+    }
+    this.undoing.set(true);
+    try {
+      await this.playback.stopIfActive(d.session.raw_midi_path);
+      if (frag) await this.playback.stopIfActive(frag.file_path);
+      const res = await this.api.undoRawTrim(d.session.id);
+      this.applySession(res.session);
+      await this.reloadDetail();
+      void this.refreshList();
+      this.toast.success(
+        res.removed_fragment_id
+          ? this.i18n.t('slicer.undoneExtract', { title: frag?.title ?? '' })
+          : this.i18n.t('slicer.undone'),
+      );
+      return true;
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('slicer.errors.undo'));
+      return false;
+    } finally {
+      this.undoing.set(false);
+    }
   }
 
   /** Replaces the SessionDto returned by the backend (after recording/slicing). */

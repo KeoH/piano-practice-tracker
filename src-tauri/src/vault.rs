@@ -496,24 +496,26 @@ mod tests {
         let legacy = dir.path().join("data");
         let old = AppPaths::from_base(&legacy);
         old.ensure_dirs().unwrap();
-        // "Old" database: files with absolute paths under the data folder.
+        // "Old" database (v1 schema): files with absolute paths under the data folder.
         {
-            let db = Database::open(&old.db_file, Path::new("/other-root")).unwrap();
-            let s = db.create_session("Old", 90).unwrap();
-            let raw = old.raw_session_file(&s.id);
+            let conn = rusqlite::Connection::open(&old.db_file).unwrap();
+            conn.execute_batch(crate::db::MIGRATION_V1).unwrap();
+            conn.execute_batch("PRAGMA user_version = 1;").unwrap();
+            let raw = old.raw_session_file("s1");
             std::fs::write(&raw, b"raw").unwrap();
-            db.set_session_raw_midi(&s.id, &raw.to_string_lossy(), 10).unwrap();
             let img = old.media_dir.join("a.png");
             std::fs::write(&img, b"img").unwrap();
-            db.insert_media(&s.id, &img.to_string_lossy()).unwrap();
-            db.update_session(&s.id, "Old", 90, &format!("![a]({})", img.display())).unwrap();
-            // Simulates the v1 schema: absolute paths and version 1 (the v2 migration rewrites them).
-            let conn = rusqlite::Connection::open(&old.db_file).unwrap();
-            conn.execute_batch("PRAGMA user_version = 1; ALTER TABLE sessions ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'PENDING'; \
-                 ALTER TABLE midi_fragments ADD COLUMN drive_file_id TEXT; ALTER TABLE midi_fragments ADD COLUMN sync_status TEXT; \
-                 ALTER TABLE session_media ADD COLUMN drive_file_id TEXT; ALTER TABLE session_media ADD COLUMN sync_status TEXT; \
-                 CREATE TABLE sync_queue (id INTEGER PRIMARY KEY);")
-                .unwrap();
+            conn.execute(
+                "INSERT INTO sessions (id, title, session_date, bpm, raw_midi_path, raw_duration_ms, markdown_notes, \
+                 updated_at) VALUES ('s1', 'Old', '2026-01-01', 90, ?1, 10, ?2, '2026-01-01T00:00:00Z')",
+                rusqlite::params![raw.to_string_lossy(), format!("![a]({})", img.display())],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_media (id, session_id, local_path) VALUES ('m1', 's1', ?1)",
+                rusqlite::params![img.to_string_lossy()],
+            )
+            .unwrap();
         }
         let dirs = AppDirs::new(&legacy, dir.path().join("conf"));
         assert!(dirs.legacy_db().is_some());

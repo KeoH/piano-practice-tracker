@@ -10,17 +10,23 @@ use std::sync::{Arc, Mutex, RwLock};
 use base64::Engine as _;
 use tauri::{Manager, State};
 
-use crate::audio_engine::AudioEngine;
+use crate::audio_engine::{self, AudioEngine};
 use crate::i18n;
+use crate::midi_notes;
 use crate::midi_recorder::{self, MidiRecorder, MidiSink};
 use crate::midi_slicer;
 use crate::models::*;
 use crate::paths::AppDirs;
+use crate::raw_history::{remove_file_quietly, TrimAction};
 use crate::soundfont;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
+use crate::wav::WavWriter;
 
 /// Maximum number of activity blocks returned to the frontend.
 const ACTIVITY_BLOCKS: usize = 200;
+/// Cut suggestions: silence that separates two passages, and the shortest passage kept apart.
+const DEFAULT_SEGMENT_GAP_MS: u64 = 3_000;
+const MIN_SEGMENT_MS: u64 = 4_000;
 
 pub struct AppState {
     /// App directories outside the vault (configuration and built-in SoundFont).
@@ -127,14 +133,6 @@ impl AppState {
     }
 }
 
-fn remove_file_quietly(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("Could not delete {}: {e}", path.display());
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // MIDI devices and recording
 // ---------------------------------------------------------------------------
@@ -211,7 +209,16 @@ pub async fn stop_recording(state: State<'_, AppState>, session_id: String) -> R
     state.audio.set_live_synth(false);
 
     let duration_ms = result?;
+    // A resumed recording is appended: only the new part counts as practice.
+    let previous_ms = vault.db.get_session(&session_id).map(|s| s.raw_duration_ms).unwrap_or(0);
     let session = vault.db.set_session_raw_midi(&session_id, &output.to_string_lossy(), duration_ms)?;
+    if let Err(e) = vault.db.add_practice_entry(&session_id, duration_ms.saturating_sub(previous_ms)) {
+        log::error!("Could not record the practice time: {e}");
+    }
+    // The snapshots don't contain what was just recorded: undoing would lose it.
+    if let Err(e) = vault.clear_raw_history(&session_id) {
+        log::error!("{e}");
+    }
     Ok(session)
 }
 
@@ -228,6 +235,14 @@ pub async fn get_midi_activity(file_path: String) -> Result<MidiActivityDto, Str
     .map_err(|e| t!("backend.internal", e = e))?
 }
 
+/// Notes and pedal of a `.mid` file, for the piano roll.
+#[tauri::command]
+pub async fn get_midi_notes(file_path: String) -> Result<MidiNotesDto, String> {
+    tauri::async_runtime::spawn_blocking(move || midi_notes::extract_notes(Path::new(&file_path)))
+        .await
+        .map_err(|e| t!("backend.internal", e = e))?
+}
+
 #[tauri::command]
 pub async fn extract_midi_fragment(
     state: State<'_, AppState>,
@@ -240,17 +255,28 @@ pub async fn extract_midi_fragment(
     }
     let session = vault.db.get_session(&req.session_id)?;
     let raw = state.raw_path_of(&session)?;
+    let session_duration_before = session.raw_duration_ms;
     // The player could be reading the raw take we are about to rewrite.
     state.audio.stop()?;
 
     let fragment_id = uuid::Uuid::new_v4().to_string();
     let dest = vault.paths.fragment_file(&fragment_id);
+    let snapshot = vault.snapshot_raw(&req.session_id, &raw)?;
     let slice = {
         let (raw, dest) = (raw.clone(), dest.clone());
         let (start, end, bpm) = (req.start_ms, req.end_ms, session.bpm);
         tauri::async_runtime::spawn_blocking(move || midi_slicer::extract_fragment_and_trim(&raw, start, end, &dest, bpm))
             .await
-            .map_err(|e| t!("backend.internal", e = e))??
+            .map_err(|e| t!("backend.internal", e = e))
+            .and_then(|r| r)
+    };
+    let slice = match slice {
+        Ok(s) => s,
+        Err(e) => {
+            // The raw take is rewritten last, so a failure leaves it untouched.
+            remove_file_quietly(&snapshot);
+            return Err(e);
+        }
     };
 
     let title = if req.title.trim().is_empty() { t!("backend.defaults.fragmentTitle") } else { req.title.trim().to_string() };
@@ -265,13 +291,23 @@ pub async fn extract_midi_fragment(
     ) {
         Ok(f) => f,
         Err(e) => {
+            // Without the fragment the section would be lost: the raw take goes back as it was.
             remove_file_quietly(&dest);
+            vault.restore_snapshot(&snapshot, &raw);
             return Err(e);
         }
+    };
+    let fragment = match req.piece_id.as_deref().filter(|p| !p.is_empty()) {
+        Some(piece_id) => vault.db.set_fragment_piece(&fragment.id, Some(piece_id), &req.passage).unwrap_or_else(|e| {
+            log::error!("{e}");
+            fragment
+        }),
+        None => fragment,
     };
     let session = vault
         .db
         .set_session_raw_midi(&req.session_id, &raw.to_string_lossy(), slice.remaining_duration_ms)?;
+    vault.record_trim(&req.session_id, &snapshot, session_duration_before, TrimAction::Extract, Some(&fragment.id));
     Ok(FragmentCreatedResponse { fragment, session })
 }
 
@@ -282,23 +318,69 @@ pub async fn discard_midi_range(
     start_ms: u64,
     end_ms: u64,
 ) -> Result<SessionDto, String> {
-    let vault = state.vault()?;
-    state.ensure_not_recording(&session_id)?;
     if end_ms <= start_ms {
         return Err(t!("backend.rangeEndBeforeStart"));
     }
-    let session = vault.db.get_session(&session_id)?;
+    discard_from_raw(&state, &session_id, vec![(start_ms, end_ms)]).await
+}
+
+/// Discards several ranges of the raw take at once (e.g. every silence), as a single undo step.
+#[tauri::command]
+pub async fn discard_midi_ranges(
+    state: State<'_, AppState>,
+    session_id: String,
+    ranges: Vec<TimeRangeDto>,
+) -> Result<SessionDto, String> {
+    if ranges.is_empty() || ranges.iter().any(|r| r.end_ms <= r.start_ms) {
+        return Err(t!("backend.rangeEndBeforeStart"));
+    }
+    discard_from_raw(&state, &session_id, ranges.iter().map(|r| (r.start_ms, r.end_ms)).collect()).await
+}
+
+async fn discard_from_raw(state: &AppState, session_id: &str, ranges: Vec<(u64, u64)>) -> Result<SessionDto, String> {
+    let vault = state.vault()?;
+    state.ensure_not_recording(session_id)?;
+    let session = vault.db.get_session(session_id)?;
     let raw = state.raw_path_of(&session)?;
     state.audio.stop()?;
 
+    let snapshot = vault.snapshot_raw(session_id, &raw)?;
     let new_duration = {
         let (raw, bpm) = (raw.clone(), session.bpm);
-        tauri::async_runtime::spawn_blocking(move || midi_slicer::discard_range(&raw, start_ms, end_ms, bpm))
+        tauri::async_runtime::spawn_blocking(move || midi_slicer::discard_ranges(&raw, &ranges, bpm))
             .await
-            .map_err(|e| t!("backend.internal", e = e))??
+            .map_err(|e| t!("backend.internal", e = e))
+            .and_then(|r| r)
     };
-    let session = vault.db.set_session_raw_midi(&session_id, &raw.to_string_lossy(), new_duration)?;
-    Ok(session)
+    let new_duration = match new_duration {
+        Ok(d) => d,
+        Err(e) => {
+            remove_file_quietly(&snapshot);
+            return Err(e);
+        }
+    };
+    let updated = vault.db.set_session_raw_midi(session_id, &raw.to_string_lossy(), new_duration)?;
+    vault.record_trim(session_id, &snapshot, session.raw_duration_ms, TrimAction::Discard, None);
+    Ok(updated)
+}
+
+/// Passages of the take separated by at least `min_gap_ms` of silence (3 s by default).
+#[tauri::command]
+pub async fn suggest_midi_segments(file_path: String, min_gap_ms: Option<u64>) -> Result<Vec<TimeRangeDto>, String> {
+    let min_gap = min_gap_ms.unwrap_or(DEFAULT_SEGMENT_GAP_MS).clamp(500, 60_000);
+    tauri::async_runtime::spawn_blocking(move || {
+        midi_notes::suggest_segments(Path::new(&file_path), min_gap, MIN_SEGMENT_MS)
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+#[tauri::command]
+pub async fn undo_raw_trim(state: State<'_, AppState>, session_id: String) -> Result<UndoTrimResult, String> {
+    let vault = state.vault()?;
+    state.ensure_not_recording(&session_id)?;
+    state.audio.stop()?;
+    vault.undo_trim(&session_id)
 }
 
 #[tauri::command]
@@ -319,6 +401,135 @@ pub async fn seek_midi_playback(state: State<'_, AppState>, ms: u64) -> Result<(
 #[tauri::command]
 pub async fn stop_midi_playback(state: State<'_, AppState>) -> Result<(), String> {
     state.audio.stop()
+}
+
+/// Sample rate of the exported audio.
+const EXPORT_SAMPLE_RATE: u32 = 44_100;
+
+/// Renders a `.mid` file to a 16-bit stereo WAV with the current SoundFont. Returns the path
+/// written (with a `.wav` extension added if it had none).
+#[tauri::command]
+pub async fn export_audio(state: State<'_, AppState>, file_path: String, dest_path: String) -> Result<String, String> {
+    let sound_font = state.audio.sound_font().ok_or_else(|| t!("backend.export.noSoundfont"))?;
+    let mut dest = PathBuf::from(dest_path);
+    if !dest.extension().is_some_and(|e| e.eq_ignore_ascii_case("wav")) {
+        dest.as_mut_os_string().push(".wav");
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut wav = WavWriter::create(&dest, EXPORT_SAMPLE_RATE, 2)?;
+        audio_engine::render_file_offline(sound_font, Path::new(&file_path), EXPORT_SAMPLE_RATE, |b| wav.write(b))?;
+        wav.finish(EXPORT_SAMPLE_RATE).map(|p| p.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Playback speed (1.0 = original tempo). Returns the speed applied after clamping.
+#[tauri::command]
+pub async fn set_playback_rate(state: State<'_, AppState>, rate: f32) -> Result<f32, String> {
+    state.audio.set_playback_rate(rate);
+    Ok(state.audio.playback_rate())
+}
+
+/// A-B loop of the loaded file; without `start_ms` / `end_ms` the loop is removed.
+#[tauri::command]
+pub async fn set_playback_loop(
+    state: State<'_, AppState>,
+    start_ms: Option<u64>,
+    end_ms: Option<u64>,
+) -> Result<(), String> {
+    let range = start_ms.zip(end_ms);
+    state.audio.set_playback_loop(range)
+}
+
+// ---------------------------------------------------------------------------
+// Repertoire
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_pieces(state: State<'_, AppState>) -> Result<Vec<PieceSummaryDto>, String> {
+    state.vault()?.db.list_pieces()
+}
+
+#[tauri::command]
+pub async fn get_piece_detail(state: State<'_, AppState>, piece_id: String) -> Result<PieceDetailDto, String> {
+    state.vault()?.db.get_piece_detail(&piece_id)
+}
+
+#[tauri::command]
+pub async fn create_piece(state: State<'_, AppState>, title: String, composer: String) -> Result<PieceDto, String> {
+    let title = if title.trim().is_empty() { t!("backend.defaults.pieceTitle") } else { title.trim().to_string() };
+    state.vault()?.db.create_piece(&title, composer.trim())
+}
+
+#[tauri::command]
+pub async fn update_piece(
+    state: State<'_, AppState>,
+    piece_id: String,
+    title: String,
+    composer: String,
+    notes: String,
+    archived: bool,
+) -> Result<PieceDto, String> {
+    let vault = state.vault()?;
+    let title = if title.trim().is_empty() { t!("backend.defaults.pieceTitle") } else { title.trim().to_string() };
+    vault.db.update_piece(&piece_id, &title, composer.trim(), &notes, archived)
+}
+
+/// Deletes the piece; its fragments stay in their sessions.
+#[tauri::command]
+pub async fn delete_piece(state: State<'_, AppState>, piece_id: String) -> Result<(), String> {
+    state.vault()?.db.delete_piece(&piece_id)
+}
+
+/// Files a fragment under a piece and passage (`piece_id = None` takes it out).
+#[tauri::command]
+pub async fn assign_fragment_piece(
+    state: State<'_, AppState>,
+    fragment_id: String,
+    piece_id: Option<String>,
+    passage: String,
+) -> Result<FragmentDto, String> {
+    let piece_id = piece_id.filter(|p| !p.is_empty());
+    let passage = if piece_id.is_some() { passage } else { String::new() };
+    state.vault()?.db.set_fragment_piece(&fragment_id, piece_id.as_deref(), &passage)
+}
+
+// ---------------------------------------------------------------------------
+// Practice statistics
+// ---------------------------------------------------------------------------
+
+/// Vault setting with the weekly goal in minutes.
+const WEEKLY_GOAL_SETTING: &str = "weekly_goal_minutes";
+/// One week of practice, at most.
+const MAX_WEEKLY_GOAL_MINUTES: u32 = 7 * 24 * 60;
+
+fn parse_iso_date(value: &str) -> Result<&str, String> {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|_| value)
+        .map_err(|_| t!("backend.invalidDate", date = value))
+}
+
+/// Practice per day in `[from, to]` (ISO dates) and the weekly goal.
+#[tauri::command]
+pub async fn get_practice_stats(state: State<'_, AppState>, from: String, to: String) -> Result<PracticeStatsDto, String> {
+    let vault = state.vault()?;
+    let days = vault.db.practice_days(parse_iso_date(&from)?, parse_iso_date(&to)?)?;
+    let weekly_goal_minutes = vault
+        .db
+        .get_setting(WEEKLY_GOAL_SETTING)?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    Ok(PracticeStatsDto { days, weekly_goal_minutes })
+}
+
+/// Sets the weekly goal (0 = no goal). Returns the value stored.
+#[tauri::command]
+pub async fn set_weekly_goal(state: State<'_, AppState>, minutes: u32) -> Result<u32, String> {
+    let vault = state.vault()?;
+    let minutes = minutes.min(MAX_WEEKLY_GOAL_MINUTES);
+    vault.db.set_setting(WEEKLY_GOAL_SETTING, &minutes.to_string())?;
+    Ok(minutes)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +577,7 @@ pub async fn delete_session(state: State<'_, AppState>, session_id: String) -> R
     for path in vault.db.delete_session(&session_id)? {
         remove_file_quietly(Path::new(&path));
     }
+    vault.remove_history_dir(&session_id);
     Ok(())
 }
 

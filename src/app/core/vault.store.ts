@@ -4,7 +4,10 @@ import { I18nService } from './i18n/i18n.service';
 import type { VaultInfo } from './models';
 import { PlaybackStore } from './playback.store';
 import { RecordingStore } from './recording.store';
+import { NavStore } from './nav.store';
+import { PieceStore } from './piece.store';
 import { SessionStore } from './session.store';
+import { StatsStore } from './stats.store';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 
@@ -19,6 +22,9 @@ export class VaultStore {
   private readonly i18n = inject(I18nService);
   private readonly confirm = inject(ConfirmService);
   private readonly sessions = inject(SessionStore);
+  private readonly stats = inject(StatsStore);
+  private readonly nav = inject(NavStore);
+  private readonly pieces = inject(PieceStore);
   private readonly playback = inject(PlaybackStore);
   private readonly recording = inject(RecordingStore);
 
@@ -40,7 +46,7 @@ export class VaultStore {
     }
     try {
       this.apply(await this.api.getVaultInfo(), true);
-      if (this.isOpen()) await this.sessions.refreshList();
+      if (this.isOpen()) await Promise.all([this.sessions.refreshList(), this.pieces.refreshList()]);
     } catch (err) {
       this.toast.error(err, this.i18n.t('vault.errors.read'));
     } finally {
@@ -114,7 +120,7 @@ export class VaultStore {
     return this.run(this.i18n.t('vault.errors.close'), async () => {
       await this.playback.stop();
       this.apply(await this.api.closeVault());
-      this.sessions.reset();
+      this.resetVaultData();
       this.settingsOpen.set(false);
       return true;
     });
@@ -155,9 +161,17 @@ export class VaultStore {
   private async switched(info: VaultInfo): Promise<void> {
     await this.playback.stop();
     this.apply(info, true);
-    this.sessions.reset();
+    this.resetVaultData();
     this.settingsOpen.set(false);
-    await this.sessions.refreshList();
+    await Promise.all([this.sessions.refreshList(), this.pieces.refreshList()]);
+  }
+
+  /** Forgets everything loaded from the previous vault. */
+  private resetVaultData(): void {
+    this.sessions.reset();
+    this.pieces.reset();
+    this.stats.reset();
+    this.nav.view.set('sessions');
   }
 
   private apply(info: VaultInfo, announce = false): void {

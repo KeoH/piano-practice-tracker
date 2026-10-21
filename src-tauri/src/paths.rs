@@ -20,6 +20,8 @@ pub struct AppPaths {
     pub raw_dir: PathBuf,
     pub fragments_dir: PathBuf,
     pub media_dir: PathBuf,
+    /// Snapshots of the raw takes taken before each trim (undo).
+    pub history_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -30,6 +32,7 @@ impl AppPaths {
             raw_dir: base.join("midi").join("raw"),
             fragments_dir: base.join("midi").join("fragments"),
             media_dir: base.join("media"),
+            history_dir: base.join("midi").join("history"),
             base,
         }
     }
@@ -47,6 +50,11 @@ impl AppPaths {
 
     pub fn fragment_file(&self, fragment_id: &str) -> PathBuf {
         self.fragments_dir.join(format!("frag_{fragment_id}.mid"))
+    }
+
+    /// New snapshot path for the session's raw take (`midi/history/<session>/<uuid>.mid`).
+    pub fn history_file(&self, session_id: &str) -> PathBuf {
+        self.history_dir.join(session_id).join(format!("{}.mid", uuid::Uuid::new_v4()))
     }
 
     pub fn marker_dir(&self) -> PathBuf {

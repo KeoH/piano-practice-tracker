@@ -4,13 +4,16 @@ pub mod i18n;
 pub mod audio_engine;
 pub mod commands;
 pub mod db;
+pub mod midi_notes;
 pub mod midi_recorder;
 pub mod midi_slicer;
 pub mod models;
 pub mod paths;
+pub mod raw_history;
 pub mod sf2_builder;
 pub mod soundfont;
 pub mod vault;
+pub mod wav;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
@@ -105,12 +108,27 @@ pub fn run() {
             commands::update_live_recording_settings,
             commands::stop_recording,
             commands::get_midi_activity,
+            commands::get_midi_notes,
             commands::extract_midi_fragment,
             commands::discard_midi_range,
+            commands::discard_midi_ranges,
+            commands::suggest_midi_segments,
+            commands::undo_raw_trim,
             commands::play_midi_file,
             commands::pause_midi_playback,
             commands::seek_midi_playback,
             commands::stop_midi_playback,
+            commands::set_playback_rate,
+            commands::set_playback_loop,
+            commands::export_audio,
+            commands::get_pieces,
+            commands::get_piece_detail,
+            commands::create_piece,
+            commands::update_piece,
+            commands::delete_piece,
+            commands::assign_fragment_piece,
+            commands::get_practice_stats,
+            commands::set_weekly_goal,
             commands::get_sessions,
             commands::get_session_detail,
             commands::create_session,

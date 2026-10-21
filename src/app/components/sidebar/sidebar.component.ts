@@ -2,13 +2,22 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { SessionSummaryDto } from '../../core/models';
+import type { MessageKey } from '../../core/i18n/languages';
+import type { PieceSummaryDto, SessionSummaryDto } from '../../core/models';
+import { NavStore, type AppView } from '../../core/nav.store';
+import { PieceStore } from '../../core/piece.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { VaultStore } from '../../core/vault.store';
-import { IconComponent } from '../icon/icon.component';
+import { IconComponent, type IconName } from '../icon/icon.component';
+
+const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
+  { view: 'sessions', label: 'nav.sessions', icon: 'calendar' },
+  { view: 'pieces', label: 'nav.pieces', icon: 'book' },
+  { view: 'stats', label: 'nav.stats', icon: 'chart' },
+];
 
 @Component({
   selector: 'app-sidebar',
@@ -24,6 +33,9 @@ export class SidebarComponent {
   protected readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
   protected readonly i18n = inject(I18nService);
+  protected readonly nav = inject(NavStore);
+  protected readonly pieces = inject(PieceStore);
+  protected readonly navItems = NAV_ITEMS;
 
   protected readonly formatMs = formatMs;
 
@@ -40,6 +52,16 @@ export class SidebarComponent {
       else groups.push({ label, items: [s] });
     }
     return groups;
+  });
+
+  /** Active pieces first, then the archived ones. */
+  protected readonly pieceGroups = computed(() => {
+    const list = this.pieces.filteredPieces();
+    const groups: { label: MessageKey; items: PieceSummaryDto[] }[] = [
+      { label: 'pieces.activeGroup', items: list.filter((p) => !p.piece.archived) },
+      { label: 'pieces.archivedGroup', items: list.filter((p) => p.piece.archived) },
+    ];
+    return groups.filter((g) => g.items.length);
   });
 
   /** State of the chosen keyboard for the sidebar footer. */
@@ -59,7 +81,13 @@ export class SidebarComponent {
       this.toast.warning(this.i18n.t('sidebar.stopToSwitch'));
       return;
     }
+    this.nav.view.set('sessions');
     void this.store.select(s.id);
+  }
+
+  protected async newPiece(): Promise<void> {
+    const piece = await this.pieces.create(this.i18n.t('pieces.defaultTitle'));
+    if (piece) await this.pieces.select(piece.id);
   }
 
   protected newSession(): void {
@@ -67,6 +95,7 @@ export class SidebarComponent {
       this.toast.warning(this.i18n.t('sidebar.stopToCreate'));
       return;
     }
+    this.nav.view.set('sessions');
     void this.store.create();
   }
 }

@@ -34,6 +34,19 @@
   --color-ok: #5cc28c;
 }
 
+/*
+ * Practice heatmap: brass sequential ramp (one hue, monotone OKLCH lightness 0.42 → 0.80),
+ * level 0 = no practice, receding into the panel. `static` because the SVG reads them as
+ * `var(--color-heat-N)` and Tailwind only emits the variables its utilities use.
+ */
+@theme static {
+  --color-heat-0: #24242c;
+  --color-heat-1: #624815;
+  --color-heat-2: #8c681c;
+  --color-heat-3: #ba8d30;
+  --color-heat-4: #e9b44c;
+}
+
 :root {
   color-scheme: dark;
 }
