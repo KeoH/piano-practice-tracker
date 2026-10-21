@@ -37,13 +37,15 @@ Environment on this machine:
 - **`.github/workflows/ci.yml`** runs on every PR:
   - `frontend`: build plus `npm run test:ci`;
   - `backend`: `cargo llvm-cov --lib`, with a placeholder `dist/` because `generate_context!` needs one to compile;
+  - `backend-macos`: `cargo test --lib` on macOS, so the macOS build doesn't break unnoticed;
   - `coverage`: joins both summaries with `.github/scripts/coverage-summary.mjs` into the job summary and a sticky PR comment.
 
   The apt packages live in the composite action `.github/actions/setup-linux`.
 - **`.github/workflows/release.yml`** runs on every push to `main`:
   1. it calls `ci.yml`;
   2. **release-please** updates the release PR;
-  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release, and the `bundle` job (ubuntu-22.04, for an older glibc) uploads the `.deb`, the `.AppImage` and `SHA256SUMS.txt`.
+  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release. The `bundle` matrix builds the `.deb` and `.AppImage` (ubuntu-22.04, for an older glibc) and a universal `.dmg` (macos-latest, `--target universal-apple-darwin`); `publish` uploads them with a single `SHA256SUMS.txt`.
+- **macOS:** `src-tauri/tauri.macos.conf.json` is merged over `tauri.conf.json` on macOS (`app` + `dmg` targets, ad-hoc signing with `signingIdentity: "-"`; the app is not notarized). Code that touches the OS must work on both: no `/proc` (the vault lock uses `libc::gethostname` / `kill(pid, 0)`).
 - **Versioning:**
   - Commits on `main` (squash-merge PR titles) follow **Conventional Commits**: `feat:` bumps the minor while on 0.x, `fix:` the patch, and `feat!:` or `BREAKING CHANGE` bumps the major.
   - Never edit the version by hand. release-please keeps it in sync in `.release-please-manifest.json`, `version.txt`, `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json` (see `release-please-config.json`), and writes `CHANGELOG.md`.
