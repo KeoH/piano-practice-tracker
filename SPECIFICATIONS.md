@@ -23,6 +23,7 @@ A native desktop application for **Ubuntu Linux** for recording, slicing and ana
 6. **Trims can be undone:** before each trim the raw take is copied to `midi/history/`; the last 10 trims of each session can be undone (undoing an extraction deletes the fragment it created). Recording again clears that history.
 7. **Practice time is recorded, not derived:** `practice_log` keeps what was actually recorded each day, so trimming or deleting a session does not change the statistics.
 8. **Repertoire:** a fragment can be filed under a piece and a passage (free text), so the takes of the same passage can be compared across sessions.
+9. **Composer:** recorded fragments are laid out as clips on a multitrack timeline to build a larger piece. A clip points to its fragment (window, repeats, transposition) and never copies its MIDI; each track is one MIDI channel with a General MIDI instrument, and all tracks sound at once.
 
 ---
 
@@ -68,7 +69,7 @@ Outside the vault:
 
 The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
-### 3.1. Full SQL Schema (version 3)
+### 3.1. Full SQL Schema (version 4)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -129,6 +130,39 @@ CREATE TABLE IF NOT EXISTS raw_history (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS compositions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- One MIDI channel per track (derived from order_index, skipping channel 10): at most 15.
+CREATE TABLE IF NOT EXISTS composition_tracks (
+    id TEXT PRIMARY KEY,
+    composition_id TEXT NOT NULL REFERENCES compositions(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    program INTEGER NOT NULL DEFAULT 0,   -- General MIDI program (0-127)
+    volume INTEGER NOT NULL DEFAULT 100,  -- channel volume (CC7)
+    muted INTEGER NOT NULL DEFAULT 0,
+    solo INTEGER NOT NULL DEFAULT 0,
+    sustain INTEGER NOT NULL DEFAULT 1,   -- play the recorded pedal (CC64)
+    color INTEGER NOT NULL DEFAULT 0,     -- index into the UI palette
+    order_index INTEGER NOT NULL
+);
+
+-- A window of a fragment placed on a track; disappears with the fragment.
+CREATE TABLE IF NOT EXISTS composition_clips (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL REFERENCES composition_tracks(id) ON DELETE CASCADE,
+    fragment_id TEXT NOT NULL REFERENCES midi_fragments(id) ON DELETE CASCADE,
+    start_ms INTEGER NOT NULL,            -- position on the timeline
+    trim_start_ms INTEGER NOT NULL DEFAULT 0,
+    length_ms INTEGER NOT NULL,           -- length of one repetition of the window
+    repeats INTEGER NOT NULL DEFAULT 1,   -- 1-16, back to back
+    transpose INTEGER NOT NULL DEFAULT 0  -- semitones, ±24
+);
+
 CREATE TABLE IF NOT EXISTS timeline_comments (
     id TEXT PRIMARY KEY,
     fragment_id TEXT NOT NULL,
@@ -154,6 +188,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and `drive_file_id` columns. The migration to version 2 drops them, deletes the `google_*` and `drive_*` settings, and turns the old absolute paths into relative ones (in `markdown_notes` too).
 
 The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the `piece_id` / `passage` columns. It fills `practice_log` with one entry per existing session: its raw take plus its fragments, on the session's date. It is an approximation: sections discarded before version 3 are not counted. The weekly goal is the `weekly_goal_minutes` key of `app_settings`.
+
+The migration to version 4 adds `compositions`, `composition_tracks` and `composition_clips`. A composition is saved whole (`save_composition` replaces its tracks and clips in one transaction) after checking that no two clips overlap on a track, that each window lies inside its fragment and the limits above.
 
 ---
 
@@ -196,6 +232,8 @@ The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the 
   - Supports `play`, `pause`, `stop` and `seek(ms)` (sending `reset_all_controllers` and `note_off_all` on seek).
   - **Speed:** from 0.25 to 1.5 (the UI offers 50–100 %). The position advances in file time at that rate, so the pitch does not change.
   - **A-B loop** of the loaded file: on reaching the end it releases the sounding notes and jumps back to the start, restoring the controllers (pedal) at that point.
+- **Sequences in memory:** besides files, the player plays events built in memory under a key (`play_sequence`, a composition's `composition:<id>`), which `PlaybackProgress.file_path` reports. Editing a composition while it plays swaps its events in place (`replace_sequence`), keeping the position, play state and loop.
+- **Channel mix:** volume and mute per MIDI channel, applied live (CC7, and All Sound Off when muting) and kept across seeks and synthesizer resets. Playing a file restores the default mix, and so does turning live monitoring on.
 - **WAV export:** a file is rendered offline with its own synthesizer and the current SoundFont (the live player is not touched), plus 2 s of tail, and written as 16-bit stereo PCM at 44.1 kHz block by block, so a long take does not have to fit in memory. The level is the same as playback (no normalization).
 
 ### 4.5. Notes and Cut Suggestions (`midi_notes.rs`)
@@ -207,6 +245,14 @@ The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the 
 - Before a trim the raw take is copied (tmp + rename) to `midi/history/<session>/`; after a successful trim the copy is recorded in `raw_history` and the copies beyond the 10 newest are deleted.
 - Undoing renames the newest copy over the raw take, restores its duration and, if that trim extracted a fragment that still exists, deletes it.
 - If inserting the fragment fails after the take was trimmed, the copy is put back, so the section is not lost.
+
+### 4.7. Compositions (`composition.rs`)
+- **Mixdown:** each clip is the `[trim_start, trim_start + length)` window of its fragment, cut like an extraction (open notes and the pedal close at the window's end), repeated back to back and transposed (notes falling outside 0-127 are dropped). Every event moves to its track's channel.
+- **The track owns the instrument:** the fragment's program changes, volume (CC7) and pan (CC10) are dropped, and its pedal (CC64) too when the track ignores it; each track starts with its own program change.
+- **Ordering:** simultaneous events go note-offs first, then controllers, then note-ons, so the seam between repeats never cuts the new note.
+- **Live vs export:** live playback leaves volume, mute and solo to the engine's channel mix; WAV and MIDI exports bake them in (silent tracks are left out). Solo wins: once a track is soloed, only the soloed ones sound, and a muted track never does.
+- **MIDI export:** SMF format 1 with a tempo track and one named track per voice (its program and volume at the start), timed at a nominal 120 BPM.
+- **Instrument preview:** a short arpeggio and chord with any General MIDI program; `soundfont::gm_programs` lists the programs (bank 0) the active SoundFont has.
 
 ### 4.4. Vaults (`vault.rs`)
 - **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
@@ -252,6 +298,21 @@ The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the 
 - `delete_piece(piece_id: String) -> Result<(), String>` (the fragments stay in their sessions)
 - `assign_fragment_piece(fragment_id: String, piece_id: Option<String>, passage: String) -> Result<FragmentDto, String>`
 
+### Compositions
+- `get_compositions() -> Result<Vec<CompositionSummaryDto>, String>`
+- `create_composition(title: String) -> Result<CompositionDto, String>` (with one empty piano track)
+- `get_composition(composition_id: String) -> Result<CompositionDto, String>`
+- `save_composition(composition: CompositionDto) -> Result<CompositionDto, String>` (the whole document; empty track or clip ids get a new one)
+- `delete_composition(composition_id: String) -> Result<(), String>`
+- `get_library_fragments() -> Result<Vec<LibraryFragmentDto>, String>` (every fragment, with its piece and session)
+- `count_composition_uses(fragment_ids: Vec<String>, session_id: Option<String>) -> Result<u32, String>` (compositions that would lose clips)
+- `play_composition(composition_id: String, start_ms: u64) -> Result<(), String>` (progress as `composition:<id>`; pause, seek, loop and speed are the playback commands)
+- `set_composition_mix(composition_id: String, mix: Vec<TrackMixDto>) -> Result<(), String>` (applied only if it is the one loaded)
+- `get_soundfont_programs() -> Result<Vec<u8>, String>`
+- `preview_instrument(program: u8) -> Result<(), String>`
+- `export_composition_audio(composition_id: String, dest_path: String) -> Result<String, String>`
+- `export_composition_midi(composition_id: String, dest_path: String) -> Result<String, String>`
+
 ### Practice Statistics
 - `get_practice_stats(from: String, to: String) -> Result<PracticeStatsDto, String>` (ISO dates; only the days with practice)
 - `set_weekly_goal(minutes: u32) -> Result<u32, String>`
@@ -290,7 +351,7 @@ The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the 
 ## 6. User Interface Design (Angular UI/UX)
 
 1. **Left Sidebar (Navigation and Status):**
-   - Three views: **Sessions**, **Repertoire** and **Statistics**.
+   - Four views: **Sessions**, **Repertoire**, **Compose** and **Statistics**.
    - "+ New Practice Session" button and the chronological list of sessions (in the Repertoire view: "+ New piece" and the list of pieces, the archived ones apart).
    - Quick USB-MIDI port selector and Settings button (with the name of the open vault) in the sidebar footer.
    - Without an open vault, the app shows a welcome screen: create a vault (name + location), open an existing one, recent ones and import of the previous version's data.
@@ -326,3 +387,12 @@ The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the 
 7. **Practice Statistics:**
    - Today, the current and best streak (days with at least a minute of practice; today's practice can still continue yesterday's streak), and the week against a goal set by the user.
    - A heatmap of the last 53 weeks (levels at 1, 15, 30 and 60 minutes) and a bar chart of the last 30 days, with a tooltip on hover or focus and a table view.
+8. **Composer:**
+   - The sidebar lists the compositions; a new one starts with one empty piano track and a drop zone that explains the three steps.
+   - Header (editable title, tracks · clips · length, Export MIDI / Export WAV, undo, redo, delete) and a transport bar (to the start, play/pause, stop, A-B loop, position, snap to clip edges / seconds / off, speed and zoom).
+   - Multitrack timeline: a ruler (click to seek, drag to set the loop) and one row per track with its colour, editable name, M / S, instrument and volume. Clips show their fragment's piano roll; they are dragged between tracks (Alt copies), trimmed by their edges and repeated with a tab on their corner. A row at the bottom takes a fragment onto a new track.
+   - Library of fragments grouped by piece, with search, a piece filter and "In use ×N"; a fragment is dragged onto the timeline or added at the playhead of the active track with a click or Enter.
+   - Inspector of the selected clip: start, length, trims, transposition and repeats steppers, Split at the playhead, Duplicate, Remove and a link to its session.
+   - Instrument dialog: 16 families, a search across the 128 programs, a preview of each one, the programs the SoundFont lacks disabled, and whether the track plays the sustain pedal.
+   - Shortcuts: Space, Ctrl+Z / Ctrl+Shift+Z, S (split), Ctrl+D (duplicate), Delete, arrows (move 0.1 s, Shift: 1 s), Esc, Shift+M / Shift+S (mute / solo the active track).
+   - Deleting a fragment or a session that a composition uses says so in the confirmation; its clips go with it.
