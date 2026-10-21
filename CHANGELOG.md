@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.4.0...v0.5.0) (2026-10-21)
+
+
+### Features
+
+* build a macOS installer in the release workflow ([ae3fd8d](https://github.com/KeoH/piano-practice-tracker/commit/ae3fd8d69a205e6df63c94ee916ed51e1cfbf7d7))
+* Include macOS version ([4dd1334](https://github.com/KeoH/piano-practice-tracker/commit/4dd133410f5bce8ffb8dff1eaf35593f5046e70b))
+
+
+### Bug Fixes
+
+* folder for mac ([3b01b36](https://github.com/KeoH/piano-practice-tracker/commit/3b01b36d2e77261a671fbf2f691187432249912d))
+* folder for mac ([9685fdb](https://github.com/KeoH/piano-practice-tracker/commit/9685fdbf5ba0690e99d2b06a8050cbec157e3629))
+
 ## [0.4.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.3.0...v0.4.0) (2026-10-21)
 
 
