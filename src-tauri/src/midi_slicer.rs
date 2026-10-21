@@ -361,7 +361,7 @@ fn validate_range(start_ms: u64, end_ms: u64, duration_ms: u64) -> Result<(u64, 
 }
 
 /// Builds the `[start, end)` fragment normalized to t=0.
-fn build_fragment(events: &[TimedMidiEvent], start_us: u64, end_us: u64) -> Vec<TimedMidiEvent> {
+pub(crate) fn build_fragment(events: &[TimedMidiEvent], start_us: u64, end_us: u64) -> Vec<TimedMidiEvent> {
     let span = end_us - start_us;
     // Pedal state right before start.
     let mut pedal: HashMap<u8, u8> = HashMap::new();

@@ -279,6 +279,14 @@ pub struct CompositionDto {
     pub tracks: Vec<CompositionTrackDto>,
 }
 
+/// Mixer state of a track, applied live while a composition plays.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct TrackMixDto {
+    pub volume: u8,
+    pub muted: bool,
+    pub solo: bool,
+}
+
 /// A fragment as the composer's library shows it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LibraryFragmentDto {

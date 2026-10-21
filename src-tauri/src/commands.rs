@@ -11,6 +11,7 @@ use base64::Engine as _;
 use tauri::{Manager, State};
 
 use crate::audio_engine::{self, AudioEngine};
+use crate::composition::{self, MixMode};
 use crate::i18n;
 use crate::midi_notes;
 use crate::midi_recorder::{self, MidiRecorder, MidiSink};
@@ -515,19 +516,64 @@ pub async fn get_composition(state: State<'_, AppState>, composition_id: String)
     state.vault()?.db.get_composition(&composition_id)
 }
 
-/// Saves the whole document (title, tracks and clips) and returns it as stored.
+/// Saves the whole document (title, tracks and clips) and returns it as stored. If the
+/// composition is loaded in the player, it carries on playing the new version.
 #[tauri::command]
 pub async fn save_composition(state: State<'_, AppState>, composition: CompositionDto) -> Result<CompositionDto, String> {
     let mut doc = composition;
     if doc.title.trim().is_empty() {
         doc.title = t!("backend.defaults.compositionTitle");
     }
-    state.vault()?.db.save_composition(&doc)
+    let saved = state.vault()?.db.save_composition(&doc)?;
+    let key = composition::playback_key(&saved.id);
+    if state.audio.active_key().as_deref() == Some(key.as_str()) {
+        let mix = composition::channel_mix(&composition::track_mix(&saved));
+        let (events, duration_us) = composition_events(saved.clone(), MixMode::Live).await?;
+        state.audio.set_channel_mix(&mix);
+        state.audio.replace_sequence(&key, events, duration_us);
+    }
+    Ok(saved)
 }
 
 #[tauri::command]
 pub async fn delete_composition(state: State<'_, AppState>, composition_id: String) -> Result<(), String> {
+    if state.audio.active_key() == Some(composition::playback_key(&composition_id)) {
+        state.audio.stop()?;
+    }
     state.vault()?.db.delete_composition(&composition_id)
+}
+
+/// Mixdown of a composition on a blocking thread (it reads the fragments' MIDI).
+async fn composition_events(doc: CompositionDto, mode: MixMode) -> Result<(Vec<midi_slicer::TimedMidiEvent>, u64), String> {
+    tauri::async_runtime::spawn_blocking(move || composition::build_events(&doc, mode))
+        .await
+        .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Plays the composition from `start_ms` in the global player; progress reports it as
+/// `composition:<id>`. Pause, seek, loop and speed are the usual playback commands.
+#[tauri::command]
+pub async fn play_composition(state: State<'_, AppState>, composition_id: String, start_ms: u64) -> Result<(), String> {
+    let doc = state.vault()?.db.get_composition(&composition_id)?;
+    let key = composition::playback_key(&doc.id);
+    let mix = composition::channel_mix(&composition::track_mix(&doc));
+    let (events, duration_us) = composition_events(doc, MixMode::Live).await?;
+    state.audio.set_channel_mix(&mix);
+    state.audio.play_sequence(&key, events, duration_us, start_ms)
+}
+
+/// Applies the mixer (volume, mute and solo of each track, in track order) right away if the
+/// composition is the one loaded in the player. Storing it is `save_composition`'s job.
+#[tauri::command]
+pub async fn set_composition_mix(
+    state: State<'_, AppState>,
+    composition_id: String,
+    mix: Vec<TrackMixDto>,
+) -> Result<(), String> {
+    if state.audio.active_key() == Some(composition::playback_key(&composition_id)) {
+        state.audio.set_channel_mix(&composition::channel_mix(&mix));
+    }
+    Ok(())
 }
 
 #[tauri::command]

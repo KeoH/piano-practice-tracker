@@ -233,6 +233,13 @@ export interface CompositionDto {
   tracks: CompositionTrackDto[];
 }
 
+/** Mixer state of a track, applied live while a composition plays. */
+export interface TrackMixDto {
+  volume: number;
+  muted: boolean;
+  solo: boolean;
+}
+
 /** A fragment as the composer's library shows it. */
 export interface LibraryFragmentDto {
   id: string;

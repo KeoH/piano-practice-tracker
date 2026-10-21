@@ -28,6 +28,7 @@ import {
   type SoundfontInfo,
   type TimeRangeDto,
   type TimelineCommentDto,
+  type TrackMixDto,
   type UndoTrimResult,
   type VaultInfo,
   type VaultOpenResult,
@@ -218,6 +219,16 @@ export class TauriApiService {
   /** Compositions that would lose clips if these fragments (or the session's) were deleted. */
   countCompositionUses(fragmentIds: string[], sessionId: string | null = null): Promise<number> {
     return this.call('count_composition_uses', { fragmentIds, sessionId });
+  }
+
+  /** Plays the composition from `startMs`; progress reports it as `composition:<id>`. */
+  playComposition(compositionId: string, startMs: number): Promise<void> {
+    return this.call('play_composition', { compositionId, startMs: Math.max(0, Math.round(startMs)) });
+  }
+
+  /** Applies the mixer live (track order) if the composition is the one loaded in the player. */
+  setCompositionMix(compositionId: string, mix: TrackMixDto[]): Promise<void> {
+    return this.call('set_composition_mix', { compositionId, mix });
   }
 
   // ---- Practice statistics ----

@@ -3,6 +3,7 @@
 pub mod i18n;
 pub mod audio_engine;
 pub mod commands;
+pub mod composition;
 pub mod db;
 pub mod midi_notes;
 pub mod midi_recorder;
@@ -134,6 +135,8 @@ pub fn run() {
             commands::delete_composition,
             commands::get_library_fragments,
             commands::count_composition_uses,
+            commands::play_composition,
+            commands::set_composition_mix,
             commands::get_practice_stats,
             commands::set_weekly_goal,
             commands::get_sessions,
