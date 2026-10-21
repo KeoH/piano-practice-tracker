@@ -389,7 +389,7 @@ export class TauriApiService {
     return this.call('get_app_info');
   }
 
-  /** Opens the website, the repository or the license in the browser. */
+  /** Opens the website, the repository, the license or the suggested GM SoundFont in the browser. */
   openAppLink(target: AppLink): Promise<void> {
     return this.call('open_app_link', { target });
   }

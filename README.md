@@ -46,7 +46,7 @@ Download the `.dmg` (a universal build for Apple Silicon and Intel, macOS 11 or 
 xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
 ```
 
-macOS has no system SoundFont, so choose a `.sf2` in **Settings** to get a realistic piano.
+macOS has no system SoundFont, so the app starts with its synthetic piano and most instruments are unavailable in the composer. Download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) (**Settings → Sound** has a button for it) and either choose the `.sf2` there or copy it to `~/Library/Audio/Sounds/Banks`, where the app finds it on its own.
 
 ### Better piano sound
 

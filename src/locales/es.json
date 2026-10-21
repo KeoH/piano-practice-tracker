@@ -108,6 +108,8 @@
       "noSf3": "Los archivos .sf3 no son compatibles.",
       "onlyBuiltinTitle": "¿Solo tienes el piano sintético?",
       "onlyBuiltinText": "Instala un SoundFont con muestras reales y reinicia la app:",
+      "onlyBuiltinTextMac": "macOS no trae ninguno. Descarga un SoundFont General MIDI (.sf2), como GeneralUser GS, y elígelo con **Elegir otro archivo .sf2…**, o cópialo en **~/Library/Audio/Sounds/Banks** para verlo en esta lista.",
+      "downloadGm": "Descargar un SoundFont General MIDI",
       "bluetooth": "Con auriculares o altavoces Bluetooth el sonido llega unos 200 ms tarde. Para tocar oyendo la app, mejor por cable.",
       "changed": "Sonido cambiado a {name}",
       "builtinDescription": "Integrado en la app. Siempre disponible, menos realista",
@@ -116,7 +118,8 @@
       "errors": {
         "read": "No se pudo leer la configuración de sonido",
         "load": "No se pudo cargar el SoundFont",
-        "picker": "No se pudo abrir el selector de archivos"
+        "picker": "No se pudo abrir el selector de archivos",
+        "openLink": "No se pudo abrir el enlace"
       }
     },
     "general": {
