@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.0...v0.5.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* open links and suggest a SoundFont on macOS ([7429cea](https://github.com/KeoH/piano-practice-tracker/commit/7429ceaf431c0ae145d1ab663de975bf32d31fdf))
+* open links and suggest a SoundFont on macOS ([d0f5917](https://github.com/KeoH/piano-practice-tracker/commit/d0f5917faf03385c0cf406fa02ecd1b4ad430592))
+
 ## [0.5.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.4.0...v0.5.0) (2026-10-21)
 
 
