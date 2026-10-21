@@ -88,6 +88,64 @@
   }
 </nav>
 
+} @else if (nav.view() === 'compose') {
+<div class="flex flex-col gap-2.5 px-4 pb-4">
+  <button type="button" class="btn btn-primary btn-lg w-full" (click)="compositions.create()" [disabled]="!api.available">
+    <app-icon name="plus" [size]="18" /> {{ 'composer.new' | t }}
+  </button>
+  <div class="relative">
+    <app-icon name="search" [size]="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
+    <label for="composition-filter" class="sr-only">{{ 'composer.searchLabel' | t }}</label>
+    <input
+      id="composition-filter"
+      type="search"
+      class="field bg-ink-850 pl-9"
+      [placeholder]="'composer.searchLabel' | t"
+      [value]="compositions.filter()"
+      (input)="compositions.filter.set($any($event.target).value)"
+    />
+  </div>
+</div>
+
+<nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" [attr.aria-label]="'composer.listLabel' | t">
+  @for (g of compositionGroups(); track g.label) {
+    <section>
+      <h2 class="px-2.5 pb-1.5 text-xs font-semibold text-faint">{{ g.label }}</h2>
+      <ul class="flex flex-col gap-0.5">
+        @for (c of g.items; track c.id) {
+          @let active = compositions.selectedId() === c.id;
+          <li>
+            <button
+              type="button"
+              class="flex min-h-[52px] w-full items-center gap-2.5 rounded-[10px] border px-2.5 py-2 text-left transition-colors"
+              [class]="active ? 'border-line-hover bg-ink-700' : 'border-transparent hover:bg-ink-800'"
+              [attr.aria-current]="active ? 'page' : null"
+              (click)="compositions.select(c.id)"
+            >
+              <span class="flex min-w-0 flex-1 flex-col gap-[3px]">
+                <span class="truncate text-sm font-medium" [class]="active ? 'text-fg-strong' : 'text-fg-soft'">{{ c.title }}</span>
+                <span class="flex gap-1.5 text-xs whitespace-nowrap text-faint">
+                  <span>{{ 'composer.trackCount' | tp: c.track_count }}</span>
+                  <span aria-hidden="true">·</span>
+                  <span class="tabular text-[11.5px]">{{ formatMs(c.duration_ms) }}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{{ i18n.shortDate(c.updated_at) }}</span>
+                </span>
+              </span>
+            </button>
+          </li>
+        }
+      </ul>
+    </section>
+  } @empty {
+    @if (!compositions.listLoading()) {
+      <p class="px-2.5 py-6 text-center text-[13px] text-faint">
+        {{ (compositions.filter() ? 'composer.noMatches' : 'composer.noCompositions') | t }}
+      </p>
+    }
+  }
+</nav>
+
 } @else {
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="newSession()" [disabled]="!api.available">

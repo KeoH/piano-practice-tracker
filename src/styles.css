@@ -128,6 +128,20 @@ app-root {
     font-variant-numeric: tabular-nums;
     @apply font-mono;
   }
+  /* Read-only value next to a label (composer inspector) */
+  .value {
+    @apply flex h-[34px] items-center rounded-[9px] border border-line-strong bg-ink-900 px-2.5 font-mono text-[12.5px] text-fg;
+  }
+    /* Mute / solo of a composer track */
+  .ms-btn {
+    @apply inline-flex h-6 w-[26px] shrink-0 items-center justify-center rounded-md border border-line-strong bg-ink-750 font-mono text-[11px] font-semibold text-muted transition-colors hover:border-line-hover hover:text-fg;
+  }
+  .ms-btn.ms-mute {
+    @apply border-fg-soft bg-fg-soft text-ink-900 hover:text-ink-900;
+  }
+  .ms-btn.ms-solo {
+    @apply border-accent bg-accent text-on-accent hover:text-on-accent;
+  }
   .kbd {
     @apply rounded-[5px] border border-line-strong px-1.5 py-px font-mono text-[11px] text-fg-soft;
   }
@@ -371,4 +385,9 @@ input[type="number"].no-spin::-webkit-outer-spin-button {
 .md-preview th {
   background: var(--color-ink-850);
   color: var(--color-fg-strong);
+}
+
+/* Composer clips: lighter on hover (their colour comes from the track) */
+.clip:hover {
+  filter: brightness(1.15);
 }

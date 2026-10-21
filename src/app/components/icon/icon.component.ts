@@ -45,7 +45,14 @@ export type IconName =
   | 'calendar'
   | 'flame'
   | 'target'
-  | 'compare';
+  | 'compare'
+  | 'layers'
+  | 'grip'
+  | 'skip-back'
+  | 'zoom-in'
+  | 'zoom-out'
+  | 'redo'
+  | 'minus';
 
 /** Inline SVG icons (1.75 stroke, inherit `currentColor`). */
 @Component({
@@ -65,6 +72,7 @@ export type IconName =
     >
       @switch (name()) {
         @case ('plus') { <path d="M12 5v14M5 12h14" /> }
+        @case ('minus') { <path d="M5 12h14" /> }
         @case ('info') { <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /> }
         @case ('search') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /> }
         @case ('folder') { <path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9Z" /> }
@@ -114,6 +122,16 @@ export type IconName =
         @case ('flame') { <path d="M12 21a6 6 0 0 0 6-6c0-4-3-6-4-9-1.5 2-2 3.5-2 5-1-1-2-1.5-2.5-3C7.5 10 6 12.5 6 15a6 6 0 0 0 6 6Z" /> }
         @case ('target') { <circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" fill="currentColor" /> }
         @case ('compare') { <rect x="3" y="4" width="18" height="6" rx="1.5" /><rect x="3" y="14" width="18" height="6" rx="1.5" /> }
+        @case ('layers') { <path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 13 9 5 9-5" /> }
+        @case ('grip') {
+          <circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none" /><circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none" />
+          <circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none" />
+          <circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none" /><circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none" />
+        }
+        @case ('skip-back') { <path d="M6 5v14" /><path d="M18 6v12l-9-6 9-6Z" fill="currentColor" /> }
+        @case ('zoom-in') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6M11 8v6" /> }
+        @case ('zoom-out') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5M8 11h6" /> }
+        @case ('redo') { <path d="m15 14 5-5-5-5" /><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" /> }
         @case ('comment') { <path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 20 12Z" /> }
       }
     </svg>

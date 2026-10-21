@@ -1,0 +1,121 @@
+@if (store.doc(); as doc) {
+  <div class="flex flex-col gap-3.5 px-6 pt-5 pb-6">
+    <!-- Header -->
+    <header class="flex flex-wrap items-end justify-between gap-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-1">
+        <span class="text-xs font-semibold text-faint">{{ 'composer.eyebrow' | t }}</span>
+        <label class="sr-only" for="composition-title">{{ 'composer.titleLabel' | t }}</label>
+        <input
+          #titleIn
+          id="composition-title"
+          class="-mx-2 min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-0.5 text-[22px] leading-tight font-semibold tracking-[-0.01em] text-fg-strong hover:border-line focus:border-line-hover focus:outline-none"
+          [value]="doc.title"
+          (blur)="saveTitle(titleIn)"
+          (keydown.enter)="titleIn.blur()"
+        />
+        <span class="text-[12.5px] text-muted">
+          {{ 'composer.trackCount' | tp: doc.tracks.length }} · {{ 'composer.clipCount' | tp: clips() }} ·
+          <span class="tabular">{{ formatMs(store.duration()) }}</span>
+        </span>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" class="btn btn-ghost btn-icon" [disabled]="!store.canUndo()" (click)="store.undo()" [attr.aria-label]="'composer.undo' | t" [title]="'composer.undo' | t">
+          <app-icon name="undo" [size]="17" />
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" [disabled]="!store.canRedo()" (click)="store.redo()" [attr.aria-label]="'composer.redo' | t" [title]="'composer.redo' | t">
+          <app-icon name="redo" [size]="17" />
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon hover:text-rec-soft" (click)="deleteComposition()" [attr.aria-label]="'composer.delete' | t" [title]="'composer.delete' | t">
+          <app-icon name="trash" [size]="16" />
+        </button>
+      </div>
+    </header>
+
+    <!-- Transport -->
+    <div class="flex flex-wrap items-center gap-2 rounded-[14px] border border-line bg-ink-800 px-2.5 py-2">
+      <button type="button" class="btn btn-ghost btn-icon" (click)="store.seek(0)" [attr.aria-label]="'composer.toStart' | t" [title]="'composer.toStart' | t">
+        <app-icon name="skip-back" [size]="17" />
+      </button>
+      <button
+        type="button"
+        class="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40"
+        [disabled]="!clips()"
+        (click)="store.togglePlay()"
+        [attr.aria-label]="(store.playing() ? 'composer.pause' : 'composer.play') | t"
+      >
+        <app-icon [name]="store.playing() ? 'pause' : 'play'" [size]="17" />
+      </button>
+      <button type="button" class="btn btn-ghost btn-icon" (click)="store.stop()" [attr.aria-label]="'composer.stop' | t" [title]="'composer.stop' | t">
+        <app-icon name="stop" [size]="15" />
+      </button>
+      <button
+        type="button"
+        class="btn btn-icon"
+        [class]="loop() ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
+        [attr.aria-pressed]="!!loop()"
+        [attr.aria-label]="'composer.loop' | t"
+        [title]="'composer.loopHint' | t"
+        (click)="toggleLoop()"
+      >
+        <app-icon name="repeat" [size]="17" />
+      </button>
+
+      <div class="tabular flex items-baseline gap-1.5 px-2.5" aria-live="off">
+        <span class="text-lg font-medium text-fg-strong">{{ formatMs(store.position(), true) }}</span>
+        <span class="text-[12.5px] text-faint">/ {{ formatMs(store.duration(), true) }}</span>
+      </div>
+
+      <span class="h-6 w-px bg-line-strong" aria-hidden="true"></span>
+
+      <label for="composer-snap" class="pl-1.5 text-[12.5px] text-muted">{{ 'composer.snap.label' | t }}</label>
+      <select id="composer-snap" class="field h-[34px] w-auto px-2 py-0 text-[13px]" (change)="store.snap.set($any($event.target).value)">
+        @for (o of snapOptions; track o.value) {
+          <option [value]="o.value" [selected]="o.value === store.snap()">{{ o.label | t }}</option>
+        }
+      </select>
+      <app-rate-select class="pl-1.5" />
+
+      <div class="ml-auto flex items-center gap-0.5">
+        <button type="button" class="btn btn-ghost btn-icon" [disabled]="!canZoomOut()" (click)="zoom(-1)" [attr.aria-label]="'composer.zoomOut' | t" [title]="'composer.zoomOut' | t">
+          <app-icon name="zoom-out" [size]="17" />
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon" [disabled]="!canZoomIn()" (click)="zoom(1)" [attr.aria-label]="'composer.zoomIn' | t" [title]="'composer.zoomIn' | t">
+          <app-icon name="zoom-in" [size]="17" />
+        </button>
+      </div>
+    </div>
+
+    <app-composer-timeline />
+
+    <div class="flex flex-wrap items-stretch gap-3.5">
+      <app-fragment-library class="min-w-0 flex-[3_1_520px]" />
+      <app-clip-inspector class="min-w-0 flex-[2_1_340px]" />
+    </div>
+  </div>
+} @else if (store.loading() || store.listLoading()) {
+  <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
+} @else {
+  <div class="flex min-h-[70vh] flex-col items-center justify-center gap-4 px-6 text-center">
+    <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
+      <app-icon name="layers" [size]="28" />
+    </span>
+    <h1 class="text-xl font-semibold text-fg-strong">{{ 'composer.welcome.title' | t }}</h1>
+    <p class="max-w-[460px] text-[13.5px] leading-relaxed text-muted">{{ 'composer.welcome.body' | t }}</p>
+    <button type="button" class="btn btn-primary btn-lg" [disabled]="!api.available" (click)="store.create()">
+      <app-icon name="plus" [size]="18" /> {{ 'composer.new' | t }}
+    </button>
+  </div>
+}
+
+@if (store.libraryDrag(); as frag) {
+  @if (pointer(); as p) {
+    <div
+      class="pointer-events-none fixed z-50 rounded-lg border border-accent/60 bg-ink-750 px-2.5 py-1.5 text-[12.5px] font-semibold text-fg shadow-lg"
+      [style.left.px]="p.x + 14"
+      [style.top.px]="p.y + 10"
+      aria-hidden="true"
+    >
+      {{ frag.title }}
+    </div>
+  }
+}

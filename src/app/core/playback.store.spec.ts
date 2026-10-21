@@ -18,6 +18,7 @@ function mockApi() {
       available: true,
       onPlaybackProgress: () => Promise.resolve(() => undefined),
       playMidiFile: record('play'),
+      playComposition: record('playComposition'),
       pauseMidiPlayback: record('pause'),
       seekMidiPlayback: record('seek'),
       stopMidiPlayback: record('stop'),
@@ -79,5 +80,12 @@ describe('PlaybackStore', () => {
     await store.play('b.mid', 0);
     expect(store.loop()).toBeNull();
     expect(mock.names().at(-1)).toBe('play');
+  });
+
+  it('plays a composition by its key', async () => {
+    await store.play('composition:abc', 1200);
+    expect(mock.calls.at(-1)).toEqual({ cmd: 'playComposition', args: ['abc', 1200] });
+    expect(store.activeFile()).toBe('composition:abc');
+    expect(store.isPlaying('composition:abc')).toBe(true);
   });
 });

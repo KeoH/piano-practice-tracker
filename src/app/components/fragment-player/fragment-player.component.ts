@@ -11,6 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { CompositionStore } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
 import { ExportService } from '../../core/export.service';
 import { clamp, formatMs } from '../../core/format';
@@ -62,6 +63,7 @@ export class FragmentPlayerComponent {
   protected readonly prefs = inject(UiPrefsStore);
   protected readonly exporter = inject(ExportService);
   private readonly pieces = inject(PieceStore);
+  private readonly compositions = inject(CompositionStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
   protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly activityLoading = signal(false);
@@ -347,9 +349,10 @@ export class FragmentPlayerComponent {
 
   protected async deleteFragment(): Promise<void> {
     const f = this.fragment();
+    const usage = await this.compositions.usageWarning([f.id]);
     const ok = await this.confirm.ask({
       title: this.i18n.t('fragments.delete'),
-      message: this.i18n.plural('fragments.deleteMessage', f.comments.length, { title: f.title }),
+      message: [this.i18n.plural('fragments.deleteMessage', f.comments.length, { title: f.title }), usage].filter(Boolean).join(' '),
       confirmLabel: this.i18n.t('fragments.delete'),
     });
     if (!ok) return;

@@ -1,4 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
+import { parseCompositionKey } from './composition';
 import type { PlaybackProgress } from './models';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
@@ -20,6 +21,7 @@ export const PLAYBACK_RATES = [0.5, 0.6, 0.7, 0.8, 0.9, 1] as const;
  * For inactive files a local "cursor" (seek position) is kept, from which the next playback
  * will start.
  * The speed is global; the loop belongs to one file and is dropped when another file plays.
+ * A composition plays under the key `composition:<id>` and is otherwise handled like a file.
  */
 @Injectable({ providedIn: 'root' })
 export class PlaybackStore {
@@ -86,7 +88,9 @@ export class PlaybackStore {
     if (activeLoop && (from < activeLoop.start || from >= activeLoop.end)) from = activeLoop.start;
     this.stopAt = endMs !== undefined && !activeLoop ? { file, endMs } : null;
     try {
-      await this.api.playMidiFile(file, from);
+      const composition = parseCompositionKey(file);
+      if (composition) await this.api.playComposition(composition, from);
+      else await this.api.playMidiFile(file, from);
       // Loading another file drops the backend loop; for the same file it is kept, but resending is harmless.
       if (activeLoop) await this.api.setPlaybackLoop(activeLoop);
       this.activeFile.set(file);
