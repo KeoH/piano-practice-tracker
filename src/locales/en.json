@@ -422,7 +422,9 @@
     "defaults": {
       "fragmentTitle": "Untitled fragment",
       "sessionTitle": "Practice session",
-      "pieceTitle": "Untitled piece"
+      "pieceTitle": "Untitled piece",
+      "compositionTitle": "Untitled composition",
+      "trackName": "Track {n}"
     },
     "image": {
       "invalidBase64": "Invalid base64 image: {e}",
@@ -511,7 +513,18 @@
       "noSoundfont": "No SoundFont is loaded; choose one in Settings → Sound",
       "tooLong": "The recording is too long for a WAV file"
     },
-    "invalidDate": "Invalid date: {date}"
+    "invalidDate": "Invalid date: {date}",
+    "composition": {
+      "missing": "Composition '{id}' does not exist",
+      "tooManyTracks": "A composition can have at most {max} tracks",
+      "overlap": "Two clips overlap on the track \"{track}\"",
+      "emptyClip": "A clip of \"{fragment}\" is empty",
+      "clipOutside": "The clip of \"{fragment}\" goes past the end of the fragment",
+      "repeats": "A clip repeats between 1 and {max} times",
+      "transpose": "Transposition goes from -{max} to +{max} semitones",
+      "program": "Unknown instrument {program}",
+      "volume": "Invalid track volume {volume}"
+    }
   },
   "export": {
     "wav": "Export WAV",

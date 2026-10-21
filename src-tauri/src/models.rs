@@ -218,6 +218,83 @@ pub struct PieceDetailDto {
     pub takes: Vec<PieceTakeDto>,
 }
 
+/// A composition in the list of the composer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionSummaryDto {
+    pub id: String,
+    pub title: String,
+    pub track_count: u32,
+    pub clip_count: u32,
+    /// End of the last clip (repeats included).
+    pub duration_ms: u64,
+    pub updated_at: String,
+}
+
+/// A clip: a window of a fragment placed on a track. The fragment's MIDI is never copied.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionClipDto {
+    pub id: String,
+    pub fragment_id: String,
+    /// Position on the composition's timeline.
+    pub start_ms: u64,
+    /// Start of the window inside the fragment.
+    pub trim_start_ms: u64,
+    /// Length of one repetition of the window.
+    pub length_ms: u64,
+    /// Times the window is played back to back (1 = once).
+    pub repeats: u32,
+    /// Semitones.
+    pub transpose: i32,
+    /// Read only: filled in from the fragment when loading, ignored when saving.
+    pub fragment_title: String,
+    pub fragment_file_path: String,
+    pub fragment_duration_ms: u64,
+}
+
+/// A track: one MIDI channel with a General MIDI instrument. The vector order is the track order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionTrackDto {
+    pub id: String,
+    pub name: String,
+    /// General MIDI program (0-127).
+    pub program: u8,
+    /// MIDI channel volume (0-127).
+    pub volume: u8,
+    pub muted: bool,
+    pub solo: bool,
+    /// Whether the recorded sustain pedal (CC64) is played.
+    pub sustain: bool,
+    /// Index into the frontend's track palette.
+    pub color: u8,
+    /// Sorted by `start_ms`.
+    pub clips: Vec<CompositionClipDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionDto {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub tracks: Vec<CompositionTrackDto>,
+}
+
+/// A fragment as the composer's library shows it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LibraryFragmentDto {
+    pub id: String,
+    pub title: String,
+    pub file_path: String,
+    pub duration_ms: u64,
+    pub session_id: String,
+    pub session_title: String,
+    pub session_date: String,
+    pub piece_id: Option<String>,
+    pub piece_title: Option<String>,
+    pub passage: String,
+    pub created_at: String,
+}
+
 /// Payload of the Tauri `playback-progress` event (emitted every 50 ms during playback).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaybackProgress {

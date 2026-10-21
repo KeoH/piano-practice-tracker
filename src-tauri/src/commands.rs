@@ -496,6 +496,56 @@ pub async fn assign_fragment_piece(
 }
 
 // ---------------------------------------------------------------------------
+// Compositions
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_compositions(state: State<'_, AppState>) -> Result<Vec<CompositionSummaryDto>, String> {
+    state.vault()?.db.list_compositions()
+}
+
+#[tauri::command]
+pub async fn create_composition(state: State<'_, AppState>, title: String) -> Result<CompositionDto, String> {
+    let title = if title.trim().is_empty() { t!("backend.defaults.compositionTitle") } else { title.trim().to_string() };
+    state.vault()?.db.create_composition(&title, &t!("backend.defaults.trackName", n = 1))
+}
+
+#[tauri::command]
+pub async fn get_composition(state: State<'_, AppState>, composition_id: String) -> Result<CompositionDto, String> {
+    state.vault()?.db.get_composition(&composition_id)
+}
+
+/// Saves the whole document (title, tracks and clips) and returns it as stored.
+#[tauri::command]
+pub async fn save_composition(state: State<'_, AppState>, composition: CompositionDto) -> Result<CompositionDto, String> {
+    let mut doc = composition;
+    if doc.title.trim().is_empty() {
+        doc.title = t!("backend.defaults.compositionTitle");
+    }
+    state.vault()?.db.save_composition(&doc)
+}
+
+#[tauri::command]
+pub async fn delete_composition(state: State<'_, AppState>, composition_id: String) -> Result<(), String> {
+    state.vault()?.db.delete_composition(&composition_id)
+}
+
+#[tauri::command]
+pub async fn get_library_fragments(state: State<'_, AppState>) -> Result<Vec<LibraryFragmentDto>, String> {
+    state.vault()?.db.list_library_fragments()
+}
+
+/// Compositions that would lose clips if these fragments (or the session's) were deleted.
+#[tauri::command]
+pub async fn count_composition_uses(
+    state: State<'_, AppState>,
+    fragment_ids: Vec<String>,
+    session_id: Option<String>,
+) -> Result<u32, String> {
+    state.vault()?.db.count_compositions_using(&fragment_ids, session_id.as_deref())
+}
+
+// ---------------------------------------------------------------------------
 // Practice statistics
 // ---------------------------------------------------------------------------
 

@@ -7,10 +7,13 @@ import {
   EVENT_PLAYBACK_PROGRESS,
   type AppInfo,
   type AppLink,
+  type CompositionDto,
+  type CompositionSummaryDto,
   type ExtractFragmentReq,
   type FragmentCreatedResponse,
   type FragmentDto,
   type LanguageInfo,
+  type LibraryFragmentDto,
   type MidiActivityDto,
   type MidiNotesDto,
   type MidiPortInfo,
@@ -183,6 +186,38 @@ export class TauriApiService {
   /** Files a fragment under a piece and passage (`null` takes it out of its piece). */
   assignFragmentPiece(fragmentId: string, pieceId: string | null, passage: string): Promise<FragmentDto> {
     return this.call('assign_fragment_piece', { fragmentId, pieceId, passage });
+  }
+
+  // ---- Compositions ----
+  getCompositions(): Promise<CompositionSummaryDto[]> {
+    return this.call('get_compositions');
+  }
+
+  /** New composition with one empty piano track (an empty title gets the default one). */
+  createComposition(title: string): Promise<CompositionDto> {
+    return this.call('create_composition', { title });
+  }
+
+  getComposition(compositionId: string): Promise<CompositionDto> {
+    return this.call('get_composition', { compositionId });
+  }
+
+  /** Saves the whole document and resolves with it as stored (new tracks and clips get their ids). */
+  saveComposition(composition: CompositionDto): Promise<CompositionDto> {
+    return this.call('save_composition', { composition });
+  }
+
+  deleteComposition(compositionId: string): Promise<void> {
+    return this.call('delete_composition', { compositionId });
+  }
+
+  getLibraryFragments(): Promise<LibraryFragmentDto[]> {
+    return this.call('get_library_fragments');
+  }
+
+  /** Compositions that would lose clips if these fragments (or the session's) were deleted. */
+  countCompositionUses(fragmentIds: string[], sessionId: string | null = null): Promise<number> {
+    return this.call('count_composition_uses', { fragmentIds, sessionId });
   }
 
   // ---- Practice statistics ----

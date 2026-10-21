@@ -422,7 +422,9 @@
     "defaults": {
       "fragmentTitle": "Fragmento sin título",
       "sessionTitle": "Sesión de práctica",
-      "pieceTitle": "Obra sin título"
+      "pieceTitle": "Obra sin título",
+      "compositionTitle": "Composición sin título",
+      "trackName": "Pista {n}"
     },
     "image": {
       "invalidBase64": "Imagen en base64 inválida: {e}",
@@ -511,7 +513,18 @@
       "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
       "tooLong": "La grabación es demasiado larga para un archivo WAV"
     },
-    "invalidDate": "Fecha no válida: {date}"
+    "invalidDate": "Fecha no válida: {date}",
+    "composition": {
+      "missing": "La composición '{id}' no existe",
+      "tooManyTracks": "Una composición puede tener como mucho {max} pistas",
+      "overlap": "Dos clips se solapan en la pista «{track}»",
+      "emptyClip": "Un clip de «{fragment}» está vacío",
+      "clipOutside": "El clip de «{fragment}» pasa del final del fragmento",
+      "repeats": "Un clip se repite entre 1 y {max} veces",
+      "transpose": "La transposición va de -{max} a +{max} semitonos",
+      "program": "Instrumento desconocido {program}",
+      "volume": "Volumen de pista no válido {volume}"
+    }
   },
   "export": {
     "wav": "Exportar WAV",
