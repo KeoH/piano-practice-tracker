@@ -17,7 +17,7 @@ Built with **Tauri v2** (Rust) and **Angular 22**. Works fully offline.
 
 ## Installation
 
-Download the latest `.deb` or `.AppImage` from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
+Download the latest `.deb` or `.AppImage` (Linux) or `.dmg` (macOS) from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
 
 ```bash
 sha256sum -c SHA256SUMS.txt --ignore-missing
@@ -37,6 +37,16 @@ Or run the AppImage directly:
 chmod +x Piano*Practice*Tracker*.AppImage
 ./Piano*Practice*Tracker*.AppImage
 ```
+
+### macOS
+
+Download the `.dmg` (a universal build for Apple Silicon and Intel, macOS 11 or later), open it and drag the app to *Applications*. The app is not notarized by Apple, so the first launch is blocked: open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
+```
+
+macOS has no system SoundFont, so choose a `.sf2` in **Settings** to get a realistic piano.
 
 ### Better piano sound
 

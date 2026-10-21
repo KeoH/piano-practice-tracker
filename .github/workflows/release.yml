@@ -39,21 +39,37 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
   bundle:
-    name: Installers
+    name: Installers (${{ matrix.name }})
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    # The oldest supported Ubuntu: the AppImage links against its glibc, so it runs on more distros.
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest supported Ubuntu: the AppImage links against its glibc, so it runs on more distros.
+          - name: Linux
+            os: ubuntu-22.04
+            rust-targets: ''
+            build-args: ''
+            installers: >-
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
+          # One universal .dmg (Apple Silicon + Intel); tauri.macos.conf.json sets the targets and ad-hoc signing.
+          - name: macOS
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build-args: --target universal-apple-darwin
+            installers: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+    runs-on: ${{ matrix.os }}
     permissions:
-      contents: write
-    env:
-      TAG: ${{ needs.release-please.outputs.tag_name }}
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.TAG }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - uses: ./.github/actions/setup-linux
+      - if: ${{ runner.os == 'Linux' }}
+        uses: ./.github/actions/setup-linux
 
       - uses: actions/setup-node@v7
         with:
@@ -61,6 +77,8 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -69,25 +87,51 @@ jobs:
 
       - run: npm ci
 
-      # beforeBuildCommand builds the frontend; tauri.conf.json targets deb + AppImage.
+      # beforeBuildCommand builds the frontend; the bundle targets come from the platform's tauri config.
       - name: Build installers
-        run: npm run tauri build
+        run: npm run tauri build -- ${{ matrix.build-args }}
 
-      - name: Upload to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # "Piano Practice Tracker_X.Y.Z_amd64.deb" -> "piano-practice-tracker_X.Y.Z_amd64.deb"
+      - name: Collect installers
         run: |
           out="$RUNNER_TEMP/installers"
           mkdir -p "$out"
           shopt -s nullglob
-          # "Piano Practice Tracker_X.Y.Z_amd64.deb" -> "piano-practice-tracker_X.Y.Z_amd64.deb"
-          for f in src-tauri/target/release/bundle/deb/*.deb src-tauri/target/release/bundle/appimage/*.AppImage; do
+          for f in ${{ matrix.installers }}; do
             name="$(basename "$f")"
             name="${name// /-}"
             cp "$f" "$out/${name/Piano-Practice-Tracker/piano-practice-tracker}"
           done
-          cd "$out"
-          ls -1 | grep -q . || { echo "No installers were built" >&2; exit 1; }
+          ls -1 "$out" | grep -q . || { echo "No installers were built" >&2; exit 1; }
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.name }}
+          path: ${{ runner.temp }}/installers
+          if-no-files-found: error
+
+  publish:
+    name: Upload installers
+    needs: [release-please, bundle]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          path: installers
+          merge-multiple: true
+
+      # A single SHA256SUMS.txt for every platform.
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: installers
+        run: |
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
           gh release upload "$TAG" * --clobber --repo "$GITHUB_REPOSITORY"

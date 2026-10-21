@@ -135,17 +135,25 @@ struct VaultMarker {
     created_at: String,
 }
 
+/// `gethostname(2)`: Linux has `/proc`, macOS doesn't.
 fn hostname() -> String {
-    ["/proc/sys/kernel/hostname", "/etc/hostname"]
-        .iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+    let mut buf = [0u8; 256];
+    // SAFETY: the buffer is valid for `buf.len()` bytes; the name is read up to the first NUL.
+    let ok = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0;
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    Some(String::from_utf8_lossy(&buf[..end]).trim().to_string())
+        .filter(|s| ok && !s.is_empty())
         .unwrap_or_else(|| "this computer".to_string())
 }
 
+/// `kill(pid, 0)` sends nothing, it only checks: `EPERM` means it exists but belongs to someone else.
 fn pid_alive(pid: u32) -> bool {
-    Path::new("/proc").join(pid.to_string()).exists()
+    let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
+    // pid 0 would address our own process group.
+    // SAFETY: signal 0 performs only the existence and permission checks.
+    pid > 0
+        && (unsafe { libc::kill(pid, 0) } == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
 }
 
 fn read_lock(path: &Path) -> Option<LockInfo> {
@@ -465,6 +473,13 @@ mod tests {
         let stale = LockInfo { host: hostname(), pid: u32::MAX - 1, opened_at: "x".into() };
         std::fs::write(paths.lock_file(), serde_json::to_string(&stale).unwrap()).unwrap();
         assert!(matches!(open_vault(&v, false).unwrap(), OpenOutcome::Opened(_)));
+    }
+
+    #[test]
+    fn lock_identity_of_this_process() {
+        assert_ne!(hostname(), "this computer");
+        assert!(pid_alive(std::process::id()));
+        assert!(!pid_alive(0));
     }
 
     #[test]
