@@ -7,12 +7,13 @@ const KEY_MARGIN = 2;
 /**
  * Small piano roll of a clip: the notes of the `[trimStart, trimStart + length)` window of a
  * fragment, repeated `repeats` times across the width, in the track's colour. Decorative: the
- * clip around it carries the accessible name.
+ * clip around it carries the accessible name. The parent sizes and positions it (`relative`
+ * with a height, or `absolute` with insets).
  */
 @Component({
   selector: 'app-clip-roll',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block relative', 'aria-hidden': 'true' },
+  host: { class: 'block', 'aria-hidden': 'true' },
   template: `<canvas #cv class="absolute inset-0 h-full w-full"></canvas>`,
 })
 export class ClipRollComponent {

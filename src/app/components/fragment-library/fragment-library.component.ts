@@ -82,7 +82,7 @@ interface LibraryGroup {
                 >
                   <app-icon name="grip" [size]="16" class="text-faint" />
                   <app-clip-roll
-                    class="h-[26px] rounded-md bg-ink-925"
+                    class="relative h-[26px] rounded-md bg-ink-925"
                     [notes]="store.notes()[f.file_path] ?? null"
                     [length]="f.duration_ms"
                     [rgb]="accent"
