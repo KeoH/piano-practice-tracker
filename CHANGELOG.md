@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.1...v0.5.2) (2026-10-22)
+
+
+### Bug Fixes
+
+* Fix error on tests for macOs ([e9d1504](https://github.com/KeoH/piano-practice-tracker/commit/e9d15040ea1899f23bb28c23c4098a30e9d8e8e2))
+* merge conflicts ([aaf5d5c](https://github.com/KeoH/piano-practice-tracker/commit/aaf5d5cf988b2d9db5c9635ed4bd1f06eab09e52))
+* More unit tests ([84fa122](https://github.com/KeoH/piano-practice-tracker/commit/84fa122ab6a1993b55a4d971e8ebd78f458e0ee8))
+* More unit tests ([0985920](https://github.com/KeoH/piano-practice-tracker/commit/09859201d413300dd492348831a89df5dcd84734))
+
 ## [0.5.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.0...v0.5.1) (2026-10-21)
 
 
