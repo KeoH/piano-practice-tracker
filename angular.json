@@ -101,7 +101,8 @@
             ],
             "coverageExclude": [
               "src/app/**/*.spec.ts",
-              "src/app/core/models.ts"
+              "src/app/core/models.ts",
+              "src/app/testing/**"
             ],
             "coverageReporters": [
               "text",

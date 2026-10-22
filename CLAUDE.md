@@ -15,6 +15,7 @@ npm run tauri build        # .deb / AppImage packages
 npm test                   # frontend tests (Vitest via `ng test`, watch mode in a TTY)
 npm run test:ci            # frontend tests once, with coverage in coverage/piano-tracker/
 npx ng test --include src/app/core/format.spec.ts  # a single spec file
+node scripts/screenshots/capture.mjs               # README screenshots (needs `npm start` running and Google Chrome)
 
 cd src-tauri
 cargo test --lib                                   # all Rust tests
@@ -25,7 +26,13 @@ cargo llvm-cov --lib --summary-only                # Rust coverage (needs `cargo
 cargo check
 ```
 
-Frontend specs are `*.spec.ts` next to the code (Vitest globals, jsdom; `TestBed` for services). So far they cover only pure code (`format`, `markdown`, `I18nService`). No linter is configured (there is a `.prettierrc`; clippy is not installed).
+Tests:
+- **Frontend specs** are `*.spec.ts` next to the code (Vitest globals, jsdom). Stores and components use `TestBed` with `mockApi()` from `src/app/testing/` (a recording `Proxy` of `TauriApiService`, provided with `mock.provider`) and the DTO builders in `testing/fixtures.ts`. That folder is excluded from the app build (`tsconfig.app.json`) and from coverage (`angular.json`).
+  - Zoneless: call `fixture.detectChanges()` after changing signals, and `await fixture.whenStable()` after async actions. With fake timers `whenStable()` never settles: advance the timers instead.
+  - jsdom has no canvas, so the canvas-heavy components (`timeline-canvas`, `midi-slicer`, `fragment-player`, `composer-timeline`) have no specs yet.
+- **`commands.rs` tests** build the real state with `tauri::test::mock_app()` (the `test` feature of `tauri` in `[dev-dependencies]`): `AppDirs` in a tempdir, `AudioEngine::new_headless` and a vault, then `block_on(command(fx.state(), …))`. The vault commands take `AppHandle<R: Runtime>` so they also run with `MockRuntime`.
+
+No linter is configured (there is a `.prettierrc`; clippy is not installed).
 
 Environment on this machine:
 - `src-tauri/.cargo/config.toml` limits cargo to `jobs = 4` and `Cargo.toml` strips debuginfo from dependencies: the machine was running out of RAM. Don't raise the parallelism or run several heavy builds at once.
