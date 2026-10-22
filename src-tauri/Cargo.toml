@@ -44,6 +44,8 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+# `tauri::test::mock_app` lets the command tests build a `State` and an `AppHandle`.
+tauri = { version = "2", features = ["protocol-asset", "test"] }
 
 # Less memory when compiling/linking: no debuginfo in dependencies and only line tables in the crate.
 [profile.dev]
