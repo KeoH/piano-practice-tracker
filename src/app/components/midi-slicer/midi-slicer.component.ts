@@ -11,38 +11,32 @@ import {
   viewChild,
 } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
+import { ExportService } from '../../core/export.service';
 import { clamp, formatMs, parseTime } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
-import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { MidiActivityDto, SessionDto } from '../../core/models';
+import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
+import type { MidiActivityDto, MidiNotesDto, SessionDto, TimeRangeDto } from '../../core/models';
+import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
+import { PiecePickerComponent, type PieceChoice } from '../piece-picker/piece-picker.component';
+import { RangeHandlesComponent } from '../range-handles/range-handles.component';
+import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
-import { TimelineCanvasComponent, type TimeRange } from '../timeline-canvas/timeline-canvas.component';
-
-type DragMode = 'start' | 'end' | 'move' | 'create';
-
-interface DragState {
-  mode: DragMode;
-  pointerId: number;
-  x0: number;
-  ms0: number;
-  sel0: TimeRange | null;
-  moved: boolean;
-}
-
-const MIN_SELECTION_MS = 100;
-const DRAG_THRESHOLD_PX = 4;
+import { MIN_SELECTION_MS, TimelineDrag } from '../../core/timeline-drag';
+import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
 
 /** Visual slicer for the session's raw take (selection, preview, extract and discard). */
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, RichTextComponent, TranslatePipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -50,7 +44,7 @@ export class MidiSlicerComponent {
   readonly fragmentCount = input(0);
 
   private readonly api = inject(TauriApiService);
-  private readonly store = inject(SessionStore);
+  protected readonly store = inject(SessionStore);
   protected readonly playback = inject(PlaybackStore);
   private readonly rec = inject(RecordingStore);
   private readonly toast = inject(ToastService);
@@ -59,30 +53,64 @@ export class MidiSlicerComponent {
 
   protected readonly formatMs = formatMs;
 
+  protected readonly prefs = inject(UiPrefsStore);
+  protected readonly exporter = inject(ExportService);
+  private readonly pieces = inject(PieceStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
+  protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly loading = signal(false);
-  protected readonly selection = signal<TimeRange | null>(null);
   protected readonly working = signal(false);
+
+  // Cut suggestions (only valid for the raw take they were computed on)
+  protected readonly suggestGapS = signal(3);
+  protected readonly suggesting = signal(false);
+  private readonly suggestionsState = signal<{ key: string; segments: TimeRangeDto[] } | null>(null);
 
   // Extraction modal
   protected readonly extractOpen = signal(false);
   protected readonly extractTitle = signal('');
   protected readonly extractExplanation = signal('');
+  protected readonly extractPiece = signal<PieceChoice>({ pieceId: null, passage: '' });
 
   private readonly track = viewChild.required<ElementRef<HTMLElement>>('track');
-  private drag: DragState | null = null;
+  protected readonly drag = new TimelineDrag({
+    track: () => this.track().nativeElement,
+    durationMs: () => this.durationMs(),
+    locked: () => this.locked(),
+    onSeek: (ms) => void this.playback.seek(this.rawPath(), ms),
+  });
+  protected readonly selection = this.drag.selection;
 
   protected readonly rawPath = computed(() => this.session().raw_midi_path ?? '');
   protected readonly durationMs = computed(
     () => this.activity()?.duration_ms || this.session().raw_duration_ms || 0,
   );
   protected readonly recordingHere = computed(() => this.rec.recordingSessionId() === this.session().id);
-  protected readonly locked = computed(() => this.recordingHere() || this.working());
+  protected readonly locked = computed(() => this.recordingHere() || this.working() || this.store.undoing());
   protected readonly position = computed(() => this.playback.positionFor(this.rawPath()));
   protected readonly isPlaying = computed(() => this.playback.isPlaying(this.rawPath()));
   protected readonly showPlayhead = computed(
     () => this.playback.progress()?.file_path === this.rawPath() || this.position() > 0,
   );
+  private readonly rawKey = computed(() => `${this.session().raw_midi_path ?? ''}|${this.session().raw_duration_ms}`);
+  protected readonly suggestions = computed(() => {
+    const s = this.suggestionsState();
+    return s && s.key === this.rawKey() ? s.segments : null;
+  });
+  /** Silences between the suggested passages (and before the first / after the last). */
+  protected readonly silences = computed<TimeRangeDto[]>(() => {
+    const segs = this.suggestions();
+    const dur = this.durationMs();
+    if (!segs || !segs.length) return [];
+    const bounds = [0, ...segs.flatMap((s) => [s.start_ms, s.end_ms]), dur];
+    const out: TimeRangeDto[] = [];
+    for (let i = 0; i < bounds.length; i += 2) {
+      if (bounds[i + 1] - bounds[i] >= MIN_SELECTION_MS) out.push({ start_ms: bounds[i], end_ms: bounds[i + 1] });
+    }
+    return out;
+  });
+  protected readonly silenceMs = computed(() => this.silences().reduce((t, s) => t + s.end_ms - s.start_ms, 0));
+
   protected readonly validSelection = computed(() => {
     const s = this.selection();
     return !!s && s.end - s.start >= MIN_SELECTION_MS && s.start >= 0 && s.end <= this.durationMs() + 1;
@@ -90,9 +118,8 @@ export class MidiSlicerComponent {
 
   constructor() {
     // Reloads the activity when the raw take's path or duration changes
-    const rawKey = computed(() => `${this.session().raw_midi_path ?? ''}|${this.session().raw_duration_ms}`);
     effect(() => {
-      rawKey();
+      this.rawKey();
       untracked(() => void this.loadActivity(this.session().raw_midi_path, this.session().raw_duration_ms));
     });
   }
@@ -100,12 +127,16 @@ export class MidiSlicerComponent {
   private async loadActivity(path: string | null, _dur: number): Promise<void> {
     if (!path) {
       this.activity.set(null);
+      this.notes.set(null);
       return;
     }
     this.loading.set(true);
     try {
-      const a = await this.api.getMidiActivity(path);
-      if (this.session().raw_midi_path === path) this.activity.set(a);
+      const [a, n] = await Promise.all([this.api.getMidiActivity(path), this.api.getMidiNotes(path)]);
+      if (this.session().raw_midi_path === path) {
+        this.activity.set(a);
+        this.notes.set(n);
+      }
       // Fits the selection to the new duration
       const sel = this.selection();
       if (sel && sel.end > a.duration_ms) this.selection.set(null);
@@ -125,109 +156,15 @@ export class MidiSlicerComponent {
     return d > 0 ? clamp((ms / d) * 100, 0, 100) : 0;
   }
 
-  private msAt(clientX: number): number {
-    const r = this.track().nativeElement.getBoundingClientRect();
-    const d = this.durationMs();
-    if (r.width <= 0 || d <= 0) return 0;
-    return Math.round(clamp((clientX - r.left) / r.width, 0, 1) * d);
-  }
-
-  // ---- Pointer interaction ----
-  protected onHandleDown(ev: PointerEvent, mode: 'start' | 'end'): void {
-    if (ev.button !== 0 || this.locked()) return;
-    ev.stopPropagation();
-    ev.preventDefault();
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    this.drag = { mode, pointerId: ev.pointerId, x0: ev.clientX, ms0: this.msAt(ev.clientX), sel0: this.selection(), moved: true };
-  }
-
-  protected onTrackDown(ev: PointerEvent): void {
-    if (ev.button !== 0 || this.durationMs() <= 0) return;
-    ev.preventDefault();
-    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
-    const ms = this.msAt(ev.clientX);
-    const sel = this.selection();
-    const inside = !!sel && ms >= sel.start && ms <= sel.end;
-    this.drag = { mode: inside ? 'move' : 'create', pointerId: ev.pointerId, x0: ev.clientX, ms0: ms, sel0: sel, moved: false };
-  }
-
-  protected onPointerMove(ev: PointerEvent): void {
-    const d = this.drag;
-    if (!d || d.pointerId !== ev.pointerId) return;
-    if (!d.moved) {
-      if (Math.abs(ev.clientX - d.x0) < DRAG_THRESHOLD_PX || this.locked()) return;
-      d.moved = true;
-    }
-    const ms = this.msAt(ev.clientX);
-    const dur = this.durationMs();
-    const sel = this.selection();
-    switch (d.mode) {
-      case 'start':
-        if (sel) this.selection.set({ start: clamp(ms, 0, sel.end - MIN_SELECTION_MS), end: sel.end });
-        break;
-      case 'end':
-        if (sel) this.selection.set({ start: sel.start, end: clamp(ms, sel.start + MIN_SELECTION_MS, dur) });
-        break;
-      case 'move':
-        if (d.sel0) {
-          const len = d.sel0.end - d.sel0.start;
-          const start = clamp(d.sel0.start + (ms - d.ms0), 0, Math.max(0, dur - len));
-          this.selection.set({ start, end: start + len });
-        }
-        break;
-      case 'create':
-        this.selection.set({ start: Math.min(d.ms0, ms), end: Math.max(d.ms0, ms) });
-        break;
-    }
-  }
-
-  protected onPointerUp(ev: PointerEvent): void {
-    const d = this.drag;
-    if (!d || d.pointerId !== ev.pointerId) return;
-    this.drag = null;
-    if (!d.moved) {
-      // Single click = seek
-      void this.playback.seek(this.rawPath(), this.msAt(ev.clientX));
-      return;
-    }
-    const sel = this.selection();
-    if (sel && sel.end - sel.start < MIN_SELECTION_MS) this.selection.set(d.mode === 'create' ? null : d.sel0);
-  }
-
-  protected onHandleKey(ev: KeyboardEvent, which: 'start' | 'end'): void {
-    const sel = this.selection();
-    if (!sel || this.locked()) return;
-    const step = ev.shiftKey ? 1000 : 100;
-    let delta = 0;
-    if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') delta = -step;
-    else if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') delta = step;
-    else return;
-    ev.preventDefault();
-    if (which === 'start') this.setStart(sel.start + delta);
-    else this.setEnd(sel.end + delta);
-  }
-
   // ---- Inputs mm:ss ----
-  private setStart(ms: number): void {
-    const dur = this.durationMs();
-    const sel = this.selection() ?? { start: 0, end: dur };
-    this.selection.set({ start: clamp(ms, 0, Math.max(0, sel.end - MIN_SELECTION_MS)), end: sel.end });
-  }
-
-  private setEnd(ms: number): void {
-    const dur = this.durationMs();
-    const sel = this.selection() ?? { start: 0, end: dur };
-    this.selection.set({ start: sel.start, end: clamp(ms, sel.start + MIN_SELECTION_MS, dur) });
-  }
-
   protected onTimeInput(el: HTMLInputElement, which: 'start' | 'end'): void {
     const ms = parseTime(el.value);
     if (ms === null) {
       this.toast.warning(this.i18n.t('slicer.invalidTime'));
     } else if (which === 'start') {
-      this.setStart(ms);
+      this.drag.setStart(ms);
     } else {
-      this.setEnd(ms);
+      this.drag.setEnd(ms);
     }
     const sel = this.selection();
     el.value = sel ? formatMs(which === 'start' ? sel.start : sel.end, true) : '';
@@ -274,6 +211,9 @@ export class MidiSlicerComponent {
     }
     this.extractTitle.set(this.i18n.t('slicer.defaultFragmentTitle', { n: this.fragmentCount() + 1 }));
     this.extractExplanation.set('');
+    // Usually the same piece as the previous fragment of the session (a new passage, though).
+    const last = [...this.store.fragments()].reverse().find((f) => f.piece_id);
+    this.extractPiece.set({ pieceId: last?.piece_id ?? null, passage: '' });
     this.extractOpen.set(true);
   }
 
@@ -294,12 +234,15 @@ export class MidiSlicerComponent {
         end_ms: Math.round(sel.end),
         title,
         explanation: this.extractExplanation().trim(),
+        piece_id: this.extractPiece().pieceId,
+        passage: this.extractPiece().passage,
       });
       this.extractOpen.set(false);
       this.selection.set(null);
       this.store.applySession(res.session);
       await this.store.reloadDetail();
       void this.store.refreshList();
+      if (res.fragment.piece_id) void this.pieces.refreshList();
       this.toast.success(
         this.i18n.t('slicer.extracted', { title: res.fragment.title, duration: formatMs(res.fragment.duration_ms) }),
       );
@@ -308,6 +251,69 @@ export class MidiSlicerComponent {
     } finally {
       this.working.set(false);
     }
+  }
+
+  // ---- Cut suggestions ----
+  protected async suggest(): Promise<void> {
+    const path = this.rawPath();
+    if (!path || this.suggesting()) return;
+    const key = this.rawKey();
+    this.suggesting.set(true);
+    try {
+      const segments = await this.api.suggestMidiSegments(path, this.suggestGapS() * 1000);
+      if (this.rawKey() === key) this.suggestionsState.set({ key, segments });
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('slicer.errors.suggest'));
+    } finally {
+      this.suggesting.set(false);
+    }
+  }
+
+  protected setSuggestGap(seconds: number): void {
+    this.suggestGapS.set(seconds);
+    void this.suggest();
+  }
+
+  protected closeSuggestions(): void {
+    this.suggestionsState.set(null);
+  }
+
+  protected pickSegment(s: TimeRangeDto): void {
+    if (this.locked()) return;
+    this.selection.set({ start: s.start_ms, end: s.end_ms });
+  }
+
+  protected async discardSilences(): Promise<void> {
+    const silences = this.silences();
+    if (!silences.length) return;
+    const ok = await this.confirm.ask({
+      title: this.i18n.t('slicer.suggest.discardTitle'),
+      message: this.i18n.plural('slicer.suggest.discardMessage', silences.length, {
+        duration: formatMs(this.silenceMs(), true),
+      }),
+      confirmLabel: this.i18n.t('slicer.discardConfirm'),
+    });
+    if (!ok) return;
+    this.working.set(true);
+    try {
+      await this.playback.stopIfActive(this.rawPath());
+      const s = await this.api.discardMidiRanges(this.session().id, silences);
+      this.selection.set(null);
+      this.store.applySession(s);
+      await this.store.reloadDetail();
+      void this.store.refreshList();
+      this.toast.success(this.i18n.plural('slicer.suggest.discarded', silences.length));
+    } catch (err) {
+      this.toast.error(err, this.i18n.t('slicer.errors.discard'));
+    } finally {
+      this.working.set(false);
+    }
+    // The passages are now back to back: suggest them again on the new take.
+    await this.suggest();
+  }
+
+  protected async undo(): Promise<void> {
+    if (await this.store.undoTrim()) this.selection.set(null);
   }
 
   protected async discard(): Promise<void> {

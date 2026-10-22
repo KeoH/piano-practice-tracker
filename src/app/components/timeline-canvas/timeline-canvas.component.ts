@@ -12,12 +12,9 @@ import {
 } from '@angular/core';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
-import type { ActivityBlock } from '../../core/models';
-
-export interface TimeRange {
-  start: number;
-  end: number;
-}
+import type { ActivityBlock, MidiNotesDto } from '../../core/models';
+import type { TimeRange } from '../../core/timeline-drag';
+import type { TimelineMode } from '../../core/ui-prefs.store';
 
 const TICK_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
 /** Height of the time ruler below the track (the parent's overlays use `bottom-[18px]`). */
@@ -27,12 +24,37 @@ const TRACK_BG = '#0e0e11';
 const ACCENT_RGB = '233, 180, 76';
 /** Bars of the section already played. */
 const PLAYED_RGB = '207, 205, 213';
+/** Piano roll: keys of margin above and below the notes played, and the pedal strip. */
+const ROLL_KEY_MARGIN = 2;
+const ROLL_PAD_Y = 6;
+const PEDAL_H = 4;
+
+interface RollGeometry {
+  hi: number;
+  top: number;
+  rowH: number;
+  /** Top of the pedal strip (null if the file has no pedal). */
+  pedalY: number | null;
+}
+
+function rollGeometry(notes: MidiNotesDto, trackH: number): RollGeometry {
+  const lo = Math.max(0, notes.min_key - ROLL_KEY_MARGIN);
+  const hi = Math.min(127, notes.max_key + ROLL_KEY_MARGIN);
+  const hasPedal = notes.pedal.length > 0;
+  const pedalY = hasPedal ? trackH - ROLL_PAD_Y - PEDAL_H : null;
+  const bottom = hasPedal ? trackH - ROLL_PAD_Y - PEDAL_H - 4 : trackH - ROLL_PAD_Y;
+  return { hi, top: ROLL_PAD_Y, rowH: Math.max(0.5, (bottom - ROLL_PAD_Y) / (hi - lo + 1)), pedalY };
+}
 
 /**
- * MIDI activity canvas: bars per block (height ∝ number of notes, opacity ∝ velocity), time ruler,
- * selected range (brass bars) and the section already played (light bars). It scales by
- * devicePixelRatio and redraws with ResizeObserver. The playhead, handles and pins are overlaid in
- * the DOM by the parent.
+ * MIDI timeline canvas, in one of two modes:
+ * - `roll`: piano roll (a rectangle per note, opacity ∝ velocity) with the sustain pedal strip;
+ * - `activity`: bars per block (height ∝ number of notes, opacity ∝ velocity). It is also the
+ *   fallback while the notes load or if the file has none.
+ * Plus the time ruler, the selected range (in brass) and the section already played (lighter).
+ * It scales by devicePixelRatio and redraws with ResizeObserver. The notes are drawn once per
+ * colour into cached layers, so a progress frame only blits them. The playhead, handles and pins
+ * are overlaid in the DOM by the parent.
  */
 @Component({
   selector: 'app-timeline-canvas',
@@ -42,6 +64,8 @@ const PLAYED_RGB = '207, 205, 213';
 })
 export class TimelineCanvasComponent {
   readonly blocks = input<ActivityBlock[]>([]);
+  readonly notes = input<MidiNotesDto | null>(null);
+  readonly mode = input<TimelineMode>('activity');
   readonly durationMs = input(0);
   readonly selection = input<TimeRange | null>(null);
   readonly height = input(96);
@@ -55,6 +79,8 @@ export class TimelineCanvasComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly i18n = inject(I18nService);
   private readonly size = signal({ w: 0, h: 0, dpr: 1 });
+  /** Note layers per colour, valid while the notes and the size don't change. */
+  private rollCache: { notes: MidiNotesDto; w: number; h: number; dpr: number; layers: Map<string, HTMLCanvasElement> } | null = null;
 
   constructor() {
     const destroyRef = inject(DestroyRef);
@@ -81,6 +107,8 @@ export class TimelineCanvasComponent {
     const showRuler = this.showRuler();
     const rgb = this.barRgb();
     const progress = this.progressMs();
+    const notes = this.notes();
+    const roll = this.mode() === 'roll' && !!notes && notes.notes.length > 0 ? notes : null;
     // Read here so the effect redraws when the language changes.
     const emptyLabel = this.i18n.t('timeline.noActivity');
     if (w <= 0 || h <= 0) return;
@@ -100,17 +128,36 @@ export class TimelineCanvasComponent {
     const rulerH = showRuler ? RULER_H : 0;
     const trackH = h - rulerH;
 
-    // Track background and centre line
+    const xOf = (ms: number) => (duration > 0 ? (ms / duration) * w : 0);
+
+    // Track background, and the centre line (bars) or a line under each C and the pedal (roll)
     ctx.fillStyle = TRACK_BG;
     ctx.fillRect(0, 0, w, trackH);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, Math.round(trackH / 2) + 0.5);
-    ctx.lineTo(w, Math.round(trackH / 2) + 0.5);
-    ctx.stroke();
-
-    const xOf = (ms: number) => (duration > 0 ? (ms / duration) * w : 0);
+    if (roll) {
+      const g = rollGeometry(roll, trackH);
+      const lo = Math.max(0, roll.min_key - ROLL_KEY_MARGIN);
+      for (let key = lo; key <= g.hi; key++) {
+        if (key % 12 !== 0) continue;
+        const y = Math.round(g.top + (g.hi - key + 1) * g.rowH) + 0.5;
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+      }
+      ctx.stroke();
+      if (g.pedalY !== null && duration > 0) {
+        ctx.fillStyle = `rgba(${ACCENT_RGB}, 0.35)`;
+        for (const p of roll.pedal) {
+          const x0 = xOf(p.start_ms);
+          ctx.fillRect(x0, g.pedalY, Math.max(1, xOf(p.end_ms) - x0), PEDAL_H);
+        }
+      }
+    } else {
+      ctx.moveTo(0, Math.round(trackH / 2) + 0.5);
+      ctx.lineTo(w, Math.round(trackH / 2) + 0.5);
+      ctx.stroke();
+    }
 
     // Time grid
     let stepS = TICK_STEPS_S[TICK_STEPS_S.length - 1];
@@ -153,9 +200,15 @@ export class TimelineCanvasComponent {
       paint();
       ctx.restore();
     };
-    if (hasBars) {
-      drawBars(rgb);
-      if (progress !== null && progress > 0) clipped(0, xOf(progress), () => drawBars(PLAYED_RGB));
+    const paint: ((color: string) => void) | null =
+      roll && duration > 0
+        ? (color) => ctx.drawImage(this.rollLayer(roll, color, w, trackH, dpr, duration), 0, 0, w, trackH)
+        : hasBars
+          ? drawBars
+          : null;
+    if (paint) {
+      paint(rgb);
+      if (progress !== null && progress > 0) clipped(0, xOf(progress), () => paint(PLAYED_RGB));
     } else if (duration > 0) {
       ctx.fillStyle = 'rgba(169, 167, 176, 0.7)';
       ctx.font = '12px "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif';
@@ -173,7 +226,7 @@ export class TimelineCanvasComponent {
       ctx.fillRect(sx1, 0, w - sx1, trackH);
       ctx.fillStyle = `rgba(${ACCENT_RGB}, 0.13)`;
       ctx.fillRect(sx0, 0, sx1 - sx0, trackH);
-      if (hasBars) clipped(sx0, sx1, () => drawBars(ACCENT_RGB));
+      if (paint) clipped(sx0, sx1, () => paint(ACCENT_RGB));
     }
 
     // Ruler
@@ -202,5 +255,43 @@ export class TimelineCanvasComponent {
       }
       ctx.stroke();
     }
+  }
+
+  /** Layer with every note in `color` (rgb), drawn once and reused while nothing changes. */
+  private rollLayer(notes: MidiNotesDto, color: string, w: number, trackH: number, dpr: number, duration: number): HTMLCanvasElement {
+    const c = this.rollCache;
+    if (!c || c.notes !== notes || c.w !== w || c.h !== trackH || c.dpr !== dpr) {
+      this.rollCache = { notes, w, h: trackH, dpr, layers: new Map() };
+    }
+    const layers = this.rollCache!.layers;
+    const cached = layers.get(color);
+    if (cached) return cached;
+
+    const layer = document.createElement('canvas');
+    layer.width = Math.round(w * dpr);
+    layer.height = Math.round(trackH * dpr);
+    const lctx = layer.getContext('2d');
+    if (lctx) {
+      lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const g = rollGeometry(notes, trackH);
+      const noteH = Math.max(1.5, g.rowH - (g.rowH > 3 ? 1 : 0));
+      // One path per velocity band: four fills instead of one per note.
+      const bands: number[][] = [[], [], [], []];
+      notes.notes.forEach((n, i) => bands[Math.min(3, n.velocity >> 5)].push(i));
+      bands.forEach((band, b) => {
+        if (!band.length) return;
+        lctx.fillStyle = `rgba(${color}, ${(0.45 + (0.55 * (b + 1)) / 4).toFixed(3)})`;
+        lctx.beginPath();
+        for (const i of band) {
+          const n = notes.notes[i];
+          const x0 = (n.start_ms / duration) * w;
+          const x1 = Math.max(x0 + 1.5, (n.end_ms / duration) * w);
+          lctx.rect(x0, g.top + (g.hi - n.key) * g.rowH, x1 - x0, noteH);
+        }
+        lctx.fill();
+      });
+    }
+    layers.set(color, layer);
+    return layer;
   }
 }

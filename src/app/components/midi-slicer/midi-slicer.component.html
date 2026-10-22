@@ -10,22 +10,67 @@
     }
     <span class="flex-1"></span>
     <span class="text-[13px] text-muted">{{ 'slicer.help' | t }}</span>
+    <button
+      type="button"
+      class="btn h-9 text-fg-soft"
+      [title]="'slicer.suggest.hint' | t"
+      [disabled]="!rawPath() || durationMs() <= 0 || suggesting() || locked()"
+      (click)="suggest()"
+    >
+      <app-icon name="wand" [size]="15" /> {{ 'slicer.suggest.button' | t }}
+    </button>
+    <app-timeline-mode-toggle />
+    <button
+      type="button"
+      class="btn btn-ghost btn-icon h-9 w-9"
+      [attr.aria-label]="'export.wav' | t"
+      [title]="'export.wavHint' | t"
+      [disabled]="!rawPath() || durationMs() <= 0 || exporter.isBusy(rawPath()) || recordingHere()"
+      (click)="exporter.exportWav(rawPath(), session().title)"
+    >
+      <app-icon name="download" [size]="17" [class.animate-pulse]="exporter.isBusy(rawPath())" />
+    </button>
     <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="reload()" [attr.aria-label]="'slicer.reanalyze' | t" [title]="'slicer.reanalyze' | t">
       <app-icon name="refresh" [size]="17" [class.animate-spin]="loading()" />
     </button>
   </header>
 
   <div class="px-6 pt-4 pb-6">
+    @if (suggestions(); as segs) {
+      <!-- Suggested passages: click to select -->
+      <div class="relative mb-1.5 h-7" role="group" [attr.aria-label]="'slicer.suggest.button' | t">
+        @for (s of segs; track s.start_ms; let n = $index) {
+          <button
+            type="button"
+            class="tabular absolute top-0 flex h-7 items-center justify-center overflow-hidden rounded-md border border-dashed border-ivory/35 bg-ivory/5 px-1.5 text-[11.5px] text-fg-soft transition-colors hover:border-accent hover:bg-accent/15 hover:text-accent"
+            [style.left.%]="pct(s.start_ms)"
+            [style.width.%]="pct(s.end_ms) - pct(s.start_ms)"
+            [attr.aria-label]="'slicer.suggest.segment' | t: { n: n + 1, start: formatMs(s.start_ms), end: formatMs(s.end_ms) }"
+            [title]="'slicer.suggest.segment' | t: { n: n + 1, start: formatMs(s.start_ms), end: formatMs(s.end_ms) }"
+            [disabled]="locked()"
+            (click)="pickSegment(s)"
+          >{{ n + 1 }}</button>
+        }
+      </div>
+    }
+
     <!-- Timeline -->
     <div
       #track
       class="relative cursor-crosshair touch-none overflow-hidden rounded-xl border border-line select-none"
-      (pointerdown)="onTrackDown($event)"
-      (pointermove)="onPointerMove($event)"
-      (pointerup)="onPointerUp($event)"
-      (pointercancel)="onPointerUp($event)"
+      (pointerdown)="drag.trackDown($event)"
+      (pointermove)="drag.move($event)"
+      (pointerup)="drag.up($event)"
+      (pointercancel)="drag.up($event)"
     >
-      <app-timeline-canvas [blocks]="activity()?.blocks ?? []" [durationMs]="durationMs()" [selection]="selection()" [height]="152" />
+      <app-timeline-canvas
+        [blocks]="activity()?.blocks ?? []"
+        [notes]="notes()"
+        [mode]="prefs.timelineMode()"
+        [durationMs]="durationMs()"
+        [selection]="selection()"
+        [height]="152"
+      />
 
       @if (selection(); as sel) {
         <!-- Selection duration -->
@@ -35,39 +80,21 @@
             [style.left.%]="(pct(sel.start) + pct(sel.end)) / 2"
           >{{ formatMs(sel.end - sel.start, true) }}</span>
         }
-        <!-- Start/end handles -->
+        <app-range-handles
+          [range]="sel"
+          [durationMs]="durationMs()"
+          [drag]="drag"
+          [startLabel]="'slicer.selectionStart' | t"
+          [endLabel]="'slicer.selectionEnd' | t"
+        />
+      }
+
+      @for (s of suggestions() ?? []; track s.start_ms) {
         <div
-          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
-          [style.left.%]="pct(sel.start)"
-          role="slider"
-          tabindex="0"
-          [attr.aria-label]="'slicer.selectionStart' | t"
-          [attr.aria-valuemin]="0"
-          [attr.aria-valuemax]="sel.end"
-          [attr.aria-valuenow]="sel.start"
-          [attr.aria-valuetext]="formatMs(sel.start, true)"
-          (pointerdown)="onHandleDown($event, 'start')"
-          (keydown)="onHandleKey($event, 'start')"
-        >
-          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
-          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
-        </div>
-        <div
-          class="group absolute top-0 bottom-[18px] z-10 -ml-[7px] flex w-[14px] cursor-ew-resize items-center justify-center"
-          [style.left.%]="pct(sel.end)"
-          role="slider"
-          tabindex="0"
-          [attr.aria-label]="'slicer.selectionEnd' | t"
-          [attr.aria-valuemin]="sel.start"
-          [attr.aria-valuemax]="durationMs()"
-          [attr.aria-valuenow]="sel.end"
-          [attr.aria-valuetext]="formatMs(sel.end, true)"
-          (pointerdown)="onHandleDown($event, 'end')"
-          (keydown)="onHandleKey($event, 'end')"
-        >
-          <span class="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-accent"></span>
-          <span class="relative h-11 w-[14px] rounded-[7px] border-2 border-ink-925 bg-accent group-hover:bg-accent-hover group-focus-visible:bg-ivory"></span>
-        </div>
+          class="pointer-events-none absolute top-1 bottom-[22px] rounded-md border border-dashed border-ivory/25"
+          [style.left.%]="pct(s.start_ms)"
+          [style.width.%]="pct(s.end_ms) - pct(s.start_ms)"
+        ></div>
       }
 
       @if (showPlayhead()) {
@@ -76,6 +103,37 @@
         </div>
       }
     </div>
+
+    @if (suggestions(); as segs) {
+      <div class="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-line bg-ink-850 px-4 py-2.5 text-[13px]" role="status">
+        <span class="inline-flex items-center gap-2 text-fg">
+          <app-icon name="wand" [size]="15" class="text-accent" />{{ 'slicer.suggest.found' | tp: segs.length }}
+        </span>
+        <label class="inline-flex items-center gap-2 text-muted">
+          {{ 'slicer.suggest.minGap' | t }}
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="0.5"
+            class="w-28 accent-accent"
+            [value]="suggestGapS()"
+            (change)="setSuggestGap(+$any($event.target).value)"
+          />
+          <span class="tabular w-10 text-fg-soft">{{ suggestGapS() }} s</span>
+        </label>
+        <span class="ml-auto flex items-center gap-1.5">
+          @if (silences().length) {
+            <button type="button" class="btn btn-danger h-9" (click)="discardSilences()" [disabled]="locked()">
+              <app-icon name="trash" [size]="15" /> {{ 'slicer.suggest.discard' | t: { duration: formatMs(silenceMs(), true) } }}
+            </button>
+          }
+          <button type="button" class="btn btn-ghost btn-icon h-9 w-9" (click)="closeSuggestions()" [attr.aria-label]="'slicer.suggest.close' | t" [title]="'slicer.suggest.close' | t">
+            <app-icon name="close" [size]="16" />
+          </button>
+        </span>
+      </div>
+    }
 
     <!-- Controls -->
     <div class="mt-5 flex flex-wrap items-center gap-x-7 gap-y-4">
@@ -96,6 +154,7 @@
         <span class="tabular ml-1.5 text-[15px]" [attr.aria-label]="'player.position' | t">
           <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
         </span>
+        <app-rate-select class="ml-3" />
       </div>
 
       <div class="flex flex-wrap items-end gap-2.5">
@@ -121,6 +180,18 @@
       </div>
 
       <div class="ml-auto flex flex-wrap gap-2.5">
+        <button
+          type="button"
+          class="btn btn-ghost btn-lg text-fg-soft"
+          (click)="undo()"
+          [disabled]="store.undoDepth() === 0 || locked()"
+          [title]="'slicer.undoHint' | t"
+        >
+          <app-icon name="undo" [size]="16" /> {{ 'slicer.undo' | t }}
+          @if (store.undoDepth() > 0) {
+            <span class="tabular text-xs text-faint">{{ store.undoDepth() }}</span>
+          }
+        </button>
         <button type="button" class="btn btn-danger btn-lg" (click)="discard()" [disabled]="!validSelection() || locked()">
           <app-icon name="trash" [size]="16" /> {{ 'slicer.discard' | t }}
         </button>
@@ -161,6 +232,11 @@
           <label for="frag-title" class="label">{{ 'fragments.titleLabel' | t }}</label>
           <input id="frag-title" class="field" autofocus [value]="extractTitle()" (input)="extractTitle.set($any($event.target).value)" />
         </div>
+        <app-piece-picker
+          [pieceId]="extractPiece().pieceId"
+          [passage]="extractPiece().passage"
+          (changed)="extractPiece.set($event)"
+        />
         <div>
           <label for="frag-expl" class="label">{{ 'fragments.explanationLabel' | t }} <span class="font-normal text-faint">{{ 'common.optional' | t }}</span></label>
           <textarea id="frag-expl" class="field min-h-24 resize-y" [placeholder]="'fragments.explanationPlaceholder' | t"

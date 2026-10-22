@@ -2616,11 +2616,12 @@ dependencies = [
 
 [[package]]
 name = "piano-tracker"
-version = "0.3.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "cpal",
+ "libc",
  "log",
  "midir",
  "midly",

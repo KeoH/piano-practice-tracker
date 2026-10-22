@@ -11,17 +11,26 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { CompositionStore } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
+import { ExportService } from '../../core/export.service';
 import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { FragmentDto, MidiActivityDto, TimelineCommentDto } from '../../core/models';
+import type { FragmentDto, MidiActivityDto, MidiNotesDto, TimelineCommentDto } from '../../core/models';
+import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
+import { TimelineDrag } from '../../core/timeline-drag';
 import { ToastService } from '../../core/toast.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { IconComponent } from '../icon/icon.component';
+import { PiecePickerComponent, type PieceChoice } from '../piece-picker/piece-picker.component';
+import { RangeHandlesComponent } from '../range-handles/range-handles.component';
+import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
 
 /** How long a comment's automatic popup stays visible. */
 const AUTO_POPUP_MS = 2500;
@@ -34,7 +43,7 @@ const LANDING_WINDOW_MS = 350;
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TimelineCanvasComponent, TranslatePipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
   templateUrl: './fragment-player.component.html',
 })
 export class FragmentPlayerComponent {
@@ -51,7 +60,12 @@ export class FragmentPlayerComponent {
   protected readonly formatMs = formatMs;
 
   protected readonly expanded = signal(false);
+  protected readonly prefs = inject(UiPrefsStore);
+  protected readonly exporter = inject(ExportService);
+  private readonly pieces = inject(PieceStore);
+  private readonly compositions = inject(CompositionStore);
   protected readonly activity = signal<MidiActivityDto | null>(null);
+  protected readonly notes = signal<MidiNotesDto | null>(null);
   protected readonly activityLoading = signal(false);
   protected readonly titleDraft = signal('');
   protected readonly explanationDraft = signal('');
@@ -78,6 +92,18 @@ export class FragmentPlayerComponent {
   protected readonly popup = computed(() => this.hoverComment() ?? this.autoComment());
   /** Two-digit order number ("01"). */
   protected readonly number = computed(() => String(this.index() + 1).padStart(2, '0'));
+  protected readonly piece = computed(() => this.pieces.byId(this.fragment().piece_id));
+  /** A-B loop of this fragment (while it is on, dragging on the timeline edits it). */
+  protected readonly loop = computed(() => this.playback.loopFor(this.file()));
+  protected readonly loopDrag = new TimelineDrag({
+    track: () => this.timeline()?.nativeElement,
+    durationMs: () => this.durationMs(),
+    locked: () => false,
+    onSeek: (ms) => void this.playback.seek(this.file(), ms),
+    onCommit: (sel) => {
+      if (sel) void this.playback.setLoop(this.file(), sel.start, sel.end);
+    },
+  });
 
   constructor() {
     // Title/explanation drafts kept in sync with the DTO
@@ -97,6 +123,12 @@ export class FragmentPlayerComponent {
       const open = this.expanded();
       const path = this.file();
       if (open && path !== this.loadedPath) untracked(() => void this.loadActivity(path));
+    });
+
+    // The handles follow the loop (also when it is dropped because another file plays)
+    effect(() => {
+      const l = this.loop();
+      untracked(() => this.loopDrag.selection.set(l ? { start: l.start, end: l.end } : null));
     });
 
     // Expands automatically when this fragment starts playing
@@ -149,8 +181,11 @@ export class FragmentPlayerComponent {
     this.loadedPath = path;
     this.activityLoading.set(true);
     try {
-      const a = await this.api.getMidiActivity(path);
-      if (this.file() === path) this.activity.set(a);
+      const [a, n] = await Promise.all([this.api.getMidiActivity(path), this.api.getMidiNotes(path)]);
+      if (this.file() === path) {
+        this.activity.set(a);
+        this.notes.set(n);
+      }
     } catch (err) {
       this.loadedPath = null;
       this.toast.error(err, this.i18n.t('fragments.errors.analyze'));
@@ -183,6 +218,19 @@ export class FragmentPlayerComponent {
     void this.playback.stop(this.file());
   }
 
+  /** Turns the loop on (over the whole fragment, to narrow it by dragging) or off. */
+  protected async toggleLoop(): Promise<void> {
+    const f = this.file();
+    if (this.loop()) {
+      await this.playback.clearLoop(f);
+      return;
+    }
+    const d = this.durationMs();
+    if (d <= 0) return;
+    await this.playback.setLoop(f, 0, d);
+    if (!this.isPlaying()) await this.playback.play(f, this.playback.positionFor(f));
+  }
+
   // ---- Scrub / seek on the timeline ----
   private msAt(clientX: number): number {
     const el = this.timeline()?.nativeElement;
@@ -193,6 +241,10 @@ export class FragmentPlayerComponent {
   }
 
   protected onTimelineDown(ev: PointerEvent): void {
+    if (this.loop()) {
+      this.loopDrag.trackDown(ev);
+      return;
+    }
     if (ev.button !== 0 || this.durationMs() <= 0) return;
     ev.preventDefault();
     (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
@@ -201,11 +253,19 @@ export class FragmentPlayerComponent {
   }
 
   protected onTimelineMove(ev: PointerEvent): void {
+    if (this.loop()) {
+      this.loopDrag.move(ev);
+      return;
+    }
     if (this.scrubPointer !== ev.pointerId) return;
     this.scrubMs.set(this.msAt(ev.clientX));
   }
 
   protected onTimelineUp(ev: PointerEvent): void {
+    if (this.loop()) {
+      this.loopDrag.up(ev);
+      return;
+    }
     if (this.scrubPointer !== ev.pointerId) return;
     this.scrubPointer = null;
     const ms = this.msAt(ev.clientX);
@@ -281,11 +341,18 @@ export class FragmentPlayerComponent {
     }
   }
 
+  protected async assignPiece(choice: PieceChoice): Promise<void> {
+    const f = this.fragment();
+    if (choice.pieceId === f.piece_id && choice.passage === f.passage) return;
+    await this.pieces.assign(f, choice.pieceId, choice.passage);
+  }
+
   protected async deleteFragment(): Promise<void> {
     const f = this.fragment();
+    const usage = await this.compositions.usageWarning([f.id]);
     const ok = await this.confirm.ask({
       title: this.i18n.t('fragments.delete'),
-      message: this.i18n.plural('fragments.deleteMessage', f.comments.length, { title: f.title }),
+      message: [this.i18n.plural('fragments.deleteMessage', f.comments.length, { title: f.title }), usage].filter(Boolean).join(' '),
       confirmLabel: this.i18n.t('fragments.delete'),
     });
     if (!ok) return;

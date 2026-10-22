@@ -138,3 +138,39 @@ This document breaks down the sequential and parallelizable tasks needed to buil
   - Optional: a PAT in the `RELEASE_PLEASE_TOKEN` secret so the release PR also runs CI.
 - [ ] **13.5. First release:** open a test PR (CI + coverage comment), merge it, merge the release PR and install the published `.deb`.
 - [ ] **13.6. More frontend tests:** stores (`SessionStore`, `PlaybackStore`, `RecordingStore`, `VaultStore`) with `TauriApiService` mocked.
+
+## Phase 14: Practice Tools, Analysis and Repertoire
+- [x] **14.1. Schema v3 (`db.rs`):** `pieces`, `midi_fragments.piece_id` / `passage`, `practice_log` (backfilled from the existing sessions) and `raw_history`.
+- [x] **14.2. Undo trims (`raw_history.rs`):** copy of the raw take before each trim in `midi/history/`, 10 steps per session, `undo_raw_trim`, an Undo button and Ctrl+Z in the slicer. A new recording clears the history.
+- [x] **14.3. A-B loop and speed (`audio_engine.rs`):** position in file time advancing at `rate`, loop of the loaded file in the backend, `TimelineDrag` + `range-handles` shared by the slicer and the fragment loop, speed selector.
+- [x] **14.4. Piano roll (`midi_notes.rs`, `timeline-canvas`):** `get_midi_notes`, notes drawn into cached layers per colour, pedal strip, and a roll / density toggle kept in `localStorage`.
+- [x] **14.5. Cut suggestions:** `suggest_midi_segments` (silence with the pedal counted as sound), clickable passages over the timeline, and `discard_midi_ranges` to discard every silence as one undo step.
+- [x] **14.6. WAV export (`wav.rs`):** offline render streamed to a 16-bit WAV with the current SoundFont, for fragments and raw takes.
+- [x] **14.7. Practice statistics:** `practice_log` filled by `stop_recording`, `get_practice_stats` / `set_weekly_goal`, `core/stats.ts` (streaks, week, heatmap) and the *Statistics* view.
+- [x] **14.8. Repertoire:** CRUD of pieces, `assign_fragment_piece`, `piece-picker` in the fragment card and the extract dialog, the *Repertoire* view with takes by passage and the comparison of two takes.
+- [x] **14.9. Navigation:** `NavStore` and the Sessions / Repertoire / Statistics switch in the sidebar.
+- [x] **14.10. UI check in headless Chrome** with the Tauri IPC mocked (screenshots of the slicer, suggestions, fragment loop, statistics and repertoire, in English and Spanish).
+- [ ] **14.11. Manual check with `npm run tauri dev`:**
+  - Open a copy of a v2 vault: it migrates and the statistics show the backfill.
+  - Record about 60 s with the simulator → "Suggest cuts" → extract one passage → undo: the fragment disappears and the take gets its duration back. "Discard the silences" → a single undo reverts it.
+  - In a fragment: loop over a passage at 70 %; it must sound in a loop without hanging notes.
+  - The roll / bars toggle is kept after a restart.
+  - Export a WAV and open it in an external player.
+  - Create a piece, file two fragments from different sessions under the same passage and compare them in Repertoire.
+  - Switch to English and check there is no untranslated text.
+
+## Phase 15: Composer
+- [x] **15.1. Schema v4 (`db.rs`):** `compositions`, `composition_tracks` and `composition_clips` (clips point to fragments and disappear with them), whole-document save with validation, the fragment library and `count_composition_uses`.
+- [x] **15.2. Mixdown and playback (`composition.rs`, `audio_engine.rs`):** clips flattened into one event list with a channel and program per track, `play_sequence` / `replace_sequence` for sequences built in memory, and a live per-channel mix (volume, mute, solo).
+- [x] **15.3. Composer view:** `CompositionStore` (undo history, delayed save), `core/composition.ts` (snap, fit, trim, split), the timeline with clip drag / trim / repeat, the fragment library, the clip inspector, the sidebar list and the shortcuts. The view is loaded with `@defer`.
+- [x] **15.4. Instruments:** the General MIDI names in the locales, `get_soundfont_programs`, `preview_instrument` and the instrument dialog with the sustain switch.
+- [x] **15.5. Export:** `export_composition_audio` (WAV as heard) and `export_composition_midi` (SMF format 1, one named track per voice).
+- [x] **15.6. Deleting with a warning:** the confirmation to delete a fragment or a session says how many compositions use it.
+- [ ] **15.7. Manual check with `npm run tauri dev`:**
+  - Create a composition, drag three fragments onto two tracks, and set the second one to Flute.
+  - Play it and, while it sounds, mute, solo and move a volume: no note is cut.
+  - Trim a clip, repeat it ×4, split it with S and undo with Ctrl+Z.
+  - Loop a range dragged on the ruler.
+  - Export the WAV and the MIDI and open the `.mid` in another program (one track per voice).
+  - Delete a fragment used in the composition: the confirmation says so and its clip disappears.
+  - Reopen the vault: the composition is still there.

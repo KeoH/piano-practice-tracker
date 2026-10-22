@@ -34,6 +34,19 @@
   --color-ok: #5cc28c;
 }
 
+/*
+ * Practice heatmap: brass sequential ramp (one hue, monotone OKLCH lightness 0.42 → 0.80),
+ * level 0 = no practice, receding into the panel. `static` because the SVG reads them as
+ * `var(--color-heat-N)` and Tailwind only emits the variables its utilities use.
+ */
+@theme static {
+  --color-heat-0: #24242c;
+  --color-heat-1: #624815;
+  --color-heat-2: #8c681c;
+  --color-heat-3: #ba8d30;
+  --color-heat-4: #e9b44c;
+}
+
 :root {
   color-scheme: dark;
 }
@@ -114,6 +127,20 @@ app-root {
   .tabular {
     font-variant-numeric: tabular-nums;
     @apply font-mono;
+  }
+  /* Read-only value next to a label (composer inspector) */
+  .value {
+    @apply flex h-[34px] items-center rounded-[9px] border border-line-strong bg-ink-900 px-2.5 font-mono text-[12.5px] text-fg;
+  }
+    /* Mute / solo of a composer track */
+  .ms-btn {
+    @apply inline-flex h-6 w-[26px] shrink-0 items-center justify-center rounded-md border border-line-strong bg-ink-750 font-mono text-[11px] font-semibold text-muted transition-colors hover:border-line-hover hover:text-fg;
+  }
+  .ms-btn.ms-mute {
+    @apply border-fg-soft bg-fg-soft text-ink-900 hover:text-ink-900;
+  }
+  .ms-btn.ms-solo {
+    @apply border-accent bg-accent text-on-accent hover:text-on-accent;
   }
   .kbd {
     @apply rounded-[5px] border border-line-strong px-1.5 py-px font-mono text-[11px] text-fg-soft;
@@ -358,4 +385,9 @@ input[type="number"].no-spin::-webkit-outer-spin-button {
 .md-preview th {
   background: var(--color-ink-850);
   color: var(--color-fg-strong);
+}
+
+/* Composer clips: lighter on hover (their colour comes from the track) */
+.clip:hover {
+  filter: brightness(1.15);
 }

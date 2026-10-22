@@ -263,19 +263,17 @@ fn tempo_for_bpm(bpm: u32) -> u32 {
     60_000_000 / bpm
 }
 
-/// Writes SMF format 0 (480 TPQ) with `EndOfTrack` at `max(last event, end_us)`.
-fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: Option<u64>) -> Result<(), String> {
-    let tempo = tempo_for_bpm(bpm) as u128;
-    let to_tick = |us: u64| -> u64 { ((us as u128 * TICKS_PER_QUARTER as u128 + tempo / 2) / tempo) as u64 };
+/// Converts µs to ticks at 480 TPQ for a constant `tempo` (µs per quarter note).
+fn tick_converter(tempo: u32) -> impl Fn(u64) -> u64 {
+    let tempo = tempo as u128;
+    move |us: u64| ((us as u128 * TICKS_PER_QUARTER as u128 + tempo / 2) / tempo) as u64
+}
 
+/// Appends `events` (stably sorted by time) to `track` as channel messages, then `EndOfTrack`
+/// at `max(last event, end_us)`.
+fn push_events(track: &mut Vec<TrackEvent<'_>>, events: &[TimedMidiEvent], to_tick: &impl Fn(u64) -> u64, end_us: Option<u64>) {
     let mut sorted: Vec<&TimedMidiEvent> = events.iter().collect();
     sorted.sort_by_key(|e| e.time_us); // sort_by_key is stable
-
-    let mut track: Vec<TrackEvent<'static>> = Vec::with_capacity(sorted.len() + 2);
-    track.push(TrackEvent {
-        delta: u28::new(0),
-        kind: TrackEventKind::Meta(MetaMessage::Tempo(u24::new(tempo as u32))),
-    });
     let mut last_tick = 0u64;
     for ev in sorted {
         let Some((ch, message)) = decode_message(&ev.bytes) else {
@@ -290,12 +288,45 @@ fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: 
     let end_tick = end_us.map(to_tick).unwrap_or(0).max(last_tick);
     let delta = (end_tick - last_tick).min(u28::max_value().as_int() as u64) as u32;
     track.push(TrackEvent { delta: u28::new(delta), kind: TrackEventKind::Meta(MetaMessage::EndOfTrack) });
+}
 
-    let mut smf = Smf::new(Header::new(Format::SingleTrack, Timing::Metrical(u15::new(TICKS_PER_QUARTER))));
-    smf.tracks.push(track);
+fn tempo_event(tempo: u32) -> TrackEvent<'static> {
+    TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::Tempo(u24::new(tempo))) }
+}
+
+fn write_smf_file(path: &Path, smf: &Smf<'_>) -> Result<(), String> {
     let mut buf: Vec<u8> = Vec::new();
     smf.write_std(&mut buf).map_err(|e| t!("backend.midi.serializeFailed", e = e))?;
     atomic_write(path, &buf)
+}
+
+/// Writes SMF format 0 (480 TPQ) with `EndOfTrack` at `max(last event, end_us)`.
+fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: Option<u64>) -> Result<(), String> {
+    let tempo = tempo_for_bpm(bpm);
+    let mut track: Vec<TrackEvent<'static>> = Vec::with_capacity(events.len() + 2);
+    track.push(tempo_event(tempo));
+    push_events(&mut track, events, &tick_converter(tempo), end_us);
+    let mut smf = Smf::new(Header::new(Format::SingleTrack, Timing::Metrical(u15::new(TICKS_PER_QUARTER))));
+    smf.tracks.push(track);
+    write_smf_file(path, &smf)
+}
+
+/// Writes SMF format 1 (480 TPQ): a first track with the tempo, then one track per
+/// `(name, events)` with its name, all ending at `max(last event, end_us)`. Atomic write.
+pub fn write_smf_multitrack(path: &Path, tracks: &[(String, Vec<TimedMidiEvent>)], bpm: u32, end_us: u64) -> Result<(), String> {
+    let tempo = tempo_for_bpm(bpm);
+    let to_tick = tick_converter(tempo);
+    let mut smf = Smf::new(Header::new(Format::Parallel, Timing::Metrical(u15::new(TICKS_PER_QUARTER))));
+    let mut conductor = vec![tempo_event(tempo)];
+    push_events(&mut conductor, &[], &to_tick, Some(end_us));
+    smf.tracks.push(conductor);
+    for (name, events) in tracks {
+        let mut track: Vec<TrackEvent<'_>> = Vec::with_capacity(events.len() + 2);
+        track.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::TrackName(name.as_bytes())) });
+        push_events(&mut track, events, &to_tick, Some(end_us));
+        smf.tracks.push(track);
+    }
+    write_smf_file(path, &smf)
 }
 
 /// Writes SMF format 0, 480 TPQ, a `Tempo(60_000_000/bpm)` meta event at t=0, events stably
@@ -361,7 +392,7 @@ fn validate_range(start_ms: u64, end_ms: u64, duration_ms: u64) -> Result<(u64, 
 }
 
 /// Builds the `[start, end)` fragment normalized to t=0.
-fn build_fragment(events: &[TimedMidiEvent], start_us: u64, end_us: u64) -> Vec<TimedMidiEvent> {
+pub(crate) fn build_fragment(events: &[TimedMidiEvent], start_us: u64, end_us: u64) -> Vec<TimedMidiEvent> {
     let span = end_us - start_us;
     // Pedal state right before start.
     let mut pedal: HashMap<u8, u8> = HashMap::new();
@@ -499,13 +530,33 @@ pub fn extract_fragment_and_trim(
 
 /// Removes `[start_ms, end_ms)` from `source` without creating a fragment. Returns the new duration (ms).
 pub fn discard_range(source: &Path, start_ms: u64, end_ms: u64, bpm: u32) -> Result<u64, String> {
-    let (events, dur_us) = read_timed_events_us(source)?;
-    let duration_ms = us_to_ms(dur_us);
-    let (start_ms, end_ms) = validate_range(start_ms, end_ms, duration_ms)?;
-    let remaining_ms = duration_ms - (end_ms - start_ms);
-    let trimmed = build_trimmed(&events, start_ms * 1000, end_ms * 1000);
-    write_smf_with_end(source, &trimmed, bpm, Some(remaining_ms * 1000))?;
-    Ok(remaining_ms)
+    discard_ranges(source, &[(start_ms, end_ms)], bpm)
+}
+
+/// Removes several ranges (in the file's current times) in one read and one write. Overlapping
+/// ranges are merged; they are cut from the last to the first so the earlier times stay valid.
+/// Returns the new duration (ms).
+pub fn discard_ranges(source: &Path, ranges: &[(u64, u64)], bpm: u32) -> Result<u64, String> {
+    let (mut events, dur_us) = read_timed_events_us(source)?;
+    let mut duration_ms = us_to_ms(dur_us);
+    let mut valid = ranges
+        .iter()
+        .map(|&(s, e)| validate_range(s, e, duration_ms))
+        .collect::<Result<Vec<_>, String>>()?;
+    valid.sort_unstable();
+    let mut merged: Vec<(u64, u64)> = Vec::with_capacity(valid.len());
+    for (s, e) in valid {
+        match merged.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+    for &(s, e) in merged.iter().rev() {
+        events = build_trimmed(&events, s * 1000, e * 1000);
+        duration_ms -= e - s;
+    }
+    write_smf_with_end(source, &events, bpm, Some(duration_ms * 1000))?;
+    Ok(duration_ms)
 }
 
 #[cfg(test)]
@@ -625,6 +676,34 @@ mod tests {
         let (evs2, dur2) = read_timed_events(&raw).unwrap();
         assert!(approx(dur2, 40_000));
         assert_clean(&evs2);
+    }
+
+    #[test]
+    fn discard_ranges_cuts_several_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let raw = dir.path().join("raw.mid");
+        let one_by_one = dir.path().join("one.mid");
+        let original = build_test_track(&raw, 120);
+        build_test_track(&one_by_one, 120);
+        let at30 = original.iter().find(|e| e.time_us == 30_000_000 && as_note_on(&e.bytes).is_some()).unwrap().clone();
+
+        // Unordered and overlapping: [5, 12) ∪ [10, 15) = [5, 15), plus [20, 25) and [50, 60).
+        let d = discard_ranges(&raw, &[(20_000, 25_000), (10_000, 15_000), (5_000, 12_000), (50_000, 60_000)], 120).unwrap();
+        assert_eq!(d, 60_000 - 10_000 - 5_000 - 10_000);
+        let (evs, dur) = read_timed_events(&raw).unwrap();
+        assert!(approx(dur, 35_000), "{dur}");
+        assert_clean(&evs);
+        // The 30 s note moves back by the 15 s removed before it.
+        assert!(evs.iter().any(|e| e.bytes == at30.bytes && approx(e.time_us / 1000, 15_000)));
+
+        // Same result as cutting one by one from the end.
+        discard_range(&one_by_one, 50_000, 60_000, 120).unwrap();
+        discard_range(&one_by_one, 20_000, 25_000, 120).unwrap();
+        discard_range(&one_by_one, 5_000, 15_000, 120).unwrap();
+        assert_eq!(read_timed_events(&one_by_one).unwrap(), (evs, dur));
+
+        assert!(discard_ranges(&raw, &[(1_000, 2_000), (5, 1)], 120).is_err());
+        assert_eq!(midi_duration_ms(&raw).unwrap(), 35_000, "an invalid range changes nothing");
     }
 
     #[test]
@@ -773,5 +852,34 @@ mod tests {
         assert_eq!(rdur, 500);
         assert_eq!(revs.len(), 1); // only the pitch bend
         assert_eq!(revs[0].bytes, vec![0xE0, 0x00, 0x40]);
+    }
+
+    #[test]
+    fn writes_one_named_track_per_voice() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("multi.mid");
+        let piano = vec![TimedMidiEvent::new(0, vec![0xC0, 0]), TimedMidiEvent::new(0, note_on(0, 60, 90)), TimedMidiEvent::new(500_000, note_on(0, 60, 0))];
+        let flute = vec![TimedMidiEvent::new(0, vec![0xC1, 73]), TimedMidiEvent::new(250_000, note_on(1, 72, 80)), TimedMidiEvent::new(750_000, note_on(1, 72, 0))];
+        write_smf_multitrack(&p, &[("Piano".into(), piano), ("Flute".into(), flute)], 120, 2_000_000).unwrap();
+
+        let data = std::fs::read(&p).unwrap();
+        let smf = Smf::parse(&data).unwrap();
+        assert_eq!(smf.header.format, Format::Parallel);
+        assert_eq!(smf.tracks.len(), 3, "tempo track + one per voice");
+        let names: Vec<&[u8]> = smf.tracks[1..]
+            .iter()
+            .filter_map(|t| t.iter().find_map(|e| match e.kind {
+                TrackEventKind::Meta(MetaMessage::TrackName(n)) => Some(n),
+                _ => None,
+            }))
+            .collect();
+        assert_eq!(names, vec![&b"Piano"[..], &b"Flute"[..]]);
+
+        // Read back merged, on the same clock.
+        let (evs, duration_ms) = read_timed_events(&p).unwrap();
+        assert_eq!(duration_ms, 2_000);
+        assert_eq!(evs.len(), 6);
+        assert!(evs.iter().any(|e| e.bytes == vec![0xC1, 73]));
+        assert!(evs.iter().any(|e| as_note_on(&e.bytes) == Some((1, 72, 80)) && approx(e.time_us / 1000, 250)));
     }
 }

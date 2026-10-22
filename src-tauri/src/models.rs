@@ -60,6 +60,10 @@ pub struct FragmentDto {
     pub duration_ms: u64,
     pub order_index: i64,
     pub created_at: String,
+    /// Piece of the repertoire this take belongs to (if any).
+    pub piece_id: Option<String>,
+    /// Passage of the piece (free text, e.g. "bars 1-16"); empty = the whole piece.
+    pub passage: String,
     /// Sorted by ascending `timestamp_ms`.
     pub comments: Vec<TimelineCommentDto>,
 }
@@ -78,6 +82,10 @@ pub struct SessionDetailDto {
     /// Sorted by `order_index` and then `created_at`.
     pub fragments: Vec<FragmentDto>,
     pub media: Vec<SessionMediaDto>,
+    /// Number of raw-take trims that can be undone.
+    pub undo_depth: u32,
+    /// Fragment that the next undo would delete (it was extracted by the newest trim).
+    pub undo_fragment_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,6 +111,11 @@ pub struct ExtractFragmentReq {
     pub end_ms: u64,
     pub title: String,
     pub explanation: String,
+    /// Piece to file the new fragment under.
+    #[serde(default)]
+    pub piece_id: Option<String>,
+    #[serde(default)]
+    pub passage: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -110,6 +123,184 @@ pub struct FragmentCreatedResponse {
     pub fragment: FragmentDto,
     /// Session after the destructive slice (new `raw_duration_ms`).
     pub session: SessionDto,
+}
+
+/// Result of undoing the last trim of a raw take.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UndoTrimResult {
+    /// Session with the restored raw take.
+    pub session: SessionDto,
+    /// Fragment deleted because the undone trim had extracted it.
+    pub removed_fragment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TimeRangeDto {
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+/// One note of a piano roll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteSpan {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub key: u8,
+    pub velocity: u8,
+}
+
+/// Notes and sustain pedal of a `.mid` file, for the piano roll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MidiNotesDto {
+    pub file_path: String,
+    pub duration_ms: u64,
+    /// Lowest and highest key played (21 and 108, an 88-key piano, if there are no notes).
+    pub min_key: u8,
+    pub max_key: u8,
+    /// Sorted by `start_ms`.
+    pub notes: Vec<NoteSpan>,
+    /// Intervals with the sustain pedal (CC64 >= 64) down.
+    pub pedal: Vec<TimeRangeDto>,
+}
+
+/// Time played on one day (local date).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeDayDto {
+    /// ISO date `YYYY-MM-DD`.
+    pub date: String,
+    pub duration_ms: u64,
+    /// Distinct sessions recorded that day.
+    pub sessions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PracticeStatsDto {
+    /// Only the days with practice, sorted by date.
+    pub days: Vec<PracticeDayDto>,
+    /// Weekly goal in minutes (0 = no goal).
+    pub weekly_goal_minutes: u32,
+}
+
+/// A piece of the repertoire.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceDto {
+    pub id: String,
+    pub title: String,
+    pub composer: String,
+    pub notes: String,
+    pub archived: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceSummaryDto {
+    pub piece: PieceDto,
+    pub take_count: u32,
+    /// Date (`YYYY-MM-DD`) of the most recent session with a take of the piece.
+    pub last_practiced: Option<String>,
+    /// Passages already used in the piece's takes (sorted, without the empty one).
+    pub passages: Vec<String>,
+}
+
+/// A fragment filed under a piece, with the session it comes from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceTakeDto {
+    pub fragment: FragmentDto,
+    pub session_title: String,
+    pub session_date: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PieceDetailDto {
+    pub piece: PieceDto,
+    /// Sorted by passage and then chronologically.
+    pub takes: Vec<PieceTakeDto>,
+}
+
+/// A composition in the list of the composer.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionSummaryDto {
+    pub id: String,
+    pub title: String,
+    pub track_count: u32,
+    pub clip_count: u32,
+    /// End of the last clip (repeats included).
+    pub duration_ms: u64,
+    pub updated_at: String,
+}
+
+/// A clip: a window of a fragment placed on a track. The fragment's MIDI is never copied.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionClipDto {
+    pub id: String,
+    pub fragment_id: String,
+    /// Position on the composition's timeline.
+    pub start_ms: u64,
+    /// Start of the window inside the fragment.
+    pub trim_start_ms: u64,
+    /// Length of one repetition of the window.
+    pub length_ms: u64,
+    /// Times the window is played back to back (1 = once).
+    pub repeats: u32,
+    /// Semitones.
+    pub transpose: i32,
+    /// Read only: filled in from the fragment when loading, ignored when saving.
+    pub fragment_title: String,
+    pub fragment_file_path: String,
+    pub fragment_duration_ms: u64,
+}
+
+/// A track: one MIDI channel with a General MIDI instrument. The vector order is the track order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionTrackDto {
+    pub id: String,
+    pub name: String,
+    /// General MIDI program (0-127).
+    pub program: u8,
+    /// MIDI channel volume (0-127).
+    pub volume: u8,
+    pub muted: bool,
+    pub solo: bool,
+    /// Whether the recorded sustain pedal (CC64) is played.
+    pub sustain: bool,
+    /// Index into the frontend's track palette.
+    pub color: u8,
+    /// Sorted by `start_ms`.
+    pub clips: Vec<CompositionClipDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CompositionDto {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub tracks: Vec<CompositionTrackDto>,
+}
+
+/// Mixer state of a track, applied live while a composition plays.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct TrackMixDto {
+    pub volume: u8,
+    pub muted: bool,
+    pub solo: bool,
+}
+
+/// A fragment as the composer's library shows it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LibraryFragmentDto {
+    pub id: String,
+    pub title: String,
+    pub file_path: String,
+    pub duration_ms: u64,
+    pub session_id: String,
+    pub session_title: String,
+    pub session_date: String,
+    pub piece_id: Option<String>,
+    pub piece_title: Option<String>,
+    pub passage: String,
+    pub created_at: String,
 }
 
 /// Payload of the Tauri `playback-progress` event (emitted every 50 ms during playback).
@@ -188,13 +379,14 @@ pub struct AppInfo {
     pub tauri_version: String,
 }
 
-/// Links the "About" tab can open. The webview never sends a URL: the backend builds it.
+/// Links the "About" tab and the SoundFont settings can open. The webview never sends a URL: the backend builds it.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AppLink {
     Homepage,
     Repository,
     License,
+    GmSoundfont,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

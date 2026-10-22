@@ -75,7 +75,7 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 
 ## Installation
 
-Download the latest `.deb` or `.AppImage` from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
+Download the latest `.deb` or `.AppImage` (Linux) or `.dmg` (macOS) from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
 
 ```bash
 sha256sum -c SHA256SUMS.txt --ignore-missing
@@ -95,6 +95,16 @@ Or run the AppImage directly:
 chmod +x Piano*Practice*Tracker*.AppImage
 ./Piano*Practice*Tracker*.AppImage
 ```
+
+### macOS
+
+Download the `.dmg` (a universal build for Apple Silicon and Intel, macOS 11 or later), open it and drag the app to *Applications*. The app is not notarized by Apple, so the first launch is blocked: open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
+```
+
+macOS has no system SoundFont, so the app starts with its synthetic piano and most instruments are unavailable in the composer. Download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) (**Settings → Sound** has a button for it) and either choose the `.sf2` there or copy it to `~/Library/Audio/Sounds/Banks`, where the app finds it on its own.
 
 ### Better piano sound
 

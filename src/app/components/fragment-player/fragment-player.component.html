@@ -19,7 +19,15 @@
       [attr.aria-controls]="'frag-body-' + f.id"
       (click)="expanded.set(!expanded())"
     >
-      <span class="max-w-full truncate text-[15px] font-semibold text-fg">{{ f.title }}</span>
+      <span class="flex max-w-full min-w-0 items-center gap-2">
+        <span class="truncate text-[15px] font-semibold text-fg">{{ f.title }}</span>
+        @if (piece(); as p) {
+          <span class="inline-flex h-[22px] max-w-[45%] shrink-0 items-center gap-1 rounded-md bg-accent/12 px-2 text-xs text-accent" [title]="'pieces.filedUnder' | t">
+            <app-icon name="book" [size]="12" class="shrink-0" />
+            <span class="truncate">{{ p.piece.title }}{{ f.passage ? ' · ' + f.passage : '' }}</span>
+          </span>
+        }
+      </span>
       @if (f.explanation) {
         <span class="max-w-full truncate text-[13px] text-muted">{{ f.explanation }}</span>
       }
@@ -107,10 +115,23 @@
             >
               <app-timeline-canvas
                 [blocks]="activity()?.blocks ?? []"
+                [notes]="notes()"
+                [mode]="prefs.timelineMode()"
                 [durationMs]="durationMs()"
                 [height]="102"
+                [selection]="loopDrag.selection()"
                 [progressMs]="position() > 0 ? position() : null"
               />
+              @if (loopDrag.selection(); as range) {
+                <app-range-handles
+                  [range]="range"
+                  [durationMs]="durationMs()"
+                  [drag]="loopDrag"
+                  [knobHeight]="34"
+                  [startLabel]="'fragments.loopStart' | t"
+                  [endLabel]="'fragments.loopEnd' | t"
+                />
+              }
               <div class="pointer-events-none absolute top-0 bottom-[18px] z-10 -ml-px w-0.5 bg-ivory shadow-[0_0_8px] shadow-ivory/60" [style.left.%]="pct(position())"></div>
             </div>
           </div>
@@ -127,6 +148,22 @@
           <span class="tabular text-[15px]">
             <span class="text-ivory">{{ formatMs(position(), true) }}</span><span class="text-faint"> / {{ formatMs(durationMs()) }}</span>
           </span>
+          <span class="flex-1"></span>
+          <button
+            type="button"
+            class="btn h-9"
+            [class]="loop() ? 'border-accent/60 bg-accent/15 text-accent' : 'text-fg-soft'"
+            [attr.aria-pressed]="!!loop()"
+            [title]="(loop() ? 'fragments.loopOn' : 'fragments.loopOff') | t"
+            (click)="toggleLoop()"
+          >
+            <app-icon name="repeat" [size]="15" /> {{ 'fragments.loop' | t }}
+            @if (loop(); as l) {
+              <span class="tabular text-xs">{{ formatMs(l.start) }}–{{ formatMs(l.end) }}</span>
+            }
+          </button>
+          <app-rate-select [showLabel]="false" />
+          <app-timeline-mode-toggle />
           @if (activityLoading()) {
             <span class="text-[13px] text-faint" role="status">{{ 'slicer.analyzing' | t }}</span>
           }
@@ -160,6 +197,7 @@
               <input [id]="'frag-title-' + f.id" class="field" [value]="titleDraft()"
                 (input)="titleDraft.set($any($event.target).value)" (blur)="saveMeta()" (keydown.enter)="$any($event.target).blur()" />
             </div>
+            <app-piece-picker [pieceId]="f.piece_id" [passage]="f.passage" (changed)="assignPiece($event)" />
             <div>
               <label class="mb-1.5 block text-xs font-semibold text-muted" [for]="'frag-expl-' + f.id">{{ 'fragments.explanationLabel' | t }}</label>
               <textarea [id]="'frag-expl-' + f.id" class="field min-h-16 resize-y" rows="2" [placeholder]="'fragments.explanationPlaceholder2' | t"
@@ -196,9 +234,20 @@
         @if (comments().length) {
           <p class="mx-2 mt-3.5 text-xs leading-normal text-faint">{{ 'fragments.commentsHint' | t }}</p>
         }
-        <button type="button" class="btn btn-danger mx-2 mt-5" (click)="deleteFragment()">
-          <app-icon name="trash" [size]="15" /> {{ 'fragments.delete' | t }}
-        </button>
+        <div class="mx-2 mt-5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="btn"
+            [title]="'export.wavHint' | t"
+            [disabled]="exporter.isBusy(f.file_path)"
+            (click)="exporter.exportWav(f.file_path, f.title)"
+          >
+            <app-icon name="download" [size]="15" /> {{ (exporter.isBusy(f.file_path) ? 'export.exporting' : 'export.wav') | t }}
+          </button>
+          <button type="button" class="btn btn-danger" (click)="deleteFragment()">
+            <app-icon name="trash" [size]="15" /> {{ 'fragments.delete' | t }}
+          </button>
+        </div>
       </aside>
     </div>
   }

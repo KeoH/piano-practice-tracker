@@ -1,0 +1,162 @@
+@if (piece(); as p) {
+  <div class="mx-auto flex max-w-[1100px] flex-col gap-6 px-6 pt-8 pb-11 xl:px-11">
+    <!-- Details -->
+    <header class="flex flex-col gap-3">
+      <div class="flex flex-wrap items-start gap-3">
+        <div class="flex min-w-0 flex-1 flex-col gap-1">
+          <label class="sr-only" for="piece-title">{{ 'pieces.titleLabel' | t }}</label>
+          <input
+            #titleIn
+            id="piece-title"
+            class="-mx-2 min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-1 text-[26px] leading-tight font-semibold text-fg-strong hover:border-line focus:border-line-hover focus:outline-none"
+            [value]="p.title"
+            (blur)="saveTitle(titleIn)"
+            (keydown.enter)="titleIn.blur()"
+          />
+          <label class="sr-only" for="piece-composer">{{ 'pieces.composer' | t }}</label>
+          <input
+            #composerIn
+            id="piece-composer"
+            class="-mx-2 min-w-0 rounded-lg border border-transparent bg-transparent px-2 py-0.5 text-[15px] text-fg-soft placeholder:text-faint hover:border-line focus:border-line-hover focus:outline-none"
+            [placeholder]="'pieces.composerPlaceholder' | t"
+            [value]="p.composer"
+            (blur)="saveComposer(composerIn.value)"
+            (keydown.enter)="composerIn.blur()"
+          />
+        </div>
+        <div class="flex items-center gap-2 pt-1.5">
+          @if (p.archived) {
+            <span class="chip">{{ 'pieces.archived' | t }}</span>
+          }
+          <button type="button" class="btn" (click)="toggleArchived()">{{ (p.archived ? 'pieces.unarchive' : 'pieces.archive') | t }}</button>
+          <button type="button" class="btn btn-ghost btn-icon hover:text-rec-soft" (click)="deletePiece()" [attr.aria-label]="'pieces.delete' | t" [title]="'pieces.delete' | t">
+            <app-icon name="trash" [size]="16" />
+          </button>
+        </div>
+      </div>
+      <p class="text-[13px] text-muted">{{ 'pieces.takes' | tp: takes().length }}</p>
+      <div>
+        <label class="label" for="piece-notes">{{ 'pieces.notes' | t }}</label>
+        <textarea
+          #notesIn
+          id="piece-notes"
+          class="field min-h-16 resize-y"
+          rows="2"
+          [placeholder]="'pieces.notesPlaceholder' | t"
+          [value]="p.notes"
+          (blur)="saveNotes(notesIn.value)"
+        ></textarea>
+      </div>
+    </header>
+
+    <!-- Comparison: both takes on the same time scale -->
+    @if (compared().length) {
+      <section class="panel p-5" aria-labelledby="compare-h">
+        <header class="mb-3 flex flex-wrap items-center gap-3">
+          <app-icon name="compare" [size]="17" class="text-accent" />
+          <h2 id="compare-h" class="text-[15px] font-semibold">
+            {{ (comparedTakes().length > 1 ? 'pieces.compareTitle' : 'pieces.comparePickOne') | t }}
+          </h2>
+          <span class="flex-1"></span>
+          <app-rate-select />
+          <button type="button" class="btn btn-ghost h-9" (click)="compared.set([])">{{ 'pieces.clearCompare' | t }}</button>
+        </header>
+        <div class="flex flex-col gap-3">
+          @for (t of comparedTakes(); track t.fragment.id) {
+            @let playing = isPlaying(t);
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors"
+                [class]="playing ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'border border-line-hover text-fg hover:bg-ink-750'"
+                (click)="togglePlay(t)"
+                [attr.aria-label]="(playing ? 'pieces.pauseTake' : 'pieces.playTake') | t: { date: i18n.shortDate(t.session_date) }"
+              >
+                <app-icon [name]="playing ? 'pause' : 'play'" [size]="14" />
+              </button>
+              <div class="w-32 shrink-0 text-[13px] leading-tight">
+                <span class="block text-fg">{{ i18n.shortDate(t.session_date) }}</span>
+                <span class="tabular block text-xs text-muted">{{ formatMs(t.fragment.duration_ms) }} · {{ t.fragment.bpm }} BPM</span>
+              </div>
+              <div class="relative min-w-0 flex-1 overflow-hidden rounded-lg border border-line">
+                <app-timeline-canvas
+                  [notes]="notes()[t.fragment.file_path] ?? null"
+                  [mode]="'roll'"
+                  [durationMs]="compareDuration()"
+                  [height]="96"
+                  [progressMs]="progressOf(t)"
+                />
+                @if (progressOf(t) !== null) {
+                  <div class="pointer-events-none absolute top-0 bottom-[18px] -ml-px w-0.5 bg-ivory" [style.left.%]="pct(progressOf(t)!, compareDuration())"></div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </section>
+    }
+
+    <!-- Takes by passage -->
+    @for (g of groups(); track g.passage) {
+      <section class="flex flex-col gap-2" [attr.aria-label]="g.passage || ('pieces.wholePiece' | t)">
+        <h2 class="flex items-baseline gap-2 px-1 text-[15px] font-semibold">
+          {{ g.passage || ('pieces.wholePiece' | t) }}
+          <span class="text-[13px] font-normal text-muted">{{ 'pieces.takes' | tp: g.takes.length }}</span>
+        </h2>
+        <ul class="flex flex-col gap-1.5">
+          @for (t of g.takes; track t.fragment.id) {
+            @let playing = isPlaying(t);
+            @let chosen = isCompared(t);
+            <li class="flex items-center gap-3 rounded-xl border bg-ink-800 py-2 pr-3 pl-2.5" [class]="chosen ? 'border-accent/50' : 'border-line'">
+              <label class="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center" [title]="'pieces.compareHint' | t">
+                <input type="checkbox" class="h-4 w-4 accent-accent" [checked]="chosen" (change)="toggleCompare(t)" [attr.aria-label]="'pieces.compare' | t" />
+              </label>
+              <button
+                type="button"
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors"
+                [class]="playing ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'border border-line-hover text-fg hover:bg-ink-750'"
+                (click)="togglePlay(t)"
+                [attr.aria-label]="(playing ? 'pieces.pauseTake' : 'pieces.playTake') | t: { date: i18n.shortDate(t.session_date) }"
+              >
+                <app-icon [name]="playing ? 'pause' : 'play'" [size]="13" />
+              </button>
+              <div class="flex w-44 min-w-0 shrink-0 flex-col gap-0.5 leading-tight">
+                <span class="truncate text-sm font-medium text-fg">{{ i18n.shortDate(t.session_date) }}</span>
+                <span class="truncate text-xs text-muted" [title]="t.session_title + ' · ' + t.fragment.title">{{ t.fragment.title }}</span>
+              </div>
+              <div class="hidden min-w-0 flex-1 overflow-hidden rounded-md sm:block">
+                <app-timeline-canvas
+                  [notes]="notes()[t.fragment.file_path] ?? null"
+                  [mode]="'roll'"
+                  [durationMs]="t.fragment.duration_ms"
+                  [height]="34"
+                  [showRuler]="false"
+                  [progressMs]="progressOf(t)"
+                />
+              </div>
+              <span class="tabular shrink-0 text-[13px] text-fg-soft">{{ formatMs(t.fragment.duration_ms) }}</span>
+              <span class="tabular hidden h-6 shrink-0 items-center rounded-md bg-ink-700 px-2 text-xs text-fg-soft md:inline-flex">{{ t.fragment.bpm }} BPM</span>
+              <span class="hidden shrink-0 items-center gap-1 text-[13px] text-muted md:inline-flex" [title]="'fragments.comments' | t">
+                <app-icon name="comment" [size]="14" />{{ t.fragment.comments.length }}
+              </span>
+              <button type="button" class="btn btn-ghost btn-icon h-9 w-9 shrink-0" (click)="openSession(t)" [attr.aria-label]="'pieces.openSession' | t" [title]="'pieces.openSession' | t">
+                <app-icon name="arrow-right" [size]="16" />
+              </button>
+            </li>
+          }
+        </ul>
+      </section>
+    } @empty {
+      @if (!store.detailLoading()) {
+        <p class="panel px-6 py-8 text-center text-[13px] leading-normal text-muted">{{ 'pieces.noTakes' | t }}</p>
+      }
+    }
+  </div>
+} @else {
+  <div class="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
+    <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent">
+      <app-icon name="book" [size]="28" />
+    </span>
+    <p class="max-w-md text-[14px] leading-normal text-muted">{{ 'pieces.empty' | t }}</p>
+  </div>
+}

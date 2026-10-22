@@ -36,6 +36,11 @@ const MASTER_VOLUME: f32 = 0.6;
 const METRONOME_GAIN: f32 = 0.45;
 const CLICK_SECS: f32 = 0.05;
 const CLICK_DECAY_SECS: f32 = 0.012;
+/// Playback speed range (1.0 = original tempo).
+pub const MIN_PLAYBACK_RATE: f32 = 0.25;
+pub const MAX_PLAYBACK_RATE: f32 = 1.5;
+/// Shortest loop accepted.
+const MIN_LOOP_US: u64 = 100_000;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -51,8 +56,11 @@ struct Sequencer {
     events: Vec<TimedMidiEvent>,
     duration_us: u64,
     next_idx: usize,
-    pos_frames: u64,
+    /// Position in file time (µs). Fractional because it advances `rate` µs per real µs.
+    pos_us: f64,
     is_playing: bool,
+    /// A-B loop in file time (µs): on reaching the end it jumps back to the start.
+    loop_us: Option<(u64, u64)>,
 }
 
 struct Metronome {
@@ -79,13 +87,28 @@ impl Metronome {
     }
 }
 
+/// Live mixer state of one MIDI channel (used by compositions: one track per channel).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ChannelMix {
+    volume: u8,
+    muted: bool,
+}
+
+/// General MIDI's default channel volume (CC7), the synthesizer's after a reset.
+const DEFAULT_CHANNEL_VOLUME: u8 = 100;
+const DEFAULT_MIX: [ChannelMix; 16] = [ChannelMix { volume: DEFAULT_CHANNEL_VOLUME, muted: false }; 16];
+
 struct AudioState {
     synth: Option<Synthesizer>,
     sound_font: Option<Arc<SoundFont>>,
     sample_rate: u32,
     seq: Sequencer,
+    /// Playback speed; kept across files.
+    rate: f32,
     metronome: Metronome,
     live_synth: bool,
+    /// Per-channel volume and mute, kept across seeks and synthesizer resets.
+    mix: [ChannelMix; 16],
     /// Asks the progress thread for an extra emission (pause/stop/end/seek).
     emit_pending: bool,
     left: Vec<f32>,
@@ -134,8 +157,10 @@ impl AudioState {
             sound_font,
             sample_rate,
             seq: Sequencer::default(),
+            rate: 1.0,
             metronome: Metronome { enabled: false, bpm: 120, pos: 0 },
             live_synth: false,
+            mix: DEFAULT_MIX,
             emit_pending: false,
             left: vec![0.0; BLOCK_FRAMES],
             right: vec![0.0; BLOCK_FRAMES],
@@ -147,18 +172,12 @@ impl AudioState {
         if sample_rate == self.sample_rate {
             return;
         }
-        let pos_us = self.pos_us();
         self.sample_rate = sample_rate;
         self.synth = self.sound_font.as_ref().and_then(|sf| new_synth(sf, sample_rate));
-        self.seq.pos_frames = self.us_to_frames(pos_us);
-    }
-
-    fn us_to_frames(&self, us: u64) -> u64 {
-        (us as u128 * self.sample_rate as u128 / 1_000_000) as u64
     }
 
     fn pos_us(&self) -> u64 {
-        (self.seq.pos_frames as u128 * 1_000_000 / self.sample_rate.max(1) as u128) as u64
+        self.seq.pos_us as u64
     }
 
     fn pos_ms(&self) -> u64 {
@@ -173,7 +192,52 @@ impl AudioState {
         }
         let d1 = bytes.get(1).copied().unwrap_or(0) as i32;
         let d2 = bytes.get(2).copied().unwrap_or(0) as i32;
-        synth.process_midi_message((status & 0x0F) as i32, (status & 0xF0) as i32, d1, d2);
+        let channel = status & 0x0F;
+        if status & 0xF0 == 0x90 && d2 > 0 && self.mix[usize::from(channel)].muted {
+            return;
+        }
+        synth.process_midi_message(channel as i32, (status & 0xF0) as i32, d1, d2);
+    }
+
+    /// Sends each channel's mix volume (CC7) to the synthesizer.
+    fn apply_mix(&mut self) {
+        let Some(s) = self.synth.as_mut() else { return };
+        for (ch, m) in self.mix.iter().enumerate() {
+            s.process_midi_message(ch as i32, 0xB0, 7, i32::from(m.volume));
+        }
+    }
+
+    /// Loads a sequence under `key` and plays it from `start_ms`. The loop survives only when the
+    /// same key is loaded again.
+    fn load(&mut self, key: String, events: Vec<TimedMidiEvent>, duration_us: u64, start_ms: u64) {
+        let loop_us = if self.seq.file_path.as_deref() == Some(key.as_str()) { self.seq.loop_us } else { None };
+        self.seq = Sequencer {
+            file_path: Some(key),
+            events,
+            duration_us,
+            next_idx: 0,
+            pos_us: 0.0,
+            is_playing: false,
+            loop_us: loop_us.filter(|(_, end)| *end <= duration_us),
+        };
+        let start = if start_ms.saturating_mul(1000) >= duration_us { 0 } else { start_ms };
+        self.position_at(start);
+        self.seq.is_playing = duration_us > 0;
+        self.emit_pending = true;
+    }
+
+    /// Resumes `key` if it is the loaded sequence, paused at `start_ms`.
+    fn resume_if_paused_at(&mut self, key: &str, start_ms: u64) -> bool {
+        if self.seq.file_path.as_deref() != Some(key) || self.seq.is_playing {
+            return false;
+        }
+        let pos = self.pos_ms();
+        if pos.abs_diff(start_ms) <= 5 && pos < self.seq.duration_us / 1000 {
+            self.seq.is_playing = true;
+            self.emit_pending = true;
+            return true;
+        }
+        false
     }
 
     /// Immediate silence + controller reset (All Sound Off / Reset All Controllers / All Notes Off).
@@ -192,12 +256,30 @@ impl AudioState {
                 s.process_midi_message(ch, 0xC0, 0, 0);
             }
         }
+        self.apply_mix();
     }
 
     /// Positions the sequencer at `ms`, applying the preceding controller state (pedal, program, pitch bend).
     fn position_at(&mut self, ms: u64) {
         let target_us = ms.saturating_mul(1000).min(self.seq.duration_us);
         self.reset_synth();
+        self.chase_to(target_us);
+    }
+
+    /// Jumps from the end of the loop back to its start. Unlike a seek, the sounding notes are
+    /// released (not cut) and the reverb tail is kept, so the jump doesn't click.
+    fn loop_back(&mut self, start_us: u64) {
+        if let Some(s) = self.synth.as_mut() {
+            for ch in 0..16 {
+                s.process_midi_message(ch, 0xB0, 64, 0);
+            }
+            s.note_off_all(false);
+        }
+        self.chase_to(start_us);
+    }
+
+    /// Sends the controller state before `target_us` and moves the sequencer there.
+    fn chase_to(&mut self, target_us: u64) {
         let idx = self.seq.events.partition_point(|e| e.time_us < target_us);
         let chase: Vec<Vec<u8>> = self.seq.events[..idx]
             .iter()
@@ -208,7 +290,7 @@ impl AudioState {
             self.send(&b);
         }
         self.seq.next_idx = idx;
-        self.seq.pos_frames = self.us_to_frames(target_us);
+        self.seq.pos_us = target_us as f64;
     }
 
     fn dispatch_until(&mut self, until_us: u64) {
@@ -246,11 +328,15 @@ impl AudioState {
                 out[o + 1] = (self.right[i] + click).clamp(-1.0, 1.0);
             }
             if self.seq.is_playing && self.seq.file_path.is_some() {
-                self.seq.pos_frames += n as u64;
-                if self.pos_us() >= self.seq.duration_us {
+                self.seq.pos_us += n as f64 * 1_000_000.0 / sr as f64 * self.rate as f64;
+                if let Some((start, end)) = self.seq.loop_us.filter(|(_, end)| self.pos_us() >= *end) {
+                    self.dispatch_until(end);
+                    self.loop_back(start);
+                    self.emit_pending = true;
+                } else if self.pos_us() >= self.seq.duration_us {
                     let end = self.seq.duration_us;
                     self.dispatch_until(end);
-                    self.seq.pos_frames = self.us_to_frames(end);
+                    self.seq.pos_us = end as f64;
                     self.seq.is_playing = false;
                     self.emit_pending = true;
                 }
@@ -360,6 +446,11 @@ impl AudioEngine {
     }
 
     /// `true` if the SoundFont loaded and the synthesizer is working.
+    /// SoundFont loaded in the engine (to render offline with the same sound).
+    pub fn sound_font(&self) -> Option<Arc<SoundFont>> {
+        lock(&self.state).sound_font.clone()
+    }
+
     pub fn synth_available(&self) -> bool {
         lock(&self.state).synth.is_some()
     }
@@ -398,36 +489,78 @@ impl AudioEngine {
     }
 
     /// Plays `path` from `start_ms`. If it is the same paused file and `start_ms` matches the
-    /// current position, it just resumes.
+    /// current position, it just resumes. A file plays with the default channel mix.
     pub fn play_file(&self, path: &Path, start_ms: u64) -> Result<(), String> {
-        let path_str = path.to_string_lossy().into_owned();
-        {
-            let mut st = lock(&self.state);
-            if st.seq.file_path.as_deref() == Some(path_str.as_str()) && !st.seq.is_playing {
-                let pos = st.pos_ms();
-                if pos.abs_diff(start_ms) <= 5 && pos < st.seq.duration_us / 1000 {
-                    st.seq.is_playing = true;
-                    st.emit_pending = true;
-                    return Ok(());
-                }
-            }
+        let key = path.to_string_lossy().into_owned();
+        if lock(&self.state).resume_if_paused_at(&key, start_ms) {
+            return Ok(());
         }
         let (events, duration_ms) = read_timed_events(path)?;
         let duration_us = (duration_ms * 1000).max(events.last().map(|e| e.time_us).unwrap_or(0));
         let mut st = lock(&self.state);
-        st.seq = Sequencer {
-            file_path: Some(path_str),
-            events,
-            duration_us,
-            next_idx: 0,
-            pos_frames: 0,
-            is_playing: false,
-        };
-        let start = if start_ms.saturating_mul(1000) >= duration_us { 0 } else { start_ms };
-        st.position_at(start);
-        st.seq.is_playing = duration_us > 0;
-        st.emit_pending = true;
+        st.mix = DEFAULT_MIX;
+        st.load(key, events, duration_us, start_ms);
         Ok(())
+    }
+
+    /// Plays events built in memory (a composition) under `key`, which progress reports as its
+    /// `file_path`. Like [`Self::play_file`], it resumes the same key paused at `start_ms`.
+    /// The channel mix is left as it is: set it first with [`Self::set_channel_mix`].
+    pub fn play_sequence(&self, key: &str, events: Vec<TimedMidiEvent>, duration_us: u64, start_ms: u64) -> Result<(), String> {
+        let mut st = lock(&self.state);
+        if st.resume_if_paused_at(key, start_ms) {
+            return Ok(());
+        }
+        st.load(key.to_string(), events, duration_us, start_ms);
+        Ok(())
+    }
+
+    /// Swaps the events of the loaded sequence `key` (edited while it plays), keeping the position,
+    /// play state and loop. The sounding notes are released, not cut. Returns `false` (and does
+    /// nothing) if `key` is not the loaded sequence.
+    pub fn replace_sequence(&self, key: &str, events: Vec<TimedMidiEvent>, duration_us: u64) -> bool {
+        let mut st = lock(&self.state);
+        if st.seq.file_path.as_deref() != Some(key) {
+            return false;
+        }
+        if let Some(s) = st.synth.as_mut() {
+            for ch in 0..16 {
+                s.process_midi_message(ch, 0xB0, 64, 0);
+            }
+            s.note_off_all(false);
+        }
+        let pos = st.pos_us().min(duration_us);
+        st.seq.events = events;
+        st.seq.duration_us = duration_us;
+        st.seq.loop_us = st.seq.loop_us.filter(|(_, end)| *end <= duration_us);
+        st.chase_to(pos);
+        if pos >= duration_us {
+            st.seq.is_playing = false;
+        }
+        st.emit_pending = true;
+        true
+    }
+
+    /// Key of the loaded sequence: a file path or a composition's key.
+    pub fn active_key(&self) -> Option<String> {
+        lock(&self.state).seq.file_path.clone()
+    }
+
+    /// Sets `(channel, volume, muted)` for each listed channel, right away. A channel being muted
+    /// goes silent at once; the others keep the mix they had.
+    pub fn set_channel_mix(&self, mix: &[(u8, u8, bool)]) {
+        let mut st = lock(&self.state);
+        for &(ch, volume, muted) in mix.iter().filter(|(ch, _, _)| *ch < 16) {
+            let slot = usize::from(ch);
+            let was_muted = st.mix[slot].muted;
+            st.mix[slot] = ChannelMix { volume: volume.min(127), muted };
+            if let Some(s) = st.synth.as_mut() {
+                s.process_midi_message(i32::from(ch), 0xB0, 7, i32::from(volume.min(127)));
+                if muted && !was_muted {
+                    s.process_midi_message(i32::from(ch), 0xB0, 120, 0);
+                }
+            }
+        }
     }
 
     pub fn pause(&self) -> Result<(), String> {
@@ -459,8 +592,44 @@ impl AudioEngine {
         st.seq.is_playing = false;
         st.reset_synth();
         st.seq.next_idx = 0;
-        st.seq.pos_frames = 0;
+        st.seq.pos_us = 0.0;
         st.emit_pending = st.seq.file_path.is_some();
+        Ok(())
+    }
+
+    /// Playback speed (clamped to [`MIN_PLAYBACK_RATE`], [`MAX_PLAYBACK_RATE`]). It changes the
+    /// tempo, not the pitch: the events are synthesized later or earlier.
+    pub fn set_playback_rate(&self, rate: f32) {
+        let rate = if rate.is_finite() { rate.clamp(MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE) } else { 1.0 };
+        lock(&self.state).rate = rate;
+    }
+
+    pub fn playback_rate(&self) -> f32 {
+        lock(&self.state).rate
+    }
+
+    /// Loops `[start_ms, end_ms)` of the loaded file (`None` = no loop). If the position is
+    /// outside the loop, it moves to its start.
+    pub fn set_playback_loop(&self, range: Option<(u64, u64)>) -> Result<(), String> {
+        let mut st = lock(&self.state);
+        let Some((start_ms, end_ms)) = range else {
+            st.seq.loop_us = None;
+            return Ok(());
+        };
+        if st.seq.file_path.is_none() {
+            return Err(t!("backend.playback.noFile"));
+        }
+        let start = start_ms.saturating_mul(1000);
+        let end = end_ms.saturating_mul(1000).min(st.seq.duration_us);
+        if end < start + MIN_LOOP_US {
+            return Err(t!("backend.playback.loopTooShort"));
+        }
+        st.seq.loop_us = Some((start, end));
+        let pos = st.pos_us();
+        if pos < start || pos >= end {
+            st.position_at(start / 1000);
+            st.emit_pending = true;
+        }
         Ok(())
     }
 
@@ -476,12 +645,18 @@ impl AudioEngine {
         st.metronome.bpm = bpm;
     }
 
+    /// Live monitoring of the keyboard. Turning it on restores the default channel mix, so a
+    /// track muted in the composer doesn't silence the keyboard.
     pub fn set_live_synth(&self, enabled: bool) {
         let mut st = lock(&self.state);
         if st.live_synth && !enabled && !st.seq.is_playing {
             if let Some(s) = st.synth.as_mut() {
                 s.note_off_all(false);
             }
+        }
+        if enabled && !st.live_synth && st.mix != DEFAULT_MIX {
+            st.mix = DEFAULT_MIX;
+            st.apply_mix();
         }
         st.live_synth = enabled;
     }
@@ -517,6 +692,64 @@ impl Drop for AudioEngine {
             let _ = h.join();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Offline rendering (export)
+// ---------------------------------------------------------------------------
+
+/// Reverb and release kept after the last event.
+const EXPORT_TAIL_SECS: u32 = 2;
+const EXPORT_BLOCK_FRAMES: usize = 4096;
+
+/// Renders `path` with `sound_font` at `sample_rate`, independently of the live player, and hands
+/// the interleaved stereo samples to `sink` block by block. Returns the frames rendered.
+pub fn render_file_offline(
+    sound_font: Arc<SoundFont>,
+    path: &Path,
+    sample_rate: u32,
+    sink: impl FnMut(&[f32]) -> Result<(), String>,
+) -> Result<u64, String> {
+    let (events, duration_ms) = read_timed_events(path)?;
+    let duration_us = (duration_ms * 1000).max(events.last().map(|e| e.time_us).unwrap_or(0));
+    render_events_offline(sound_font, events, duration_us, sample_rate, sink)
+}
+
+/// [`render_file_offline`] for events built in memory (a composition's mixdown).
+pub fn render_events_offline(
+    sound_font: Arc<SoundFont>,
+    events: Vec<TimedMidiEvent>,
+    duration_us: u64,
+    sample_rate: u32,
+    mut sink: impl FnMut(&[f32]) -> Result<(), String>,
+) -> Result<u64, String> {
+    let mut st = AudioState::new(Some(sound_font), sample_rate);
+    if st.synth.is_none() {
+        return Err(t!("backend.export.noSoundfont"));
+    }
+    st.seq = Sequencer {
+        file_path: Some("offline".into()),
+        events,
+        duration_us,
+        is_playing: duration_us > 0,
+        ..Sequencer::default()
+    };
+    let mut buf = vec![0.0f32; EXPORT_BLOCK_FRAMES * 2];
+    let mut frames = 0u64;
+    while st.seq.is_playing {
+        st.render_interleaved(&mut buf);
+        sink(&buf)?;
+        frames += EXPORT_BLOCK_FRAMES as u64;
+    }
+    let tail = (sample_rate * EXPORT_TAIL_SECS) as usize;
+    let mut done = 0;
+    while done < tail {
+        let n = EXPORT_BLOCK_FRAMES.min(tail - done);
+        st.render_interleaved(&mut buf[..n * 2]);
+        sink(&buf[..n * 2])?;
+        done += n;
+    }
+    Ok(frames + tail as u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -878,6 +1111,184 @@ mod tests {
         assert!(eng.position_ms() > 1_000);
         assert!(eng.seek(500).is_ok());
         assert!(eng.play_file(&dir.path().join("no_existe.mid"), 0).is_err());
+    }
+
+    #[test]
+    fn playback_rate_scales_the_clock() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        eng.set_playback_rate(0.5);
+        eng.play_file(&mid, 0).unwrap();
+        eng.render_offline(44_100);
+        let pos = eng.position_ms();
+        assert!((495..=505).contains(&pos), "1 s at half speed: pos={pos}");
+        // The speed is kept when another file (or the same one) is played.
+        eng.play_file(&mid, 0).unwrap();
+        assert_eq!(eng.playback_rate(), 0.5);
+        eng.set_playback_rate(9.0);
+        assert_eq!(eng.playback_rate(), MAX_PLAYBACK_RATE);
+        eng.set_playback_rate(f32::NAN);
+        assert_eq!(eng.playback_rate(), 1.0);
+        eng.set_playback_rate(0.0);
+        assert_eq!(eng.playback_rate(), MIN_PLAYBACK_RATE);
+    }
+
+    #[test]
+    fn loop_wraps_inside_the_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        assert!(eng.set_playback_loop(Some((0, 1000))).is_err(), "no file loaded");
+        eng.play_file(&mid, 0).unwrap();
+        assert!(eng.set_playback_loop(Some((900, 950))).is_err(), "too short");
+        // Outside the loop: it moves to the start.
+        eng.set_playback_loop(Some((500, 1000))).unwrap();
+        assert_eq!(eng.position_ms(), 500);
+
+        let mut wrapped = false;
+        let mut last = 500;
+        let mut audio = Vec::new();
+        for _ in 0..30 {
+            audio.extend(eng.render_offline(4_410));
+            let pos = eng.position_ms();
+            assert!((500..1000).contains(&pos), "pos={pos}");
+            wrapped |= pos < last;
+            last = pos;
+        }
+        assert!(wrapped, "3 s of a 0.5 s loop must wrap");
+        assert!(eng.is_playing());
+        assert!(rms(&audio) > 0.01 && audio.iter().all(|v| v.is_finite()));
+
+        // Replaying the same file keeps the loop; without it, it plays to the end.
+        eng.play_file(&mid, 600).unwrap();
+        eng.render_offline(44_100);
+        assert!(eng.position_ms() < 1000);
+        eng.set_playback_loop(None).unwrap();
+        eng.render_offline(88_200);
+        assert!(!eng.is_playing());
+        assert_eq!(eng.position_ms(), 2_000);
+    }
+
+    /// 1 s of chords on `channel`.
+    fn chords(channel: u8) -> Vec<TimedMidiEvent> {
+        let mut evs = Vec::new();
+        for i in 0..4u64 {
+            for k in [60u8, 64, 67] {
+                evs.push(TimedMidiEvent::new(i * 250_000, vec![0x90 | channel, k, 100]));
+                evs.push(TimedMidiEvent::new(i * 250_000 + 200_000, vec![0x80 | channel, k, 0]));
+            }
+        }
+        evs.sort_by_key(|e| e.time_us);
+        evs
+    }
+
+    #[test]
+    fn channel_mix_mutes_and_resets_with_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        let mut evs = chords(0);
+        evs.extend(chords(1));
+        evs.sort_by_key(|e| e.time_us);
+
+        eng.set_channel_mix(&[(0, 100, true), (1, 100, true)]);
+        eng.play_sequence("composition:x", evs, 1_000_000, 0).unwrap();
+        assert_eq!(eng.active_key().as_deref(), Some("composition:x"));
+        assert_eq!(eng.current_progress().unwrap().file_path, "composition:x");
+        assert!(peak(&eng.render_offline(8_820)) < 1e-4, "both channels muted");
+
+        eng.set_channel_mix(&[(1, 100, false), (16, 0, true)]);
+        eng.seek(250).unwrap();
+        assert!(rms(&eng.render_offline(8_820)) > 0.01, "channel 2 back");
+
+        // A file plays with the default mix, even on a channel muted before.
+        eng.set_channel_mix(&[(0, 100, true)]);
+        eng.play_file(&mid, 0).unwrap();
+        assert!(rms(&eng.render_offline(8_820)) > 0.01);
+    }
+
+    #[test]
+    fn replacing_the_sequence_keeps_the_position() {
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        eng.play_sequence("composition:x", chords(0), 1_000_000, 0).unwrap();
+        eng.render_offline(22_050);
+        let pos = eng.position_ms();
+        assert!((495..=505).contains(&pos), "{pos}");
+
+        assert!(!eng.replace_sequence("composition:other", chords(1), 3_000_000));
+        assert!(eng.replace_sequence("composition:x", chords(1), 3_000_000));
+        assert_eq!(eng.position_ms(), pos);
+        assert!(eng.is_playing());
+        assert_eq!(eng.current_progress().unwrap().duration_ms, 3_000);
+
+        // Same key, paused at the same point: it resumes without reloading.
+        eng.pause().unwrap();
+        eng.play_sequence("composition:x", Vec::new(), 0, pos).unwrap();
+        assert!(eng.is_playing());
+        assert_eq!(eng.current_progress().unwrap().duration_ms, 3_000);
+
+        // Shortened past the position: it stops at the new end.
+        assert!(eng.replace_sequence("composition:x", chords(0), 300_000));
+        assert!(!eng.is_playing());
+        assert_eq!(eng.position_ms(), 300);
+    }
+
+    #[test]
+    fn renders_a_file_offline_without_touching_the_player() {
+        let dir = tempfile::tempdir().unwrap();
+        let mid = test_midi(dir.path());
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        eng.play_file(&mid, 500).unwrap();
+        let sf = eng.sound_font().expect("SoundFont loaded");
+
+        let mut out = Vec::new();
+        let frames = render_file_offline(sf, &mid, 22_050, |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(out.len() as u64, frames * 2);
+        // 2 s of music (rounded up to a block) + 2 s of tail.
+        let secs = frames as f64 / 22_050.0;
+        assert!((4.0..4.2).contains(&secs), "{secs} s");
+        assert!(rms(&out[..22_050 * 2]) > 0.01);
+        assert!(out.iter().all(|v| v.is_finite() && v.abs() <= 1.0));
+        // The tail fades out.
+        assert!(peak(&out[out.len() - 2_000..]) < peak(&out[..22_050 * 2]));
+        // The live player is still where it was.
+        assert_eq!(eng.position_ms(), 500);
+        assert!(eng.is_playing());
+
+        let failing = render_file_offline(eng.sound_font().unwrap(), &mid, 22_050, |_| Err("disk full".into()));
+        assert_eq!(failing.unwrap_err(), "disk full");
+    }
+
+    #[test]
+    fn renders_events_built_in_memory() {
+        let (em, _) = collecting_emitter();
+        let eng = AudioEngine::new_headless(sf2_path(), em);
+        let mut evs = chords(0);
+        evs.extend(chords(1).into_iter().map(|mut e| {
+            e.time_us += 1_000_000;
+            e
+        }));
+        let mut out = Vec::new();
+        let frames = render_events_offline(eng.sound_font().unwrap(), evs, 2_500_000, 22_050, |b| {
+            out.extend_from_slice(b);
+            Ok(())
+        })
+        .unwrap();
+        // 2.5 s of composition (rounded up to a block) + 2 s of tail.
+        let secs = frames as f64 / 22_050.0;
+        assert!((4.5..4.7).contains(&secs), "{secs} s");
+        // The second voice sounds in its second.
+        assert!(rms(&out[22_050 * 2..22_050 * 4]) > 0.01);
     }
 
     #[test]

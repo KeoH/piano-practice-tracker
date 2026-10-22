@@ -10,7 +10,20 @@
     <div class="flex min-h-0 flex-1">
       <app-sidebar />
       <main class="min-w-0 flex-1 overflow-y-auto bg-ink-900">
-        <app-session-view />
+        <!-- Hidden instead of destroyed, so the session keeps its state while browsing other views -->
+        <app-session-view [hidden]="nav.view() !== 'sessions'" />
+        @if (nav.view() === 'stats') {
+          <app-stats-view />
+        } @else if (nav.view() === 'pieces') {
+          <app-pieces-view />
+        } @else if (nav.view() === 'compose') {
+          <!-- Loaded on demand: the composer is the largest view -->
+          @defer (on immediate) {
+            <app-composer-view />
+          } @loading (minimum 200ms) {
+            <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
+          }
+        }
       </main>
     </div>
   } @else if (vault.loaded()) {
