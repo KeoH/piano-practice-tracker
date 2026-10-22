@@ -1121,13 +1121,17 @@ mod tests {
     /// App state on temporary folders, with a headless audio engine and a vault already open.
     struct Fixture {
         app: tauri::App<MockRuntime>,
-        tmp: tempfile::TempDir,
+        /// Canonical path of `_tmp`: vaults are stored canonicalized, and on macOS the temp dir
+        /// is under `/var`, a symlink to `/private/var`.
+        root: PathBuf,
+        _tmp: tempfile::TempDir,
     }
 
     impl Fixture {
         fn new() -> Self {
             let tmp = tempfile::tempdir().unwrap();
-            let dirs = AppDirs::new(tmp.path().join("data"), tmp.path().join("config"));
+            let root = tmp.path().canonicalize().unwrap();
+            let dirs = AppDirs::new(root.join("data"), root.join("config"));
             dirs.ensure_dirs().unwrap();
             let sf2 = sf2_builder::ensure_soundfont(&dirs.sf2_file).unwrap();
             let audio = Arc::new(AudioEngine::new_headless(&sf2, Arc::new(|_| {})));
@@ -1141,7 +1145,7 @@ mod tests {
                 recording_session: Mutex::new(None),
                 soundfont: Arc::new(Mutex::new(SoundfontState { current: sf2, loading: false })),
             });
-            let fx = Fixture { app, tmp };
+            let fx = Fixture { app, root, _tmp: tmp };
             block_on(create_vault(fx.handle(), fx.state(), fx.path("vault"))).unwrap();
             fx
         }
@@ -1155,7 +1159,7 @@ mod tests {
         }
 
         fn path(&self, name: &str) -> String {
-            self.tmp.path().join(name).to_string_lossy().into_owned()
+            self.root.join(name).to_string_lossy().into_owned()
         }
 
         fn vault(&self) -> Arc<Vault> {
@@ -1262,7 +1266,7 @@ mod tests {
         let info = block_on(get_vault_info(fx.state())).unwrap();
         assert_eq!(info.current.as_deref(), Some(first.as_str()));
         assert!(fx.state().config.lock().unwrap().recent_vaults.contains(&first));
-        assert!(fx.tmp.path().join("config/config.json").is_file());
+        assert!(fx.root.join("config/config.json").is_file());
 
         // Opening the vault that is already open changes nothing.
         let again = block_on(open_vault(fx.handle(), fx.state(), first.clone(), false)).unwrap();
@@ -1289,7 +1293,7 @@ mod tests {
         // The old layout: a database (made here by a vault) in the app data folder.
         let legacy = fx.state().dirs.data_dir.clone();
         let old = vault::open_vault(&{
-            let dir = fx.tmp.path().join("old");
+            let dir = fx.root.join("old");
             vault::create_vault(&dir).unwrap();
             dir
         }, true)
@@ -1298,7 +1302,7 @@ mod tests {
         old.db.create_session("Old session", 90).unwrap();
         old.release_lock();
         drop(old);
-        std::fs::copy(fx.tmp.path().join("old").join(crate::paths::DB_FILE_NAME), legacy.join(crate::paths::DB_FILE_NAME)).unwrap();
+        std::fs::copy(fx.root.join("old").join(crate::paths::DB_FILE_NAME), legacy.join(crate::paths::DB_FILE_NAME)).unwrap();
 
         let info = block_on(import_legacy_data(fx.handle(), fx.state(), fx.path("imported"))).unwrap();
         assert_eq!(info.current.as_deref(), Some(fx.path("imported").as_str()));
@@ -1555,7 +1559,7 @@ mod tests {
         assert!(!info.loading);
 
         assert_eq!(block_on(set_soundfont(fx.state(), fx.path("piano.sf3"))).unwrap_err(), t!("backend.soundfont.invalidFile"));
-        let copy = fx.tmp.path().join("copy.sf2");
+        let copy = fx.root.join("copy.sf2");
         std::fs::copy(&info.current_path, &copy).unwrap();
         let info = block_on(set_soundfont(fx.state(), copy.to_string_lossy().into_owned())).unwrap();
         assert_eq!(info.current_path, copy.to_string_lossy());
