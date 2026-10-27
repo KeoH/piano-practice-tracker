@@ -52,7 +52,12 @@ export type IconName =
   | 'zoom-in'
   | 'zoom-out'
   | 'redo'
-  | 'minus';
+  | 'minus'
+  | 'trophy'
+  | 'upload'
+  | 'arrow-up'
+  | 'arrow-down'
+  | 'back';
 
 /** Inline SVG icons (1.75 stroke, inherit `currentColor`). */
 @Component({
@@ -72,6 +77,11 @@ export type IconName =
     >
       @switch (name()) {
         @case ('plus') { <path d="M12 5v14M5 12h14" /> }
+        @case ('trophy') { <path d="M8 4h8v5a4 4 0 0 1-8 0V4ZM8 6H5a2.5 2.5 0 0 0 3 4M16 6h3a2.5 2.5 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4" /> }
+        @case ('upload') { <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15" /> }
+        @case ('arrow-up') { <path d="M12 19V5M6 11l6-6 6 6" /> }
+        @case ('arrow-down') { <path d="M12 5v14M6 13l6 6 6-6" /> }
+        @case ('back') { <path d="M19 12H5M11 6l-6 6 6 6" /> }
         @case ('minus') { <path d="M5 12h14" /> }
         @case ('info') { <circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /> }
         @case ('search') { <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /> }

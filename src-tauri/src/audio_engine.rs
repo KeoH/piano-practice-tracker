@@ -645,6 +645,15 @@ impl AudioEngine {
         st.metronome.bpm = bpm;
     }
 
+    /// Turns the metronome on with its first (accented) beat right now, even if it was already on:
+    /// it aligns the clicks with something that starts at this instant (the challenge count-in).
+    pub fn restart_metronome(&self, bpm: u32) {
+        let mut st = lock(&self.state);
+        st.metronome.pos = 0;
+        st.metronome.enabled = true;
+        st.metronome.bpm = bpm.clamp(20, 400);
+    }
+
     /// Live monitoring of the keyboard. Turning it on restores the default channel mix, so a
     /// track muted in the composer doesn't silence the keyboard.
     pub fn set_live_synth(&self, enabled: bool) {

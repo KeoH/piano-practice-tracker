@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChallengeStore } from '../../core/challenge.store';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -13,10 +14,12 @@ import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { VaultStore } from '../../core/vault.store';
 import { IconComponent, type IconName } from '../icon/icon.component';
+import { MelodyListComponent } from '../melody-list/melody-list.component';
 
 const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
   { view: 'sessions', label: 'nav.sessions', icon: 'calendar' },
   { view: 'pieces', label: 'nav.pieces', icon: 'book' },
+  { view: 'challenges', label: 'nav.challenges', icon: 'target' },
   { view: 'compose', label: 'nav.compose', icon: 'layers' },
   { view: 'stats', label: 'nav.stats', icon: 'chart' },
 ];
@@ -24,7 +27,7 @@ const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
 @Component({
   selector: 'app-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, MelodyListComponent, TranslatePipe, PluralPipe],
   host: { class: 'flex h-full w-[280px] shrink-0 flex-col border-r border-line bg-ink-950' },
   templateUrl: './sidebar.component.html',
 })
@@ -39,6 +42,7 @@ export class SidebarComponent {
   protected readonly pieces = inject(PieceStore);
   protected readonly compositions = inject(CompositionStore);
   protected readonly navItems = NAV_ITEMS;
+  protected readonly challenge = inject(ChallengeStore);
 
   protected readonly formatMs = formatMs;
 

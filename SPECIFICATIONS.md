@@ -23,6 +23,7 @@ A native desktop application for **Ubuntu Linux** for recording, slicing and ana
 6. **Trims can be undone:** before each trim the raw take is copied to `midi/history/`; the last 10 trims of each session can be undone (undoing an extraction deletes the fragment it created). Recording again clears that history.
 7. **Practice time is recorded, not derived:** `practice_log` keeps what was actually recorded each day, so trimming or deleting a session does not change the statistics.
 8. **Repertoire:** a fragment can be filed under a piece and a passage (free text), so the takes of the same passage can be compared across sessions.
+10. **Challenge mode (compete with your previous self):** a **melody** is a frozen copy of a fragment or of an imported `.mid` (leading silence removed), so its history never breaks if the fragment changes or is deleted. An **attempt** plays it at 40-150 % of its tempo after a one-bar count-in; every note is scored live and the attempt is saved with its score, accuracy, per-note detail, mistakes and the MIDI played. The **record** is the best completed attempt at the same tempo, and a "ghost" compares the notes hit so far with it at the same moment. Attempts stopped by hand are kept as incomplete and never count for records or charts. A vault gets five **starter melodies** the first time it is opened (C major scale, Twinkle Twinkle, Frère Jacques, Ode to Joy, Petzold's Minuet in G: public domain, right hand); deleted ones can be added again from the Challenges view.
 9. **Composer:** recorded fragments are laid out as clips on a multitrack timeline to build a larger piece. A clip points to its fragment (window, repeats, transposition) and never copies its MIDI; each track is one MIDI channel with a General MIDI instrument, and all tracks sound at once.
 
 ---
@@ -69,7 +70,7 @@ Outside the vault:
 
 The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
-### 3.1. Full SQL Schema (version 4)
+### 3.1. Full SQL Schema (version 5)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -185,6 +186,43 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 ```
 
+Version 5 adds the challenge mode tables:
+
+```sql
+-- No foreign key to the fragment: the melody is a copy. Its file and the attempts' files live in
+-- midi/melodies/ and midi/attempts/ (created on the first write).
+CREATE TABLE IF NOT EXISTS melodies (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,              -- 'fragment' | 'import'
+    source_fragment_id TEXT,
+    file_path TEXT NOT NULL,
+    bpm INTEGER NOT NULL,              -- tempo at 100 %
+    duration_ms INTEGER NOT NULL,
+    note_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS challenge_attempts (
+    id TEXT PRIMARY KEY,
+    melody_id TEXT NOT NULL REFERENCES melodies(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    tempo_pct INTEGER NOT NULL,
+    bpm INTEGER NOT NULL,              -- effective BPM
+    completed INTEGER NOT NULL,        -- 0 = stopped by hand
+    score INTEGER NOT NULL,            -- 0-1000
+    accuracy REAL NOT NULL,            -- notes hit / notes
+    hits INTEGER NOT NULL, perfect INTEGER NOT NULL, misses INTEGER NOT NULL,
+    wrong INTEGER NOT NULL, extra INTEGER NOT NULL,
+    mean_offset_ms INTEGER NOT NULL, mean_abs_offset_ms INTEGER NOT NULL,
+    latency_comp_ms INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    played_midi_path TEXT,
+    details_json TEXT NOT NULL         -- AttemptDetails: per-note outcome + played errors
+);
+```
+
 Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and `drive_file_id` columns. The migration to version 2 drops them, deletes the `google_*` and `drive_*` settings, and turns the old absolute paths into relative ones (in `markdown_notes` too).
 
 The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the `piece_id` / `passage` columns. It fills `practice_log` with one entry per existing session: its raw take plus its fragments, on the session's date. It is an approximation: sections discarded before version 3 are not counted. The weekly goal is the `weekly_goal_minutes` key of `app_settings`.
@@ -253,6 +291,14 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - **Live vs export:** live playback leaves volume, mute and solo to the engine's channel mix; WAV and MIDI exports bake them in (silent tracks are left out). Solo wins: once a track is soloed, only the soloed ones sound, and a muted track never does.
 - **MIDI export:** SMF format 1 with a tempo track and one named track per voice (its program and volume at the start), timed at a nominal 120 BPM.
 - **Instrument preview:** a short arpeggio and chord with any General MIDI program; `soundfont::gm_programs` lists the programs (bank 0) the active SoundFont has.
+
+### 4.8. Challenge Mode (`challenge.rs`)
+- **Notes:** note-ons are paired with note-offs (FIFO per channel and key) and the leading silence is trimmed, so the first note is at $t = 0$. At `tempo_pct` the expected time of a note is $t \cdot 100 / tempo\_pct$.
+- **Window:** $W = clamp(150\text{ ms} \cdot 100 / tempo\_pct,\ 100,\ 250)$ ms; a hit is "perfect" if $|\Delta| \le W/3$.
+- **Matching:** each played note-on is matched with the closest still unmatched expected note of the **same key** within $\pm W$ (chords work on their own); otherwise it is **wrong** if another expected note was due within the window, or **extra**. An expected note whose window closes unmatched is **missed**.
+- **Metrics:** `accuracy = hits / N`; each hit has quality $q = 1 - 0.5 \cdot |\Delta| / W$; `score = round(1000 · Σq / (N + 0.5 · (wrong + extra)))`; plus the mean signed and absolute offsets.
+- **Latency:** the user plays along with what they hear (count-in, metronome, guide), which comes out `output_latency_us` late; it is subtracted from the played times.
+- **Live runner:** the same `Matcher` scores live and offline. A ticker thread emits `challenge-progress` every 50 ms, starts the guide at the end of the count-in (at the challenge tempo through the global playback speed, restored afterwards) and ends the attempt 1.5 s after the last note's window. The capture reuses `midi_recorder` without writing a session take; with the simulator it plays the melody itself with some jitter and mistakes.
 
 ### 4.4. Vaults (`vault.rs`)
 - **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
@@ -329,6 +375,19 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - `add_timeline_comment(fragment_id: String, timestamp_ms: u64, content: String) -> Result<TimelineCommentDto, String>`
 - `delete_timeline_comment(comment_id: String) -> Result<(), String>`
 
+### Challenge Mode
+- `get_melodies() -> Result<Vec<MelodySummaryDto>, String>`
+- `get_melody_detail(melody_id: String) -> Result<MelodyDetailDto, String>` (melody, notes and attempts with their detail)
+- `create_melody_from_fragment(fragment_id: String, title: Option<String>) -> Result<MelodyDto, String>`
+- `import_melody(path: String, title: Option<String>) -> Result<MelodyDto, String>`
+- `rename_melody(melody_id: String, title: String) -> Result<MelodyDto, String>`
+- `delete_melody(melody_id: String) -> Result<(), String>`
+- `delete_attempt(attempt_id: String) -> Result<(), String>`
+- `add_starter_melodies() -> Result<Vec<MelodyDto>, String>` (the missing ones; returns those added)
+- `start_challenge(melody_id: String, port_id: String, tempo_pct: u32, metronome_on: bool, guide_on: bool, live_synth_on: bool) -> Result<ChallengeStarted, String>`
+- `stop_challenge() -> Result<(), String>` (kept as incomplete, unless nothing was played)
+- Events: `challenge-note` (each played note, classified), `challenge-progress` (every 50 ms) and `challenge-finished` (whichever way the attempt ended).
+
 ### Vault
 - `get_vault_info() -> Result<VaultInfo, String>`
 - `create_vault(path: String) -> Result<VaultInfo, String>`
@@ -387,7 +446,13 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 7. **Practice Statistics:**
    - Today, the current and best streak (days with at least a minute of practice; today's practice can still continue yesterday's streak), and the week against a goal set by the user.
    - A heatmap of the last 53 weeks (levels at 1, 15, 30 and 60 minutes) and a bar chart of the last 30 days, with a tooltip on hover or focus and a table view.
-8. **Composer:**
+8. **Challenges:**
+   - Sidebar: "Import .mid…" and the melody list (attempts and best score). Each fragment card has "Use as a challenge".
+   - Main area: title, tempo (40-150 %, effective BPM), metronome / guide / live synth switches, a start/stop button with the record at this tempo, and "Listen" at the chosen tempo.
+   - A piano roll that scrolls past a fixed playhead, with a count-in overlay; notes turn green when hit and red when missed, and wrong/extra notes appear as red marks. Live counters and the ghost ("+3 vs record").
+   - Result card: accuracy, score, new record, comparison with the record and the previous attempt, timing tendency, the list of mistakes (clicking one highlights it on the roll), retry and the suggested tempo (+5 % from 90 % accuracy, −10 % under 50 %). Then the attempt history.
+   - In **Statistics**, a "Challenge progress" section: a table of every melody (attempts, best score, mastered tempo, recent accuracy sparkline, trend) and, per melody, key figures, accuracy per attempt with the best so far, tempo per attempt and a map of the notes missed most in the last 10 completed attempts.
+9. **Composer:**
    - The sidebar lists the compositions; a new one starts with one empty piano track and a drop zone that explains the three steps.
    - Header (editable title, tracks · clips · length, Export MIDI / Export WAV, undo, redo, delete) and a transport bar (to the start, play/pause, stop, A-B loop, position, snap to clip edges / seconds / off, speed and zoom).
    - Multitrack timeline: a ruler (click to seek, drag to set the loop) and one row per track with its colour, editable name, M / S, instrument and volume. Clips show their fragment's piano roll; they are dragged between tracks (Alt copies), trimmed by their edges and repeated with a tab on their corner. A row at the bottom takes a fragment onto a new track.

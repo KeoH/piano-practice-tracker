@@ -25,7 +25,7 @@ cargo llvm-cov --lib --summary-only                # Rust coverage (needs `cargo
 cargo check
 ```
 
-Frontend specs are `*.spec.ts` next to the code (Vitest globals, jsdom; `TestBed` for services). So far they cover only pure code (`format`, `markdown`, `I18nService`). No linter is configured (there is a `.prettierrc`; clippy is not installed).
+Frontend specs are `*.spec.ts` next to the code (Vitest globals, jsdom; `TestBed` for services). They cover mostly pure code (`format`, `markdown`, `music`, `challenge-stats`, `I18nService`…). No linter is configured (there is a `.prettierrc`; clippy is not installed).
 
 Environment on this machine:
 - `src-tauri/.cargo/config.toml` limits cargo to `jobs = 4` and `Cargo.toml` strips debuginfo from dependencies: the machine was running out of RAM. Don't raise the parallelism or run several heavy builds at once.
@@ -58,10 +58,12 @@ Environment on this machine:
   1. an `async` function in `commands.rs`;
   2. registering it in `generate_handler!` in `lib.rs`;
   3. a method in `TauriApiService` (`src/app/core/tauri-api.service.ts`), which is the frontend's only IPC entry point.
-- Backend → frontend event: `playback-progress` (`PlaybackProgress`, every 50 ms). Its `file_path` is the player's key: a file path, `composition:<id>` or `preview:<program>`.
+- Backend → frontend events (names in `lib.rs` and `models.ts`):
+  - `playback-progress` (`PlaybackProgress`, every 50 ms). Its `file_path` is the player's key: a file path, `composition:<id>` or `preview:<program>`.
+  - `challenge-note` (each played note, already classified), `challenge-progress` (every 50 ms during an attempt) and `challenge-finished` (the only way the result of an attempt reaches the frontend, whether it ended on its own or with `stop_challenge`).
 
 ### Backend (`src-tauri/src`)
-- **Tauri-independent modules:** `db`, `vault`, `raw_history`, `i18n`, `midi_recorder`, `midi_slicer`, `midi_notes`, `composition`, `audio_engine`, `wav`, `sf2_builder`, `soundfont` and `paths` don't import `tauri::`, so they can be tested without the app. They emit outwards through callbacks (`ProgressEmitter`, `MidiSink`) that `lib.rs` wires to `AppHandle::emit`.
+- **Tauri-independent modules:** `db`, `vault`, `raw_history`, `i18n`, `midi_recorder`, `midi_slicer`, `midi_notes`, `composition`, `challenge`, `starter_melodies`, `audio_engine`, `wav`, `sf2_builder`, `soundfont` and `paths` don't import `tauri::`, so they can be tested without the app. They emit outwards through callbacks (`ProgressEmitter`, `MidiSink`, `ChallengeEmitter`) that `lib.rs` / `commands.rs` wire to `AppHandle::emit`.
 - **`commands.rs`** defines `AppState`, Tauri's managed state. Its commands are `async` so they don't block the UI thread; heavy work (MIDI slicing and analysis) goes in `spawn_blocking`.
   - The open vault lives in `AppState.vault: RwLock<Option<Arc<Vault>>>` and can change at runtime. Data commands start with `let vault = state.vault()?;` (error "No vault is open" if there is none) and use `vault.db` / `vault.paths`.
   - `activate_vault` is the only way to open one: it checks the lock before closing the current one, saves the configuration and adds the folder to the asset protocol scope.
@@ -74,14 +76,15 @@ Environment on this machine:
 
   On exit (`RunEvent::Exit`) the vault lock is deleted.
 - **Paths (`paths.rs`):**
-  - `AppPaths` is the layout of a vault: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `midi/history/<session>/<uuid>.mid` (undo snapshots), `media/` and the `.piano-tracker/` marker (`vault.json` and `lock`).
+  - `AppPaths` is the layout of a vault: `piano_tracker.sqlite`, `midi/raw/raw_session_<id>.mid`, `midi/fragments/frag_<id>.mid`, `midi/history/<session>/<uuid>.mid` (undo snapshots), `midi/melodies/melody_<id>.mid` and `midi/attempts/attempt_<id>.mid` (challenge mode; like `history`, created on the first write), `media/` and the `.piano-tracker/` marker (`vault.json` and `lock`).
   - `AppDirs` is what depends on the machine: `~/.config/piano-tracker/config.json` and `~/.local/share/piano-tracker/assets/default_piano.sf2`. The data lived in `~/.local/share/piano-tracker/` before vaults existed.
 - **`vault.rs`:**
   - `AppConfig` stores the current vault, the recent ones, the chosen SoundFont and the language (`language`, `None` = the system language); it depends on the machine, which is why it doesn't go in the vault.
   - Creating requires a new or empty folder. Opening accepts the marker or a folder with `piano_tracker.sqlite` (the previous version's folder).
   - The lock `{ host, pid, opened_at }` makes opening a vault in use on another computer ask for confirmation (`open_vault(path, force)`). A lock from this computer with a dead pid is ignored.
   - `import_legacy` moves the database, `midi/` and `media/` from the old folder after flushing its WAL.
-- **`db.rs`** (schema v4):
+- **`db.rs`** (schema v5; v5 adds `melodies` and `challenge_attempts`, whose per-note detail is JSON in `details_json`):
+  - **Schema numbers are linear across branches:** a branch that adds a migration takes the next number after every other branch it will be merged after. A vault opened by a newer schema is refused (`backend.db.newerSchema`), so two branches reusing a number make each other's vaults unopenable.
   - Paths are stored **relative to the vault** and the public API returns them absolute (`store_path` / `load_path`). The frontend and the audio engine only see absolute paths.
   - `journal_mode = DELETE`, not WAL: at rest the database is a single file, which is safer inside a synced folder.
   - The v1 → v2 migration drops `sync_queue`, `sync_status`, `drive_file_id` and the Google settings, and turns the old absolute paths into relative ones, including those of the images in `markdown_notes`.
@@ -90,6 +93,13 @@ Environment on this machine:
   - `delete_session` and `delete_fragment` return the paths (`delete_session` includes the undo snapshots); deleting the files is the caller's job.
   - `practice_log` is the time actually recorded (`stop_recording` adds the new part of the take); trimming doesn't change it and deleting a session keeps it (`session_id` → `NULL`). The weekly goal is the `weekly_goal_minutes` setting in `app_settings`.
 - **Undo (`raw_history.rs`, an `impl Vault`):** every trim (extract, discard, discard several) first copies the raw take to `midi/history/` (`snapshot_raw`) and then records it (`record_trim`); `undo_trim` renames the newest snapshot back over the take and deletes the fragment that trim extracted. 10 steps per session (`RAW_HISTORY_LIMIT`). A new recording clears the history: the snapshots don't contain what was recorded after them.
+- **`challenge.rs`:**
+  - **Scoring:** `extract_notes` trims the leading silence; `Matcher` classifies each note-on (hit / wrong / extra) and marks notes missed when their window (100-250 ms, wider when slower) closes. `score_attempt` runs the same `Matcher` offline, so the live and saved results always agree.
+  - **Timeline:** t = 0 is the first note, times scaled by `100 / tempo_pct`. Capture clock → attempt timeline = minus (count-in + `output_latency_us`).
+  - **`ChallengeRunner`:** owns the clock and a ticker thread (progress, `go` at the end of the count-in to start the guide, `time_up` at the end). `stop` does not join the ticker, so `time_up` can finish the attempt from that thread.
+  - **Melodies** are frozen copies (`freeze_melody`) of a fragment or an imported file, so deleting the fragment never breaks the history.
+  - **Starter melodies** (`starter_melodies.rs`): five public-domain tunes written as `(key, beats)`, with fixed ids `starter-<key>`. `activate_vault` adds them once per vault (`app_settings.starter_melodies_seeded`), so deleted ones never come back on their own; `add_starter_melodies` adds the missing ones again. Their titles are translated when they are added (`backend.starter.*`).
+  - `AppState.challenge` holds the attempt in progress; it uses `recorder` (`start_scripted` / `stop_without_saving`), so a recording and a challenge never run at once. The guide changes the global playback rate and `finish_challenge` restores it.
 - **`composition.rs`:** flattens a composition into one `Vec<TimedMidiEvent>`, one MIDI channel per track (channel 10 skipped) with its program change at the start. Each clip is cut with `midi_slicer::build_fragment`, repeated and transposed; the fragment's program changes, CC7 and CC10 are dropped (CC64 too if the track ignores the pedal). `MixMode::Live` leaves volume / mute / solo to the engine's channel mix; `MixMode::Export` bakes them in. `build_named_tracks` feeds the format 1 MIDI export (`midi_slicer::write_smf_multitrack`).
 - **Markdown images:** `save_session_image` returns the relative path (`media/…`), which is what gets inserted into the notes. The frontend resolves it against the vault root and serves it through the asset protocol. `assetProtocol.scope` is empty in `tauri.conf.json`: each vault is allowed at runtime.
 - **`midi_slicer.rs`** works with `TimedMidiEvent { time_us, bytes }` in absolute time, honouring the tempo map, and writes SMF format 0 at 480 TPQ with atomic writes (tmp + rename).
@@ -121,11 +131,13 @@ Environment on this machine:
 - **Angular 22 standalone and zoneless** (there is no zone.js): any state the UI renders must be in signals or `computed`; Tauri event callbacks write to signals.
 - **Stores in `core/`:**
   - `SessionStore`: list, selected session and detail.
+  - `ChallengeStore`: melody list, selected melody with its notes and attempts, tempo (remembered per melody), the attempt in progress (phase, live note states, marks, ghost against the record) and the result. Its `clock()` drives the piano roll and is corrected with each `challenge-progress`. "Listen" sets the global rate to the challenge tempo and puts the user's back when the preview stops. Pure helpers in `core/challenge-stats.ts` and `core/music.ts`.
+  - Challenge components: `challenge-view` (deferred), `melody-list` (sidebar body), `piano-roll` (canvas; `live` mode scrolls with `requestAnimationFrame`, `static` also draws the error heat map), `attempt-result`, `attempt-history`, and `challenge-progress` (deferred inside `stats-view`) with `line-chart` / `sparkline` (SVG; `CHART_COLORS` validated for the dark surface with the dataviz validator, not the UI accent).
   - `PlaybackStore`: a single global player, with the position indexed by `file_path`; each timeline only reacts to the progress of its own file.
   - `RecordingStore`: port, BPM, toggles and timer.
   - `VaultStore`: open vault, recent ones, create / open / import / close and the Settings dialog (`settingsOpen`). Without a vault, `app.html` shows `vault-welcome` instead of the layout.
   - `LanguageStore`: language preference (or automatic) and the system language; the backend stores it (or `localStorage` without Tauri).
-  - `NavStore`: the main view (`sessions`, `pieces`, `compose`, `stats`), chosen in the sidebar. `session-view` stays mounted (hidden) while another view is shown.
+  - `NavStore`: the main view (`sessions`, `pieces`, `challenges`, `compose`, `stats`), chosen in the sidebar. `session-view` stays mounted (hidden) while another view is shown.
   - `PieceStore`: repertoire list, selected piece and its takes; `assign` files a fragment under a piece and passage.
   - `StatsStore`: practice per day and the weekly goal; streaks, heatmap and week totals are pure functions in `core/stats.ts`.
   - `UiPrefsStore`: view preferences of this machine (piano roll or density bars) in `localStorage`, guarded with try/catch. Vault data never goes there.

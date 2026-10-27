@@ -2,6 +2,7 @@
 #[macro_use]
 pub mod i18n;
 pub mod audio_engine;
+pub mod challenge;
 pub mod commands;
 pub mod composition;
 pub mod db;
@@ -13,6 +14,7 @@ pub mod paths;
 pub mod raw_history;
 pub mod sf2_builder;
 pub mod soundfont;
+pub mod starter_melodies;
 pub mod vault;
 pub mod wav;
 
@@ -29,6 +31,9 @@ use crate::paths::AppDirs;
 use crate::vault::AppConfig;
 
 pub const EVENT_PLAYBACK_PROGRESS: &str = "playback-progress";
+pub const EVENT_CHALLENGE_NOTE: &str = "challenge-note";
+pub const EVENT_CHALLENGE_PROGRESS: &str = "challenge-progress";
+pub const EVENT_CHALLENGE_FINISHED: &str = "challenge-finished";
 
 /// Builds the application state: directories, SoundFont, audio and the last open vault.
 fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
@@ -65,6 +70,7 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
         audio: audio.clone(),
         recording_session: Mutex::new(None),
         soundfont: Arc::new(Mutex::new(SoundfontState { current: sf2.clone(), loading: false })),
+        challenge: Mutex::new(None),
     };
 
     // Reopens the last vault. If it is not available or seems open on another computer, the app
@@ -153,6 +159,16 @@ pub fn run() {
             commands::delete_fragment,
             commands::add_timeline_comment,
             commands::delete_timeline_comment,
+            commands::get_melodies,
+            commands::get_melody_detail,
+            commands::create_melody_from_fragment,
+            commands::import_melody,
+            commands::rename_melody,
+            commands::delete_melody,
+            commands::delete_attempt,
+            commands::add_starter_melodies,
+            commands::start_challenge,
+            commands::stop_challenge,
             commands::get_soundfont_info,
             commands::set_soundfont,
             commands::get_vault_info,

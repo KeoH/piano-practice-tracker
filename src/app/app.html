@@ -16,6 +16,13 @@
           <app-stats-view />
         } @else if (nav.view() === 'pieces') {
           <app-pieces-view />
+        } @else if (nav.view() === 'challenges') {
+          <!-- Loaded on demand: it is not needed to start the app -->
+          @defer (on immediate) {
+            <app-challenge-view />
+          } @loading (minimum 200ms) {
+            <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
+          }
         } @else if (nav.view() === 'compose') {
           <!-- Loaded on demand: the composer is the largest view -->
           @defer (on immediate) {
