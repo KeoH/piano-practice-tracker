@@ -4,8 +4,18 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { errorMessage } from './format';
 import { I18nService } from './i18n/i18n.service';
 import {
+  EVENT_CHALLENGE_FINISHED,
+  EVENT_CHALLENGE_NOTE,
+  EVENT_CHALLENGE_PROGRESS,
   EVENT_PLAYBACK_PROGRESS,
   type AppInfo,
+  type ChallengeFinished,
+  type ChallengeNoteEvent,
+  type ChallengeProgress,
+  type ChallengeStarted,
+  type MelodyDetailDto,
+  type MelodyDto,
+  type MelodySummaryDto,
   type AppLink,
   type CompositionDto,
   type CompositionSummaryDto,
@@ -297,6 +307,75 @@ export class TauriApiService {
     return this.call('delete_timeline_comment', { commentId });
   }
 
+  // ---- Challenge mode ----
+  getMelodies(): Promise<MelodySummaryDto[]> {
+    return this.call('get_melodies');
+  }
+
+  getMelodyDetail(melodyId: string): Promise<MelodyDetailDto> {
+    return this.call('get_melody_detail', { melodyId });
+  }
+
+  /** Copies the fragment's MIDI as a new melody (`title` null = the fragment's). */
+  createMelodyFromFragment(fragmentId: string, title: string | null = null): Promise<MelodyDto> {
+    return this.call('create_melody_from_fragment', { fragmentId, title });
+  }
+
+  /** Copies a .mid file into the vault as a new melody (`title` null = the file name). */
+  importMelody(path: string, title: string | null = null): Promise<MelodyDto> {
+    return this.call('import_melody', { path, title });
+  }
+
+  renameMelody(melodyId: string, title: string): Promise<MelodyDto> {
+    return this.call('rename_melody', { melodyId, title });
+  }
+
+  deleteMelody(melodyId: string): Promise<void> {
+    return this.call('delete_melody', { melodyId });
+  }
+
+  /** Adds again the starter melodies the vault does not have; returns the ones added. */
+  addStarterMelodies(): Promise<MelodyDto[]> {
+    return this.call('add_starter_melodies');
+  }
+
+  deleteAttempt(attemptId: string): Promise<void> {
+    return this.call('delete_attempt', { attemptId });
+  }
+
+  startChallenge(
+    melodyId: string,
+    portId: string,
+    tempoPct: number,
+    metronomeOn: boolean,
+    guideOn: boolean,
+    liveSynthOn: boolean,
+  ): Promise<ChallengeStarted> {
+    return this.call('start_challenge', { melodyId, portId, tempoPct, metronomeOn, guideOn, liveSynthOn });
+  }
+
+  /** Stops by hand; the result arrives through `challenge-finished` (as when it ends on its own). */
+  stopChallenge(): Promise<void> {
+    return this.call('stop_challenge');
+  }
+
+  /** Native dialog to choose a .mid file; returns null if cancelled. */
+  async pickMidiFile(): Promise<string | null> {
+    if (!this.available) return null;
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const picked = await open({
+        title: this.i18n.t('challenge.importTitle'),
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'MIDI', extensions: ['mid', 'midi', 'MID', 'MIDI'] }],
+      });
+      return typeof picked === 'string' ? picked : null;
+    } catch (err) {
+      throw new IpcError('dialog.open', errorMessage(err));
+    }
+  }
+
   // ---- Vault ----
   getVaultInfo(): Promise<VaultInfo> {
     return this.call('get_vault_info');
@@ -424,6 +503,18 @@ export class TauriApiService {
   // ---- Events ----
   onPlaybackProgress(cb: (p: PlaybackProgress) => void): Promise<UnlistenFn> {
     return this.listenTo<PlaybackProgress>(EVENT_PLAYBACK_PROGRESS, cb);
+  }
+
+  onChallengeNote(cb: (e: ChallengeNoteEvent) => void): Promise<UnlistenFn> {
+    return this.listenTo<ChallengeNoteEvent>(EVENT_CHALLENGE_NOTE, cb);
+  }
+
+  onChallengeProgress(cb: (p: ChallengeProgress) => void): Promise<UnlistenFn> {
+    return this.listenTo<ChallengeProgress>(EVENT_CHALLENGE_PROGRESS, cb);
+  }
+
+  onChallengeFinished(cb: (f: ChallengeFinished) => void): Promise<UnlistenFn> {
+    return this.listenTo<ChallengeFinished>(EVENT_CHALLENGE_FINISHED, cb);
   }
 
   private async listenTo<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

@@ -199,4 +199,11 @@
       </div>
     }
   </div>
+
+  <!-- Challenge progress: loaded on demand, it carries the charts and the piano roll -->
+  <div class="mt-4 border-t border-line pt-8">
+    @defer (on immediate) {
+      <app-challenge-progress />
+    }
+  </div>
 </div>

@@ -290,7 +290,8 @@
     "loopOn": "Loop on: drag on the timeline to change the passage",
     "loopOff": "Repeat a passage in a loop",
     "loopStart": "Start of the loop",
-    "loopEnd": "End of the loop"
+    "loopEnd": "End of the loop",
+    "useAsChallenge": "Use as a challenge"
   },
   "slicer": {
     "analyzing": "Analyzing…",
@@ -411,6 +412,192 @@
       "folder": "Open folder…"
     }
   },
+  "challenge": {
+    "import": "Import .mid…",
+    "importTitle": "Import a MIDI file as a challenge",
+    "starters": {
+      "add": "Add the starter melodies",
+      "added_one": "1 starter melody added",
+      "added_other": "{n} starter melodies added",
+      "none": "You already have all the starter melodies"
+    },
+    "imported": "“{title}” added to your challenges",
+    "created": "“{title}” is now a challenge",
+    "listLabel": "Challenge melodies",
+    "listTitle": "Melodies",
+    "listEmpty": "No melodies yet. Import a .mid file or turn a fragment into a challenge.",
+    "attemptCount_zero": "No attempts",
+    "attemptCount_one": "1 attempt",
+    "attemptCount_other": "{n} attempts",
+    "bestScore": "Best score",
+    "noteCount_one": "1 note",
+    "noteCount_other": "{n} notes",
+    "originalBpm": "{bpm} BPM at 100 %",
+    "source": {
+      "fragment": "From a fragment",
+      "import": "Imported",
+      "starter": "Starter melody"
+    },
+    "titleLabel": "Melody title",
+    "rename": "Rename",
+    "delete": "Delete melody",
+    "deleteMessage_zero": "“{title}” will be deleted. This cannot be undone.",
+    "deleteMessage_one": "“{title}” and its attempt will be deleted. This cannot be undone.",
+    "deleteMessage_other": "“{title}” and its {n} attempts will be deleted. This cannot be undone.",
+    "deleted": "Melody deleted",
+    "controls": "Challenge settings",
+    "start": "Start the attempt",
+    "stop": "Stop the attempt",
+    "status": {
+      "ready": "Ready",
+      "countin": "Get ready…",
+      "playing": "Play!",
+      "done": "Attempt finished"
+    },
+    "recordAt": "Record at {tempo} %: {score} · {accuracy}",
+    "noRecord": "No record at this tempo yet",
+    "input": "Input: {port}",
+    "tempo": "Tempo",
+    "tempoDown": "Slower",
+    "tempoUp": "Faster",
+    "suggestUp": "Next challenge: {tempo} %",
+    "suggestDown": "Try it slower: {tempo} %",
+    "metronome": "Metronome",
+    "guide": "Guide",
+    "guideHint": "The melody sounds while you play",
+    "rollLabel": "Piano roll",
+    "preview": "Listen at {tempo} %",
+    "pausePreview": "Pause",
+    "howTo": "Press **Start**: after a bar of count-in, play each note as it reaches the line. Notes turn **green** when you hit them and **red** when you miss them.",
+    "live": {
+      "hits": "{n} hit",
+      "misses": "{n} missed",
+      "errors": "{n} wrong",
+      "ghost": "{delta} vs record",
+      "ghostHint": "Notes hit compared with your record at this same moment"
+    },
+    "stopFirst": "Stop the challenge first",
+    "stopRecordingFirst": "Stop the recording before starting a challenge",
+    "emptyTitle": "Challenges",
+    "emptyText": "Play a melody along with the app and beat your previous self: every attempt gets a score and is saved, so you can see how you improve.",
+    "emptyStep1": "**Import a .mid file**, or turn one of your fragments into a challenge from its card.",
+    "emptyStep2": "**Choose the tempo**: start slow and speed up once you get it right.",
+    "emptyStep3": "**Beat your record**: the app compares every note with your best attempt.",
+    "fromFragments": "Go to my fragments",
+    "result": {
+      "label": "Attempt result",
+      "accuracy": "Notes hit",
+      "notesHit": "{hits} of {total} notes",
+      "score": "Score",
+      "outOf": "out of 1000",
+      "incomplete": "Stopped before the end: it does not count for records",
+      "newRecord": "New record!",
+      "newRecordToast": "New record: {score} points!",
+      "vsRecord": "{delta} points vs the record",
+      "vsPrevious": "{delta} accuracy points vs the previous attempt",
+      "early": "You tend to play early ({ms} ms on average)",
+      "late": "You tend to play late ({ms} ms on average)",
+      "steady": "Steady timing (±{ms} ms on average)",
+      "perfect": "Perfect",
+      "good": "Off time",
+      "missed": "Missed",
+      "wrong": "Wrong notes",
+      "extra": "Extra notes",
+      "mistakes_zero": "Mistakes",
+      "mistakes_one": "1 mistake",
+      "mistakes_other": "{n} mistakes",
+      "noMistakes": "No mistakes. Flawless!",
+      "kind": {
+        "missed": "Missed",
+        "wrong": "Wrong note",
+        "extra": "Extra note"
+      },
+      "wrongInstead": "You played {played} instead of {expected}",
+      "retry": "Try again",
+      "tempoUp": "Again at {tempo} %",
+      "tempoDown": "Again at {tempo} %",
+      "viewProgress": "See progress"
+    },
+    "history": {
+      "title": "Attempts",
+      "empty": "No attempts yet.",
+      "date": "Date",
+      "tempo": "Tempo",
+      "score": "Score",
+      "accuracy": "Accuracy",
+      "missed": "Missed",
+      "errors": "Errors",
+      "actions": "Actions",
+      "record": "Record at this tempo",
+      "incomplete": "incomplete",
+      "delete": "Delete attempt",
+      "deleteMessage": "The attempt of {date} will be deleted. This cannot be undone."
+    },
+    "errors": {
+      "loadList": "Could not load the challenges",
+      "loadDetail": "Could not load the melody",
+      "import": "Could not import the file",
+      "create": "Could not create the challenge",
+      "rename": "Could not rename the melody",
+      "delete": "Could not delete the melody",
+      "deleteAttempt": "Could not delete the attempt",
+      "start": "Could not start the challenge",
+      "stop": "Could not stop the challenge",
+      "save": "Could not save the attempt",
+      "starters": "Could not add the starter melodies"
+    }
+  },
+  "challengeStats": {
+    "title": "Challenge progress",
+    "overview": "Overview",
+    "overviewHint": "Your progress in every challenge melody. Choose one to see the detail of its attempts.",
+    "back": "Back to the overview",
+    "play": "Play it",
+    "kpi": {
+      "attempts": "Completed attempts",
+      "attemptsHint_zero": "none yet",
+      "attemptsHint_one": "1 in total",
+      "attemptsHint_other": "{n} in total",
+      "best": "Best score",
+      "mastered": "Mastered tempo",
+      "masteredHint": "fastest with at least 90 % accuracy",
+      "trend": "Trend",
+      "trendHint": "accuracy points: last 5 vs the 5 before"
+    },
+    "accuracyChart": "Accuracy per attempt",
+    "accuracyChartAria": "Line chart of the accuracy of {n} completed attempts",
+    "tempoChart": "Tempo per attempt",
+    "tempoChartAria": "Step chart of the tempo of each completed attempt",
+    "legend": "Legend",
+    "xAxis": "Horizontal axis: completed attempts in order.",
+    "series": {
+      "accuracy": "Accuracy",
+      "bestSoFar": "Best so far",
+      "tempo": "Tempo"
+    },
+    "pointLabel": "{date} · {tempo} %",
+    "heatTitle": "Where you fail",
+    "heatHint": "Each note is coloured by how often it was missed in the last {n} completed attempts.",
+    "heatNever": "never",
+    "heatSometimes": "sometimes",
+    "heatAlways": "always",
+    "noAttempts": "No completed attempts yet: play this melody to see your progress.",
+    "table": {
+      "melody": "Melody",
+      "attempts": "Attempts",
+      "best": "Best",
+      "mastered": "Mastered tempo",
+      "recent": "Recent accuracy",
+      "trend": "Trend",
+      "last": "Last played"
+    },
+    "sparkLabel": "Accuracy of the recent attempts; last one {accuracy} %",
+    "empty": "There are no challenges yet.",
+    "goToChallenges": "Go to Challenges"
+  },
+  "music": {
+    "noteNames": "C,C♯,D,D♯,E,F,F♯,G,G♯,A,A♯,B"
+  },
   "backend": {
     "noVault": "No vault is open",
     "stopRecordingToSwitchVault": "Stop recording before switching vaults",
@@ -427,7 +614,8 @@
       "sessionTitle": "Practice session",
       "pieceTitle": "Untitled piece",
       "compositionTitle": "Untitled composition",
-      "trackName": "Track {n}"
+      "trackName": "Track {n}",
+      "melodyTitle": "Untitled melody"
     },
     "image": {
       "invalidBase64": "Invalid base64 image: {e}",
@@ -497,6 +685,8 @@
       "sessionMissing": "Session '{id}' does not exist",
       "fragmentMissing": "Fragment '{id}' does not exist",
       "commentMissing": "Comment '{id}' does not exist",
+      "melodyMissing": "Melody '{id}' does not exist",
+      "attemptMissing": "Attempt '{id}' does not exist",
       "removeTemp": "Could not delete the temporary file {path}: {e}",
       "invalidBackupPath": "Invalid backup path: {path}",
       "backupFailed": "Could not create the backup: {e}",
@@ -528,6 +718,19 @@
       "transpose": "Transposition goes from -{max} to +{max} semitones",
       "program": "Unknown instrument {program}",
       "volume": "Invalid track volume {volume}"
+    },
+    "challenge": {
+      "noNotes": "The MIDI file has no notes to play",
+      "busy": "Stop the recording or the current challenge first",
+      "titleEmpty": "The title is empty",
+      "melodyInUse": "This melody is being played; stop the challenge first"
+    },
+    "starter": {
+      "scale": "C major scale",
+      "twinkle": "Twinkle, Twinkle, Little Star",
+      "frereJacques": "Frère Jacques",
+      "odeToJoy": "Ode to Joy (Beethoven)",
+      "minuet": "Minuet in G (Petzold)"
     }
   },
   "export": {
@@ -547,6 +750,7 @@
     "label": "Views",
     "sessions": "Sessions",
     "pieces": "Repertoire",
+    "challenges": "Challenges",
     "stats": "Statistics",
     "compose": "Compose"
   },

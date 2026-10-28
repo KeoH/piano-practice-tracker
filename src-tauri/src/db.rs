@@ -6,7 +6,8 @@
 //!   - v3: repertoire (`pieces`, `piece_id` / `passage` on fragments), practice log and the undo
 //!     history of the raw takes.
 //!   - v4: compositions (`compositions`, `composition_tracks`, `composition_clips`).
-//! - File paths (`raw_midi_path`, `file_path`, `local_path`) are stored **relative to the vault
+//!   - v5: challenge mode (`melodies` and `challenge_attempts`).
+//! - File paths (`raw_midi_path`, `file_path`, `local_path`, `played_midi_path`) are stored **relative to the vault
 //!   root** and the public API returns them absolute. That way the vault can be moved or synced
 //!   between computers (Dropbox, Syncthing…) without breaking references.
 //! - `journal_mode = DELETE`: at rest the database is a single file, with no `-wal`/`-shm`,
@@ -20,13 +21,14 @@ use chrono::{Local, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::models::{
-    CompositionClipDto, CompositionDto, CompositionSummaryDto, CompositionTrackDto, FragmentDto, LibraryFragmentDto,
-    PieceDetailDto, PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto,
-    SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
+    AttemptDetails, AttemptDto, AttemptSummaryDto, CompositionClipDto, CompositionDto, CompositionSummaryDto,
+    CompositionTrackDto, FragmentDto, LibraryFragmentDto, MelodyDto, MelodySource, MelodySummaryDto, PieceDetailDto,
+    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto, SessionMediaDto,
+    SessionSummaryDto, TimelineCommentDto,
 };
 use crate::paths::relative_to;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
 /// Trims of a raw take that can be undone; older snapshots are deleted.
 pub const RAW_HISTORY_LIMIT: usize = 10;
 /// Tracks of a composition: one MIDI channel each, skipping channel 10 (GM percussion).
@@ -197,6 +199,48 @@ CREATE INDEX IF NOT EXISTS idx_clips_track ON composition_clips(track_id, start_
 CREATE INDEX IF NOT EXISTS idx_clips_fragment ON composition_clips(fragment_id);
 "#;
 
+/// v5: challenge mode. A melody is a frozen copy of its MIDI, so it has no foreign key to the
+/// fragment it came from.
+const MIGRATION_V5: &str = r#"
+CREATE TABLE IF NOT EXISTS melodies (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_fragment_id TEXT,
+    file_path TEXT NOT NULL,
+    bpm INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    note_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS challenge_attempts (
+    id TEXT PRIMARY KEY,
+    melody_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    tempo_pct INTEGER NOT NULL,
+    bpm INTEGER NOT NULL,
+    completed INTEGER NOT NULL,
+    score INTEGER NOT NULL,
+    accuracy REAL NOT NULL,
+    hits INTEGER NOT NULL,
+    perfect INTEGER NOT NULL,
+    misses INTEGER NOT NULL,
+    wrong INTEGER NOT NULL,
+    extra INTEGER NOT NULL,
+    mean_offset_ms INTEGER NOT NULL,
+    mean_abs_offset_ms INTEGER NOT NULL,
+    latency_comp_ms INTEGER NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    played_midi_path TEXT,
+    details_json TEXT NOT NULL,
+    FOREIGN KEY (melody_id) REFERENCES melodies(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_attempts_melody ON challenge_attempts(melody_id, created_at);
+"#;
+
 /// Vault sub-paths that identify each file type when converting old paths.
 const RAW_MARKER: &str = "/midi/raw/";
 const FRAGMENT_MARKER: &str = "/midi/fragments/";
@@ -213,6 +257,15 @@ const PIECE_COLS: &str = "id, title, composer, notes, archived, created_at, upda
 const PIECE_COLS_P: &str = "p.id, p.title, p.composer, p.notes, p.archived, p.created_at, p.updated_at";
 const COMMENT_COLS: &str = "id, fragment_id, timestamp_ms, content, created_at";
 const MEDIA_COLS: &str = "id, session_id, local_path";
+
+/// Completed attempts per melody in `MelodySummaryDto.recent_accuracy`.
+const RECENT_ACCURACY: usize = 12;
+/// Accuracy from which a tempo counts as mastered.
+const MASTERED_ACCURACY: f64 = 0.9;
+const MELODY_COLS: &str =
+    "id, title, source, source_fragment_id, file_path, bpm, duration_ms, note_count, created_at, updated_at";
+const ATTEMPT_COLS: &str = "id, melody_id, created_at, tempo_pct, bpm, completed, score, accuracy, hits, perfect, \
+     misses, wrong, extra, mean_offset_ms, mean_abs_offset_ms, latency_comp_ms, duration_ms, played_midi_path, details_json";
 
 fn db_err(e: rusqlite::Error) -> String {
     t!("backend.db.error", e = e)
@@ -336,6 +389,52 @@ fn fetch_comments(conn: &Connection, fragment_id: &str) -> Result<Vec<TimelineCo
         .map_err(db_err)?;
     let rows = stmt.query_map(params![fragment_id], map_comment).map_err(db_err)?;
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+}
+
+fn map_melody(r: &Row) -> rusqlite::Result<MelodyDto> {
+    Ok(MelodyDto {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        source: MelodySource::parse(&r.get::<_, String>(2)?),
+        source_fragment_id: r.get(3)?,
+        file_path: r.get(4)?,
+        bpm: to_u32(r.get(5)?),
+        duration_ms: to_u64(r.get(6)?),
+        note_count: to_u32(r.get(7)?),
+        created_at: r.get(8)?,
+        updated_at: r.get(9)?,
+    })
+}
+
+fn map_attempt(r: &Row) -> rusqlite::Result<AttemptDto> {
+    let details: String = r.get(18)?;
+    Ok(AttemptDto {
+        summary: AttemptSummaryDto {
+            id: r.get(0)?,
+            melody_id: r.get(1)?,
+            created_at: r.get(2)?,
+            tempo_pct: to_u32(r.get(3)?),
+            bpm: to_u32(r.get(4)?),
+            completed: r.get::<_, i64>(5)? != 0,
+            score: to_u32(r.get(6)?),
+            accuracy: r.get(7)?,
+            hits: to_u32(r.get(8)?),
+            perfect: to_u32(r.get(9)?),
+            misses: to_u32(r.get(10)?),
+            wrong: to_u32(r.get(11)?),
+            extra: to_u32(r.get(12)?),
+            mean_offset_ms: r.get::<_, i64>(13)?.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            mean_abs_offset_ms: to_u32(r.get(14)?),
+            latency_comp_ms: to_u32(r.get(15)?),
+            duration_ms: to_u64(r.get(16)?),
+        },
+        played_midi_path: r.get(17)?,
+        // A detail that cannot be read (written by a newer version) leaves the totals usable.
+        details: serde_json::from_str(&details).unwrap_or_else(|e| {
+            log::warn!("Unreadable attempt details: {e}");
+            AttemptDetails::default()
+        }),
+    })
 }
 
 fn fetch_fragment(conn: &Connection, fragment_id: &str) -> Result<FragmentDto, String> {
@@ -507,6 +606,24 @@ fn fragment_session_id(conn: &Connection, fragment_id: &str) -> Result<String, S
         .optional()
         .map_err(db_err)?
         .ok_or_else(|| t!("backend.db.fragmentMissing", id = fragment_id))
+}
+
+fn fetch_melody(conn: &Connection, melody_id: &str) -> Result<MelodyDto, String> {
+    conn.query_row(&format!("SELECT {MELODY_COLS} FROM melodies WHERE id = ?1"), params![melody_id], map_melody)
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| t!("backend.db.melodyMissing", id = melody_id))
+}
+
+fn fetch_attempt(conn: &Connection, attempt_id: &str) -> Result<AttemptDto, String> {
+    conn.query_row(
+        &format!("SELECT {ATTEMPT_COLS} FROM challenge_attempts WHERE id = ?1"),
+        params![attempt_id],
+        map_attempt,
+    )
+    .optional()
+    .map_err(db_err)?
+    .ok_or_else(|| t!("backend.db.attemptMissing", id = attempt_id))
 }
 
 fn backup_in(conn: &Connection, dest: &Path) -> Result<(), String> {
@@ -688,6 +805,13 @@ impl Database {
             tx.execute_batch("PRAGMA user_version = 4;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
+        if version < 5 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V5)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 5, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 5;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
         Ok(())
     }
 
@@ -723,6 +847,16 @@ impl Database {
     fn fix_fragment(&self, mut f: FragmentDto) -> FragmentDto {
         f.file_path = self.load_path(f.file_path);
         f
+    }
+
+    fn fix_melody(&self, mut m: MelodyDto) -> MelodyDto {
+        m.file_path = self.load_path(m.file_path);
+        m
+    }
+
+    fn fix_attempt(&self, mut a: AttemptDto) -> AttemptDto {
+        a.played_midi_path = a.played_midi_path.map(|p| self.load_path(p));
+        a
     }
 
     fn fix_media(&self, mut m: SessionMediaDto) -> SessionMediaDto {
@@ -1466,6 +1600,185 @@ impl Database {
         Ok(SessionMediaDto { id, session_id: session_id.to_string(), local_path: local_path.to_string() })
     }
 
+    // ----------------------------- Melodies -----------------------------
+
+    /// Inserts a melody (`file_path` absolute) and returns it.
+    pub fn insert_melody(&self, m: &MelodyDto) -> Result<MelodyDto, String> {
+        let conn = self.lock()?;
+        conn.execute(
+            &format!("INSERT INTO melodies ({MELODY_COLS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"),
+            params![
+                m.id,
+                m.title,
+                m.source.as_str(),
+                m.source_fragment_id,
+                self.store_path(&m.file_path),
+                i64::from(m.bpm),
+                to_i64(m.duration_ms),
+                i64::from(m.note_count),
+                m.created_at,
+                m.updated_at
+            ],
+        )
+        .map_err(db_err)?;
+        fetch_melody(&conn, &m.id).map(|m| self.fix_melody(m))
+    }
+
+    /// Most recently played (or created) first.
+    pub fn list_melodies(&self) -> Result<Vec<MelodySummaryDto>, String> {
+        let conn = self.lock()?;
+        let cols = MELODY_COLS.split(", ").map(|c| format!("m.{c}")).collect::<Vec<_>>().join(", ");
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {cols}, COUNT(a.id), MAX(CASE WHEN a.completed = 1 THEN a.score END), MAX(a.created_at) \
+                 FROM melodies m LEFT JOIN challenge_attempts a ON a.melody_id = m.id \
+                 GROUP BY m.id ORDER BY COALESCE(MAX(a.created_at), m.updated_at) DESC"
+            ))
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(MelodySummaryDto {
+                    melody: map_melody(r)?,
+                    attempt_count: to_u32(r.get(10)?),
+                    best_score: r.get::<_, Option<i64>>(11)?.map(to_u32),
+                    last_attempt_at: r.get(12)?,
+                    recent_accuracy: Vec::new(),
+                    mastered_tempo_pct: None,
+                })
+            })
+            .map_err(db_err)?;
+        let mut list = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT melody_id, accuracy, tempo_pct FROM challenge_attempts WHERE completed = 1 \
+                 ORDER BY created_at ASC",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, to_u32(r.get(2)?))))
+            .map_err(db_err)?;
+        let mut by_melody: std::collections::HashMap<String, Vec<(f64, u32)>> = std::collections::HashMap::new();
+        for row in rows {
+            let (id, accuracy, tempo) = row.map_err(db_err)?;
+            by_melody.entry(id).or_default().push((accuracy, tempo));
+        }
+        for s in &mut list {
+            s.melody.file_path = self.load_path(std::mem::take(&mut s.melody.file_path));
+            if let Some(attempts) = by_melody.get(&s.melody.id) {
+                let from = attempts.len().saturating_sub(RECENT_ACCURACY);
+                s.recent_accuracy = attempts[from..].iter().map(|a| a.0).collect();
+                s.mastered_tempo_pct = attempts.iter().filter(|a| a.0 >= MASTERED_ACCURACY).map(|a| a.1).max();
+            }
+        }
+        Ok(list)
+    }
+
+    pub fn get_melody(&self, melody_id: &str) -> Result<MelodyDto, String> {
+        let conn = self.lock()?;
+        fetch_melody(&conn, melody_id).map(|m| self.fix_melody(m))
+    }
+
+    pub fn rename_melody(&self, melody_id: &str, title: &str) -> Result<MelodyDto, String> {
+        let conn = self.lock()?;
+        let changed = conn
+            .execute(
+                "UPDATE melodies SET title = ?1, updated_at = ?2 WHERE id = ?3",
+                params![title, now_rfc3339(), melody_id],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.db.melodyMissing", id = melody_id));
+        }
+        fetch_melody(&conn, melody_id).map(|m| self.fix_melody(m))
+    }
+
+    /// Deletes the melody and its attempts; returns the absolute paths of their files.
+    pub fn delete_melody(&self, melody_id: &str) -> Result<Vec<String>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let melody = fetch_melody(&tx, melody_id)?;
+        let mut paths = vec![melody.file_path];
+        {
+            let mut stmt = tx
+                .prepare("SELECT played_midi_path FROM challenge_attempts WHERE melody_id = ?1 AND played_midi_path IS NOT NULL")
+                .map_err(db_err)?;
+            let rows = stmt.query_map(params![melody_id], |r| r.get::<_, String>(0)).map_err(db_err)?;
+            paths.extend(rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?);
+        }
+        tx.execute("DELETE FROM melodies WHERE id = ?1", params![melody_id]).map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        Ok(paths.into_iter().map(|p| self.load_path(p)).collect())
+    }
+
+    // ----------------------------- Attempts -----------------------------
+
+    /// Inserts an attempt (`played_midi_path` absolute) and returns it.
+    pub fn insert_attempt(&self, a: &AttemptDto) -> Result<AttemptDto, String> {
+        let s = &a.summary;
+        let details = serde_json::to_string(&a.details).map_err(|e| t!("backend.internal", e = e))?;
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        fetch_melody(&tx, &s.melody_id)?;
+        tx.execute(
+            &format!(
+                "INSERT INTO challenge_attempts ({ATTEMPT_COLS}) VALUES \
+                 (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)"
+            ),
+            params![
+                s.id,
+                s.melody_id,
+                s.created_at,
+                i64::from(s.tempo_pct),
+                i64::from(s.bpm),
+                s.completed as i64,
+                i64::from(s.score),
+                s.accuracy,
+                i64::from(s.hits),
+                i64::from(s.perfect),
+                i64::from(s.misses),
+                i64::from(s.wrong),
+                i64::from(s.extra),
+                i64::from(s.mean_offset_ms),
+                i64::from(s.mean_abs_offset_ms),
+                i64::from(s.latency_comp_ms),
+                to_i64(s.duration_ms),
+                a.played_midi_path.as_deref().map(|p| self.store_path(p)),
+                details
+            ],
+        )
+        .map_err(db_err)?;
+        let attempt = fetch_attempt(&tx, &s.id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(self.fix_attempt(attempt))
+    }
+
+    /// Newest first.
+    pub fn list_attempts(&self, melody_id: &str) -> Result<Vec<AttemptDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {ATTEMPT_COLS} FROM challenge_attempts WHERE melody_id = ?1 ORDER BY created_at DESC"
+            ))
+            .map_err(db_err)?;
+        let rows = stmt.query_map(params![melody_id], map_attempt).map_err(db_err)?;
+        let list = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+        Ok(list.into_iter().map(|a| self.fix_attempt(a)).collect())
+    }
+
+    pub fn get_attempt(&self, attempt_id: &str) -> Result<AttemptDto, String> {
+        let conn = self.lock()?;
+        fetch_attempt(&conn, attempt_id).map(|a| self.fix_attempt(a))
+    }
+
+    /// Deletes the attempt and returns the absolute path of its MIDI file, if any.
+    pub fn delete_attempt(&self, attempt_id: &str) -> Result<Option<String>, String> {
+        let conn = self.lock()?;
+        let attempt = fetch_attempt(&conn, attempt_id)?;
+        conn.execute("DELETE FROM challenge_attempts WHERE id = ?1", params![attempt_id]).map_err(db_err)?;
+        Ok(attempt.played_midi_path.map(|p| self.load_path(p)))
+    }
+
     // ----------------------------- Settings -----------------------------
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>, String> {
@@ -2046,6 +2359,123 @@ mod tests {
         assert_eq!(a.session_id, s.id);
         let b = lib.iter().find(|f| f.id == "b").unwrap();
         assert_eq!(b.piece_title, None);
+    }
+
+    fn melody(id: &str) -> MelodyDto {
+        MelodyDto {
+            id: id.into(),
+            title: "Nocturne".into(),
+            source: MelodySource::Fragment,
+            source_fragment_id: Some("f1".into()),
+            file_path: format!("/vault/midi/melodies/melody_{id}.mid"),
+            bpm: 90,
+            duration_ms: 8000,
+            note_count: 4,
+            created_at: now_rfc3339(),
+            updated_at: now_rfc3339(),
+        }
+    }
+
+    fn attempt(id: &str, melody_id: &str, created_at: &str, score: u32, completed: bool) -> AttemptDto {
+        use crate::models::{NoteOutcome, NoteStatus};
+        AttemptDto {
+            summary: AttemptSummaryDto {
+                id: id.into(),
+                melody_id: melody_id.into(),
+                created_at: created_at.into(),
+                tempo_pct: 80,
+                bpm: 72,
+                completed,
+                score,
+                accuracy: 0.75,
+                hits: 3,
+                perfect: 2,
+                misses: 1,
+                wrong: 1,
+                extra: 0,
+                mean_offset_ms: -12,
+                mean_abs_offset_ms: 30,
+                latency_comp_ms: 15,
+                duration_ms: 10_000,
+            },
+            played_midi_path: Some(format!("/vault/midi/attempts/attempt_{id}.mid")),
+            details: AttemptDetails {
+                notes: vec![NoteOutcome { status: NoteStatus::Perfect, offset_ms: Some(-5) }, NoteOutcome { status: NoteStatus::Missed, offset_ms: None }],
+                errors: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn melodies_and_attempts() {
+        let db = db();
+        let m = db.insert_melody(&melody("m1")).unwrap();
+        assert_eq!(m.file_path, "/vault/midi/melodies/melody_m1.mid");
+        assert_eq!(stored(&db, "SELECT file_path FROM melodies"), "midi/melodies/melody_m1.mid");
+        db.insert_melody(&melody("m2")).unwrap();
+
+        let list = db.list_melodies().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().all(|s| s.attempt_count == 0 && s.best_score.is_none()));
+
+        let a = db.insert_attempt(&attempt("a1", "m1", "2099-10-01T10:00:00.000Z", 700, true)).unwrap();
+        assert_eq!(a.played_midi_path.as_deref(), Some("/vault/midi/attempts/attempt_a1.mid"));
+        assert_eq!(stored(&db, "SELECT played_midi_path FROM challenge_attempts"), "midi/attempts/attempt_a1.mid");
+        assert_eq!(a, attempt("a1", "m1", "2099-10-01T10:00:00.000Z", 700, true));
+        // An incomplete attempt never is the best one.
+        db.insert_attempt(&attempt("a2", "m1", "2099-10-02T10:00:00.000Z", 900, false)).unwrap();
+        assert!(db.insert_attempt(&attempt("a3", "nope", "2099-10-02T10:00:00.000Z", 1, true)).is_err());
+
+        let list = db.list_melodies().unwrap();
+        assert_eq!(list[0].melody.id, "m1"); // most recently played first
+        assert_eq!(list[0].attempt_count, 2);
+        assert_eq!(list[0].best_score, Some(700));
+        assert_eq!(list[0].recent_accuracy, vec![0.75]);
+        assert_eq!(list[0].mastered_tempo_pct, None);
+        assert_eq!(list[0].melody.file_path, "/vault/midi/melodies/melody_m1.mid");
+        assert_eq!(list[0].last_attempt_at.as_deref(), Some("2099-10-02T10:00:00.000Z"));
+
+        let attempts = db.list_attempts("m1").unwrap();
+        assert_eq!(attempts.iter().map(|a| a.summary.id.as_str()).collect::<Vec<_>>(), vec!["a2", "a1"]);
+        assert!(!attempts[0].summary.completed);
+
+        assert_eq!(db.rename_melody("m1", "Nocturne op. 9").unwrap().title, "Nocturne op. 9");
+        assert!(db.rename_melody("nope", "x").is_err());
+
+        assert_eq!(db.delete_attempt("a2").unwrap().as_deref(), Some("/vault/midi/attempts/attempt_a2.mid"));
+        assert!(db.get_attempt("a2").is_err());
+
+        let paths = db.delete_melody("m1").unwrap();
+        assert_eq!(paths, vec!["/vault/midi/melodies/melody_m1.mid", "/vault/midi/attempts/attempt_a1.mid"]);
+        assert!(db.get_attempt("a1").is_err()); // cascade
+        assert!(db.get_melody("m1").is_err());
+        assert_eq!(db.list_melodies().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrates_a_v4_vault_to_v5_keeping_its_data() {
+        // A vault last opened by the composer (v4): the challenge tables do not exist yet.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        let session_id = {
+            let db = Database::open(&path, dir.path()).unwrap();
+            let s = db.create_session("Before v5", 72).unwrap();
+            let conn = db.lock().unwrap();
+            conn.execute_batch(
+                "DROP TABLE challenge_attempts; DROP TABLE melodies; PRAGMA user_version = 4;",
+            )
+            .unwrap();
+            s.id
+        };
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 5);
+        assert_eq!(db.get_session(&session_id).unwrap().title, "Before v5");
+        assert!(db.list_melodies().unwrap().is_empty());
+        db.insert_melody(&melody("m1")).unwrap();
+        // Reopening is idempotent.
+        drop(db);
+        assert_eq!(Database::open(&path, dir.path()).unwrap().list_melodies().unwrap().len(), 1);
     }
 
     #[test]

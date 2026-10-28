@@ -230,6 +230,30 @@ pub fn midi_duration_ms(path: &Path) -> Result<u64, String> {
     read_timed_events(path).map(|(_, d)| d)
 }
 
+/// BPM of the first tempo meta event of any track (120 if there is none or the timing is SMPTE).
+pub fn read_initial_bpm(path: &Path) -> Result<u32, String> {
+    let data = std::fs::read(path).map_err(|e| t!("backend.io.read", path = path.display(), e = e))?;
+    let smf = Smf::parse(&data).map_err(|e| t!("backend.midi.invalidFile", path = path.display(), e = e))?;
+    if !matches!(smf.header.timing, Timing::Metrical(_)) {
+        return Ok(60_000_000 / DEFAULT_TEMPO_US_PER_QN);
+    }
+    let mut first: Option<(u64, u32)> = None;
+    for track in &smf.tracks {
+        let mut tick = 0u64;
+        for ev in track {
+            tick += ev.delta.as_int() as u64;
+            if let TrackEventKind::Meta(MetaMessage::Tempo(t)) = ev.kind {
+                if first.is_none_or(|(ft, _)| tick < ft) {
+                    first = Some((tick, t.as_int().max(1)));
+                }
+                break;
+            }
+        }
+    }
+    let us_per_qn = first.map(|(_, t)| t).unwrap_or(DEFAULT_TEMPO_US_PER_QN);
+    Ok(((60_000_000.0 / us_per_qn as f64).round() as u32).max(1))
+}
+
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
@@ -777,6 +801,7 @@ mod tests {
         let frag = dir.path().join("frag90.mid");
         build_test_track(&raw, 90);
         assert!(approx(midi_duration_ms(&raw).unwrap(), 60_000));
+        assert_eq!(read_initial_bpm(&raw).unwrap(), 90);
         let r = extract_fragment_and_trim(&raw, 10_000, 25_000, &frag, 90).unwrap();
         assert!(approx(r.remaining_duration_ms, 45_000));
         let (fevs, fdur) = read_timed_events(&frag).unwrap();
@@ -821,6 +846,7 @@ mod tests {
         let times: Vec<u64> = evs.iter().map(|e| e.time_us).collect();
         assert_eq!(times, vec![500_000, 2_000_000, 3_000_000, 5_000_000]);
         assert_eq!(dur, 6_000);
+        assert_eq!(read_initial_bpm(&p).unwrap(), 120);
 
         // Rewriting with a fixed BPM keeps the real times.
         let frag = dir.path().join("tempo_frag.mid");

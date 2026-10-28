@@ -22,6 +22,10 @@ pub struct AppPaths {
     pub media_dir: PathBuf,
     /// Snapshots of the raw takes taken before each trim (undo).
     pub history_dir: PathBuf,
+    /// Frozen copies of the challenge melodies.
+    pub melodies_dir: PathBuf,
+    /// What was played in each challenge attempt.
+    pub attempts_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -33,6 +37,8 @@ impl AppPaths {
             fragments_dir: base.join("midi").join("fragments"),
             media_dir: base.join("media"),
             history_dir: base.join("midi").join("history"),
+            melodies_dir: base.join("midi").join("melodies"),
+            attempts_dir: base.join("midi").join("attempts"),
             base,
         }
     }
@@ -55,6 +61,15 @@ impl AppPaths {
     /// New snapshot path for the session's raw take (`midi/history/<session>/<uuid>.mid`).
     pub fn history_file(&self, session_id: &str) -> PathBuf {
         self.history_dir.join(session_id).join(format!("{}.mid", uuid::Uuid::new_v4()))
+    }
+
+    /// Created on the first write, like `history_dir`: opening a vault leaves no empty folders.
+    pub fn melody_file(&self, melody_id: &str) -> PathBuf {
+        self.melodies_dir.join(format!("melody_{melody_id}.mid"))
+    }
+
+    pub fn attempt_file(&self, attempt_id: &str) -> PathBuf {
+        self.attempts_dir.join(format!("attempt_{attempt_id}.mid"))
     }
 
     pub fn marker_dir(&self) -> PathBuf {
@@ -165,6 +180,9 @@ mod tests {
         assert!(p.raw_dir.is_dir() && p.fragments_dir.is_dir() && p.media_dir.is_dir() && p.marker_dir().is_dir());
         assert!(p.raw_session_file("abc").ends_with("midi/raw/raw_session_abc.mid"));
         assert!(p.fragment_file("x").ends_with("midi/fragments/frag_x.mid"));
+        assert!(p.melody_file("x").ends_with("midi/melodies/melody_x.mid"));
+        assert!(p.attempt_file("x").ends_with("midi/attempts/attempt_x.mid"));
+        assert!(!p.melodies_dir.exists() && !p.attempts_dir.exists(), "created on the first write");
     }
 
     #[test]

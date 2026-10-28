@@ -397,3 +397,219 @@ pub struct VaultOpenResult {
     /// Message asking for confirmation before opening with `force = true`.
     pub lock_warning: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// Challenge mode
+// ---------------------------------------------------------------------------
+
+/// Where a melody came from.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MelodySource {
+    Fragment,
+    Import,
+    /// One of the melodies bundled with the app (`starter_melodies`).
+    Starter,
+}
+
+impl MelodySource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MelodySource::Fragment => "fragment",
+            MelodySource::Import => "import",
+            MelodySource::Starter => "starter",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "fragment" => MelodySource::Fragment,
+            "starter" => MelodySource::Starter,
+            _ => MelodySource::Import,
+        }
+    }
+}
+
+/// A reference melody for the challenge mode: a frozen copy of a fragment or of an imported file,
+/// or one of the starter melodies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MelodyDto {
+    pub id: String,
+    pub title: String,
+    pub source: MelodySource,
+    /// Fragment it was copied from (informative: it may no longer exist).
+    pub source_fragment_id: Option<String>,
+    /// Absolute path (stored relative to the vault in the database).
+    pub file_path: String,
+    /// Original tempo: the one at 100 %.
+    pub bpm: u32,
+    pub duration_ms: u64,
+    pub note_count: u32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MelodySummaryDto {
+    pub melody: MelodyDto,
+    pub attempt_count: u32,
+    /// Best score among the completed attempts (at any tempo).
+    pub best_score: Option<u32>,
+    pub last_attempt_at: Option<String>,
+    /// Accuracy (0.0-1.0) of the last completed attempts, oldest first (at most 12).
+    pub recent_accuracy: Vec<f64>,
+    /// Highest tempo with a completed attempt of at least 90 % accuracy.
+    pub mastered_tempo_pct: Option<u32>,
+}
+
+/// A note of a melody, in its original time with the leading silence trimmed (the first note
+/// starts at 0). Its index in `MelodyDetailDto.notes` is the one `AttemptDetails.notes` uses.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteDto {
+    pub key: u8,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub velocity: u8,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteStatus {
+    Perfect,
+    Good,
+    Missed,
+}
+
+/// Result of one expected note in an attempt.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteOutcome {
+    pub status: NoteStatus,
+    /// Played time minus expected time (negative = early); `None` if missed.
+    pub offset_ms: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayedErrorKind {
+    /// Another expected note was due at that moment.
+    Wrong,
+    /// Nothing was due at that moment.
+    Extra,
+}
+
+/// A played note that matched nothing.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlayedError {
+    /// In the attempt's timeline (already scaled by the tempo), relative to the first note.
+    pub time_ms: i64,
+    pub kind: PlayedErrorKind,
+    pub played_key: u8,
+    /// The closest note that was due (only for `Wrong`).
+    pub expected_key: Option<u8>,
+}
+
+/// Per-note detail of an attempt (`details_json` in the database).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AttemptDetails {
+    /// One per note of the melody, in the same order as `MelodyDetailDto.notes`.
+    pub notes: Vec<NoteOutcome>,
+    /// Sorted by time.
+    pub errors: Vec<PlayedError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttemptSummaryDto {
+    pub id: String,
+    pub melody_id: String,
+    pub created_at: String,
+    pub tempo_pct: u32,
+    /// Effective BPM (`melody.bpm · tempo_pct / 100`).
+    pub bpm: u32,
+    /// `false` if it was stopped before the end: it does not count for records or charts.
+    pub completed: bool,
+    /// 0-1000.
+    pub score: u32,
+    /// Fraction of notes hit, 0.0-1.0.
+    pub accuracy: f64,
+    pub hits: u32,
+    pub perfect: u32,
+    pub misses: u32,
+    pub wrong: u32,
+    pub extra: u32,
+    pub mean_offset_ms: i32,
+    pub mean_abs_offset_ms: u32,
+    pub latency_comp_ms: u32,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AttemptDto {
+    pub summary: AttemptSummaryDto,
+    /// Absolute path of what was played.
+    pub played_midi_path: Option<String>,
+    pub details: AttemptDetails,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MelodyDetailDto {
+    pub melody: MelodyDto,
+    pub notes: Vec<NoteDto>,
+    /// Newest first, with their details (for the ghost, the history and the statistics).
+    pub attempts: Vec<AttemptDto>,
+}
+
+/// Returned by `start_challenge`: what the frontend needs to run its clock and draw the roll.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChallengeStarted {
+    pub melody_id: String,
+    pub tempo_pct: u32,
+    /// Effective BPM (count-in and metronome).
+    pub bpm: u32,
+    /// The first note is due this long after the start.
+    pub count_in_ms: u64,
+    /// Output latency subtracted from the played times.
+    pub latency_comp_ms: u32,
+    /// Half-width of the hit window.
+    pub window_ms: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChallengeNoteKind {
+    Perfect,
+    Good,
+    Wrong,
+    Extra,
+}
+
+/// Payload of the `challenge-note` event: a played note, already classified.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChallengeNoteEvent {
+    /// In the attempt's timeline (the first note is due at 0).
+    pub time_ms: i64,
+    pub key: u8,
+    pub kind: ChallengeNoteKind,
+    /// Index of the note it hit (`Perfect` / `Good`).
+    pub expected_index: Option<u32>,
+    pub offset_ms: Option<i32>,
+}
+
+/// Payload of the `challenge-progress` event (every 50 ms while a challenge runs).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChallengeProgress {
+    /// In the attempt's timeline: negative during the count-in.
+    pub elapsed_ms: i64,
+    pub hits: u32,
+    pub misses: u32,
+    pub errors: u32,
+    /// Notes missed since the previous event.
+    pub missed: Vec<u32>,
+}
+
+/// Payload of the `challenge-finished` event, sent when an attempt ends on its own.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChallengeFinished {
+    pub attempt: Option<AttemptDto>,
+    /// Why it could not be saved, if that failed.
+    pub error: Option<String>,
+}

@@ -8,9 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use base64::Engine as _;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::audio_engine::{self, AudioEngine};
+use crate::challenge::{self, ChallengeEmitter, ChallengeRunner};
 use crate::composition::{self, MixMode};
 use crate::i18n;
 use crate::midi_notes;
@@ -20,6 +21,7 @@ use crate::models::*;
 use crate::paths::AppDirs;
 use crate::raw_history::{remove_file_quietly, TrimAction};
 use crate::soundfont;
+use crate::starter_melodies;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
 use crate::wav::WavWriter;
 
@@ -40,6 +42,8 @@ pub struct AppState {
     /// Session being recorded right now (if any).
     pub recording_session: Mutex<Option<String>>,
     pub soundfont: Arc<Mutex<SoundfontState>>,
+    /// Challenge in progress (if any). It uses `recorder` for the capture.
+    pub challenge: Mutex<Option<ActiveChallenge>>,
 }
 
 /// Active SoundFont and whether a background load is in progress.
@@ -195,7 +199,7 @@ pub async fn update_live_recording_settings(
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, AppState>, session_id: String) -> Result<SessionDto, String> {
     let vault = state.vault()?;
-    if !state.recorder.is_recording() {
+    if !state.recorder.is_recording() || state.challenge_melody_id().is_some() {
         return Err(t!("backend.recorder.notRunning"));
     }
     if let Some(active) = state.recording_session() {
@@ -852,6 +856,321 @@ pub async fn delete_timeline_comment(state: State<'_, AppState>, comment_id: Str
 }
 
 // ---------------------------------------------------------------------------
+// Challenge mode: melodies, attempts and the live challenge
+// ---------------------------------------------------------------------------
+
+/// The challenge in progress (one at a time; it uses the MIDI capture like a recording).
+pub struct ActiveChallenge {
+    runner: ChallengeRunner,
+    melody: MelodyDto,
+    tempo_pct: u32,
+    bpm: u32,
+    latency_us: u64,
+    vault: Arc<Vault>,
+    /// Global playback speed before the attempt: the guide changes it and it is restored at the end.
+    previous_rate: f32,
+}
+
+/// Copies `source` into the vault as a new melody and registers it.
+async fn add_melody(
+    vault: Arc<Vault>,
+    source: PathBuf,
+    title: String,
+    origin: MelodySource,
+    source_fragment_id: Option<String>,
+) -> Result<MelodyDto, String> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let dest = vault.paths.melody_file(&id);
+    let frozen = {
+        let dest = dest.clone();
+        tauri::async_runtime::spawn_blocking(move || challenge::freeze_melody(&source, &dest))
+            .await
+            .map_err(|e| t!("backend.internal", e = e))??
+    };
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let melody = MelodyDto {
+        id,
+        title,
+        source: origin,
+        source_fragment_id,
+        file_path: dest.to_string_lossy().into_owned(),
+        bpm: frozen.bpm,
+        duration_ms: frozen.duration_ms,
+        note_count: frozen.note_count,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    vault.db.insert_melody(&melody).inspect_err(|_| remove_file_quietly(&dest))
+}
+
+impl AppState {
+    fn challenge_melody_id(&self) -> Option<String> {
+        lock_ignoring_poison(&self.challenge).as_ref().map(|c| c.melody.id.clone())
+    }
+
+    /// Ends the challenge in progress and saves the attempt. `None` if there was none (it had
+    /// already ended); `attempt: None` if it was stopped by hand before a single note was played.
+    pub fn finish_challenge(&self, completed: bool) -> Option<ChallengeFinished> {
+        let active = lock_ignoring_poison(&self.challenge).take()?;
+        Some(match self.save_attempt(active, completed) {
+            Ok(attempt) => ChallengeFinished { attempt, error: None },
+            Err(e) => ChallengeFinished { attempt: None, error: Some(e) },
+        })
+    }
+
+    /// Ends the challenge and tells the frontend through `challenge-finished`, whichever way it
+    /// ended (on its own or by hand), so there is a single path to the result.
+    pub fn finish_challenge_and_emit(&self, app: &tauri::AppHandle, completed: bool) {
+        if let Some(finished) = self.finish_challenge(completed) {
+            let _ = app.emit(crate::EVENT_CHALLENGE_FINISHED, finished);
+        }
+    }
+
+    fn save_attempt(&self, active: ActiveChallenge, completed: bool) -> Result<Option<AttemptDto>, String> {
+        let outcome = active.runner.stop();
+        if let Err(e) = self.recorder.stop_without_saving() {
+            log::warn!("{e}");
+        }
+        self.audio.set_metronome(false, active.bpm);
+        self.audio.set_live_synth(false);
+        let _ = self.audio.stop();
+        self.audio.set_playback_rate(active.previous_rate);
+
+        let played_notes = outcome.played.iter().any(|e| midi_slicer::as_note_on(&e.bytes).is_some());
+        if !completed && !played_notes {
+            return Ok(None);
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let played_path = active.vault.paths.attempt_file(&id);
+        let played_midi_path = match midi_slicer::write_smf(&played_path, &outcome.played, active.bpm) {
+            Ok(()) => Some(played_path.to_string_lossy().into_owned()),
+            Err(e) => {
+                log::warn!("{e}");
+                None
+            }
+        };
+        let r = outcome.result;
+        let attempt = AttemptDto {
+            summary: AttemptSummaryDto {
+                id,
+                melody_id: active.melody.id.clone(),
+                created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                tempo_pct: active.tempo_pct,
+                bpm: active.bpm,
+                completed,
+                score: r.score,
+                accuracy: r.accuracy,
+                hits: r.hits,
+                perfect: r.perfect,
+                misses: r.misses,
+                wrong: r.wrong,
+                extra: r.extra,
+                mean_offset_ms: r.mean_offset_ms,
+                mean_abs_offset_ms: r.mean_abs_offset_ms,
+                latency_comp_ms: (active.latency_us / 1000) as u32,
+                duration_ms: outcome.duration_ms,
+            },
+            played_midi_path,
+            details: r.details,
+        };
+        match active.vault.db.insert_attempt(&attempt) {
+            Ok(a) => Ok(Some(a)),
+            Err(e) => {
+                remove_file_quietly(&played_path);
+                Err(e)
+            }
+        }
+    }
+}
+
+fn lock_ignoring_poison<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+#[tauri::command]
+pub async fn get_melodies(state: State<'_, AppState>) -> Result<Vec<MelodySummaryDto>, String> {
+    let vault = state.vault()?;
+    vault.db.list_melodies()
+}
+
+#[tauri::command]
+pub async fn get_melody_detail(state: State<'_, AppState>, melody_id: String) -> Result<MelodyDetailDto, String> {
+    let vault = state.vault()?;
+    let melody = vault.db.get_melody(&melody_id)?;
+    let notes = {
+        let path = PathBuf::from(&melody.file_path);
+        tauri::async_runtime::spawn_blocking(move || challenge::load_notes(&path))
+            .await
+            .map_err(|e| t!("backend.internal", e = e))??
+    };
+    let attempts = vault.db.list_attempts(&melody_id)?;
+    Ok(MelodyDetailDto { melody, notes: challenge::note_dtos(&notes), attempts })
+}
+
+#[tauri::command]
+pub async fn create_melody_from_fragment(
+    state: State<'_, AppState>,
+    fragment_id: String,
+    title: Option<String>,
+) -> Result<MelodyDto, String> {
+    let vault = state.vault()?;
+    let fragment = vault.db.get_fragment(&fragment_id)?;
+    let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or(fragment.title);
+    add_melody(vault, PathBuf::from(fragment.file_path), title, MelodySource::Fragment, Some(fragment_id)).await
+}
+
+#[tauri::command]
+pub async fn import_melody(state: State<'_, AppState>, path: String, title: Option<String>) -> Result<MelodyDto, String> {
+    let vault = state.vault()?;
+    let source = PathBuf::from(&path);
+    let title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .or_else(|| source.file_stem().map(|s| s.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| t!("backend.defaults.melodyTitle"));
+    add_melody(vault, source, title, MelodySource::Import, None).await
+}
+
+#[tauri::command]
+pub async fn rename_melody(state: State<'_, AppState>, melody_id: String, title: String) -> Result<MelodyDto, String> {
+    let vault = state.vault()?;
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(t!("backend.challenge.titleEmpty"));
+    }
+    vault.db.rename_melody(&melody_id, title)
+}
+
+#[tauri::command]
+pub async fn delete_melody(state: State<'_, AppState>, melody_id: String) -> Result<(), String> {
+    let vault = state.vault()?;
+    if state.challenge_melody_id().as_deref() == Some(melody_id.as_str()) {
+        return Err(t!("backend.challenge.melodyInUse"));
+    }
+    state.audio.stop()?;
+    for path in vault.db.delete_melody(&melody_id)? {
+        remove_file_quietly(Path::new(&path));
+    }
+    Ok(())
+}
+
+/// Adds again the starter melodies the vault does not have; returns the ones added.
+#[tauri::command]
+pub async fn add_starter_melodies(state: State<'_, AppState>) -> Result<Vec<MelodyDto>, String> {
+    let vault = state.vault()?;
+    tauri::async_runtime::spawn_blocking(move || starter_melodies::add_missing(&vault.db, &vault.paths))
+        .await
+        .map_err(|e| t!("backend.internal", e = e))?
+}
+
+#[tauri::command]
+pub async fn delete_attempt(state: State<'_, AppState>, attempt_id: String) -> Result<(), String> {
+    let vault = state.vault()?;
+    if let Some(path) = vault.db.delete_attempt(&attempt_id)? {
+        remove_file_quietly(Path::new(&path));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn start_challenge(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    melody_id: String,
+    port_id: String,
+    tempo_pct: u32,
+    metronome_on: bool,
+    guide_on: bool,
+    live_synth_on: bool,
+) -> Result<ChallengeStarted, String> {
+    let vault = state.vault()?;
+    if state.recorder.is_recording() {
+        return Err(t!("backend.challenge.busy"));
+    }
+    let melody = vault.db.get_melody(&melody_id)?;
+    let notes = {
+        let path = PathBuf::from(&melody.file_path);
+        tauri::async_runtime::spawn_blocking(move || challenge::load_notes(&path))
+            .await
+            .map_err(|e| t!("backend.internal", e = e))??
+    };
+    if notes.is_empty() {
+        return Err(t!("backend.challenge.noNotes"));
+    }
+    let tempo_pct = challenge::clamp_tempo_pct(tempo_pct);
+    let bpm = challenge::effective_bpm(melody.bpm, tempo_pct);
+    let latency_us = u64::from(state.audio.output_latency_us());
+    let previous_rate = state.audio.playback_rate();
+
+    state.audio.stop()?;
+    state.audio.set_live_synth(live_synth_on);
+    // The count-in always clicks; afterwards the metronome stays only if it was asked for.
+    state.audio.restart_metronome(bpm);
+
+    let emitter = {
+        let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
+        let audio = state.audio.clone();
+        let guide = PathBuf::from(&melody.file_path);
+        ChallengeEmitter {
+            note: Arc::new(move |e| {
+                let _ = a1.emit(crate::EVENT_CHALLENGE_NOTE, e);
+            }),
+            progress: Arc::new(move |p| {
+                let _ = a2.emit(crate::EVENT_CHALLENGE_PROGRESS, p);
+            }),
+            go: Arc::new(move || {
+                if !metronome_on {
+                    audio.set_metronome(false, bpm);
+                }
+                if guide_on {
+                    audio.set_playback_rate(tempo_pct as f32 / 100.0);
+                    if let Err(e) = audio.play_file(&guide, 0) {
+                        log::warn!("{e}");
+                    }
+                }
+            }),
+            time_up: Arc::new(move || a3.state::<AppState>().finish_challenge_and_emit(&a3, true)),
+        }
+    };
+    let runner = ChallengeRunner::start(notes, tempo_pct, bpm, latency_us, emitter);
+    let started = ChallengeStarted {
+        melody_id: melody.id.clone(),
+        tempo_pct,
+        bpm,
+        count_in_ms: runner.count_in_us() / 1000,
+        latency_comp_ms: (latency_us / 1000) as u32,
+        window_ms: (runner.window_us() / 1000) as u32,
+    };
+    let monitor = state.audio.clone();
+    let scorer = runner.sink();
+    let sink: MidiSink = Arc::new(move |bytes: &[u8]| {
+        monitor.send_live_midi(bytes);
+        scorer(bytes);
+    });
+    let script = runner.script();
+    *lock_ignoring_poison(&state.challenge) =
+        Some(ActiveChallenge { runner, melody, tempo_pct, bpm, latency_us, vault, previous_rate });
+    if let Err(e) = state.recorder.start_scripted(&port_id, script, sink) {
+        if let Some(active) = lock_ignoring_poison(&state.challenge).take() {
+            active.runner.stop();
+        }
+        state.audio.set_metronome(false, bpm);
+        state.audio.set_live_synth(false);
+        return Err(e);
+    }
+    Ok(started)
+}
+
+/// Stops the challenge by hand. The attempt is kept as not completed, unless nothing was played;
+/// the result arrives through `challenge-finished`.
+#[tauri::command]
+pub async fn stop_challenge(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.finish_challenge_and_emit(&app, false);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // SoundFont (synthesizer sound)
 // ---------------------------------------------------------------------------
 
@@ -945,6 +1264,10 @@ pub fn activate_vault<R: Runtime>(app: &AppHandle<R>, state: &AppState, dir: &Pa
         }
         config.set_current(&dir.to_string_lossy());
         state.save_config(&config);
+    }
+    // A vault opened for the first time with the challenge mode gets the starter melodies.
+    if let Err(e) = starter_melodies::seed_once(&opened.db, &opened.paths) {
+        log::warn!("Could not add the starter melodies: {e}");
     }
     *state.vault.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(opened));
     Ok(VaultOpenResult { info: state.vault_info(), opened: true, lock_warning: None })
@@ -1144,6 +1467,7 @@ mod tests {
                 audio,
                 recording_session: Mutex::new(None),
                 soundfont: Arc::new(Mutex::new(SoundfontState { current: sf2, loading: false })),
+                challenge: Mutex::new(None),
             });
             let fx = Fixture { app, root, _tmp: tmp };
             block_on(create_vault(fx.handle(), fx.state(), fx.path("vault"))).unwrap();

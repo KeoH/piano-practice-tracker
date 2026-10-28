@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChallengeViewComponent } from './components/challenge-view/challenge-view.component';
 import { ComposerViewComponent } from './components/composer-view/composer-view.component';
 import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dialog.component';
 import { SettingsDialogComponent } from './components/settings-dialog/settings-dialog.component';
@@ -8,6 +9,7 @@ import { StatsViewComponent } from './components/stats-view/stats-view.component
 import { SidebarComponent } from './components/sidebar/sidebar.component';
 import { ToastsComponent } from './components/toasts/toasts.component';
 import { VaultWelcomeComponent } from './components/vault-welcome/vault-welcome.component';
+import { ChallengeStore } from './core/challenge.store';
 import { CompositionStore } from './core/composition.store';
 import { ConfirmService } from './core/confirm.service';
 import { TranslatePipe } from './core/i18n/translate.pipe';
@@ -28,6 +30,7 @@ import { VaultStore } from './core/vault.store';
     StatsViewComponent,
     PiecesViewComponent,
     ComposerViewComponent,
+    ChallengeViewComponent,
     SettingsDialogComponent,
     VaultWelcomeComponent,
     ToastsComponent,
@@ -44,6 +47,7 @@ export class App implements OnInit {
   private readonly recording = inject(RecordingStore);
   private readonly sessions = inject(SessionStore);
   private readonly compositions = inject(CompositionStore);
+  private readonly challenge = inject(ChallengeStore);
   protected readonly nav = inject(NavStore);
   private readonly confirm = inject(ConfirmService);
   private readonly language = inject(LanguageStore);
@@ -54,6 +58,7 @@ export class App implements OnInit {
     // Language first: startup warnings (e.g. from the vault) already come out translated.
     void this.language.init();
     void this.playback.init();
+    void this.challenge.init();
     void this.vault.init();
     void this.recording.refreshPorts();
   }
@@ -66,7 +71,7 @@ export class App implements OnInit {
    */
   protected onGlobalKey(ev: KeyboardEvent): void {
     if (ev.metaKey) return;
-    if (this.confirm.current() || this.vault.settingsOpen() || !this.vault.isOpen()) return;
+    if (this.confirm.current() || this.vault.settingsOpen() || !this.vault.isOpen() || this.challenge.isRunning()) return;
     const t = ev.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (this.nav.view() === 'compose' && this.composerKey(ev, t)) {

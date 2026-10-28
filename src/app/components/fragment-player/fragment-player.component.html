@@ -244,6 +244,9 @@
           >
             <app-icon name="download" [size]="15" /> {{ (exporter.isBusy(f.file_path) ? 'export.exporting' : 'export.wav') | t }}
           </button>
+          <button type="button" class="btn" (click)="useAsChallenge()" [disabled]="!api.available">
+            <app-icon name="target" [size]="15" /> {{ 'fragments.useAsChallenge' | t }}
+          </button>
           <button type="button" class="btn btn-danger" (click)="deleteFragment()">
             <app-icon name="trash" [size]="15" /> {{ 'fragments.delete' | t }}
           </button>

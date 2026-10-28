@@ -126,6 +126,24 @@ impl MidiRecorder {
     /// Starts recording from `port_id` (`"simulator"` or `"midir:<name>"`).
     /// If `resume_from` exists, its events are kept and the new ones are shifted by its duration.
     pub fn start(&self, port_id: &str, bpm: u32, resume_from: Option<&Path>, sink: MidiSink) -> Result<(), String> {
+        self.start_inner(port_id, bpm, resume_from, sink, None)
+    }
+
+    /// Starts a capture that is not saved as a session take (challenge mode). With the simulator,
+    /// `script` is played instead of the chord progression, with some timing jitter and mistakes,
+    /// so the challenge can be tried without a keyboard.
+    pub fn start_scripted(&self, port_id: &str, script: Vec<TimedMidiEvent>, sink: MidiSink) -> Result<(), String> {
+        self.start_inner(port_id, 120, None, sink, Some(script))
+    }
+
+    fn start_inner(
+        &self,
+        port_id: &str,
+        bpm: u32,
+        resume_from: Option<&Path>,
+        sink: MidiSink,
+        script: Option<Vec<TimedMidiEvent>>,
+    ) -> Result<(), String> {
         let mut active = lock(&self.active);
         if active.is_some() {
             return Err(t!("backend.recorder.alreadyRunning"));
@@ -148,7 +166,10 @@ impl MidiRecorder {
             let bpm = Arc::clone(&self.bpm);
             let handle = std::thread::Builder::new()
                 .name("midi-simulator".into())
-                .spawn(move || run_simulator(sh, bpm, stop_rx))
+                .spawn(move || match script {
+                    Some(script) => run_script(sh, script, stop_rx),
+                    None => run_simulator(sh, bpm, stop_rx),
+                })
                 .map_err(|e| t!("backend.recorder.simulatorFailed", e = e))?;
             (handle, Source::Simulator)
         } else {
@@ -198,6 +219,23 @@ impl MidiRecorder {
     /// Stops recording, closes notes/pedal at the stop instant, writes the SMF (active BPM) and
     /// returns the total duration in ms.
     pub fn stop(&self, output_path: &Path) -> Result<u64, String> {
+        let all = self.stop_capture()?;
+        let bpm = self.bpm.load(Ordering::SeqCst);
+        write_smf(output_path, &all, bpm)?;
+        let duration = midi_duration_ms(output_path)?;
+        log::info!("midi_recorder: recording saved to {} ({duration} ms)", output_path.display());
+        Ok(duration)
+    }
+
+    /// Stops the capture without writing anything (the notes still open are closed through the
+    /// sink, so nothing keeps sounding).
+    pub fn stop_without_saving(&self) -> Result<(), String> {
+        self.stop_capture().map(|_| ())
+    }
+
+    /// Stops the capture thread, closes notes/pedal at the stop instant and returns every event
+    /// (the resumed ones included).
+    fn stop_capture(&self) -> Result<Vec<TimedMidiEvent>, String> {
         let mut rec = lock(&self.active).take().ok_or_else(|| t!("backend.recorder.notRunning"))?;
         let _ = rec.stop_tx.send(());
         if let Some(t) = rec.thread.take() {
@@ -236,11 +274,7 @@ impl MidiRecorder {
 
         let mut all = rec.base_events;
         all.extend(events);
-        let bpm = self.bpm.load(Ordering::SeqCst);
-        write_smf(output_path, &all, bpm)?;
-        let duration = midi_duration_ms(output_path)?;
-        log::info!("midi_recorder: recording saved to {} ({duration} ms)", output_path.display());
-        Ok(duration)
+        Ok(all)
     }
 }
 
@@ -400,6 +434,52 @@ fn run_simulator(shared: Arc<RecShared>, bpm: Arc<AtomicU32>, stop_rx: mpsc::Rec
     // Notes still open are closed by `MidiRecorder::stop` at the stop instant.
 }
 
+/// Plays `script` (times relative to the start) like a not-quite-perfect pianist: ±40 ms of
+/// jitter, about 1 note in 20 a semitone off and 1 in 30 skipped.
+fn run_script(shared: Arc<RecShared>, script: Vec<TimedMidiEvent>, stop_rx: mpsc::Receiver<()>) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let mut rng = Rng((0x9E37_79B9_7F4A_7C15 ^ nanos) | 1);
+    // Each note-on gets its mistakes decided once; its note-off follows it.
+    let mut planned: Vec<(u64, Vec<u8>)> = Vec::new();
+    let mut open: HashMap<(u8, u8), Vec<(u8, i64)>> = HashMap::new();
+    for e in &script {
+        if let Some((ch, key, vel)) = as_note_on(&e.bytes) {
+            let jitter = rng.range(-40_000, 40_000);
+            let skip = rng.range(0, 29) == 0;
+            let played = if rng.range(0, 19) == 0 { key.saturating_add(1).min(127) } else { key };
+            open.entry((ch, key)).or_default().push((played, if skip { i64::MIN } else { jitter }));
+            if !skip {
+                planned.push(((e.time_us as i64 + jitter).max(0) as u64, vec![0x90 | ch, played, vel]));
+            }
+        } else if let Some((ch, key)) = as_note_off(&e.bytes) {
+            let Some(queue) = open.get_mut(&(ch, key)).filter(|q| !q.is_empty()) else { continue };
+            let (played, jitter) = queue.remove(0);
+            if jitter != i64::MIN {
+                planned.push(((e.time_us as i64 + jitter).max(0) as u64, note_off_msg(ch, played)));
+            }
+        }
+    }
+    planned.sort_by_key(|p| p.0);
+    let start = Instant::now();
+    for (t, msg) in planned {
+        loop {
+            let now = start.elapsed().as_micros() as u64;
+            if now >= t {
+                break;
+            }
+            match stop_rx.recv_timeout(Duration::from_micros((t - now).min(20_000))) {
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+        shared.handle_message(&msg);
+    }
+    let _ = stop_rx.recv();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,6 +567,31 @@ mod tests {
             evs2.iter().filter(|e| e.time_us > dur * 1000 + 1500 && as_note_on(&e.bytes).is_some()).collect();
         assert!(!new_note_ons.is_empty());
         assert!(evs2.iter().filter(|e| e.time_us <= dur * 1000 + 1500).count() >= n_first);
+    }
+
+    #[test]
+    fn simulator_plays_a_script() {
+        let script: Vec<TimedMidiEvent> = (0..10u64)
+            .flat_map(|i| {
+                let key = 60 + i as u8;
+                [TimedMidiEvent::new(i * 50_000, vec![0x90, key, 80]), TimedMidiEvent::new(i * 50_000 + 40_000, note_off_msg(0, key))]
+            })
+            .collect();
+        let seen: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen2 = Arc::clone(&seen);
+        let sink: MidiSink = Arc::new(move |b: &[u8]| lock(&seen2).push(b.to_vec()));
+        let rec = MidiRecorder::new();
+        rec.start_scripted(SIMULATOR_PORT_ID, script, sink).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        rec.stop_without_saving().unwrap();
+        assert!(!rec.is_recording());
+        let seen = lock(&seen);
+        let ons: Vec<u8> = seen.iter().filter_map(|b| as_note_on(b).map(|(_, k, _)| k)).collect();
+        // Some notes may be skipped or a semitone off, but they stay around the script.
+        assert!(ons.len() >= 6, "{ons:?}");
+        assert!(ons.iter().all(|k| (60..=70).contains(k)), "{ons:?}");
+        let evs: Vec<TimedMidiEvent> = seen.iter().map(|b| TimedMidiEvent::new(0, b.clone())).collect();
+        assert_clean(&evs);
     }
 
     #[test]

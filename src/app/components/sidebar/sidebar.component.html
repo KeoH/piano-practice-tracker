@@ -11,11 +11,12 @@
 
 <!-- Views -->
 <nav class="mx-4 mb-3 grid grid-cols-2 gap-1 rounded-[10px] border border-line bg-ink-900 p-1" [attr.aria-label]="'nav.label' | t">
-  @for (item of navItems; track item.view) {
+  @for (item of navItems; track item.view; let last = $last, odd = $odd) {
     @let active = nav.view() === item.view;
     <button
       type="button"
       class="flex h-9 min-w-0 items-center gap-2 rounded-[7px] px-2.5 text-[12.5px] font-medium transition-colors"
+      [class.col-span-2]="last && !odd"
       [class]="active ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
       [attr.aria-current]="active ? 'page' : null"
       [title]="item.label | t"
@@ -88,6 +89,8 @@
   }
 </nav>
 
+} @else if (nav.view() === 'challenges') {
+<app-melody-list />
 } @else if (nav.view() === 'compose') {
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="compositions.create()" [disabled]="!api.available">
@@ -223,7 +226,7 @@
         id="midi-port"
         class="field min-w-0 flex-1 bg-ink-850 text-[13px]"
         [value]="rec.selectedPortId()"
-        [disabled]="rec.isRecording()"
+        [disabled]="rec.isRecording() || challenge.isRunning()"
         (change)="rec.selectPort($any($event.target).value)"
       >
         @for (p of rec.ports(); track p.id) {

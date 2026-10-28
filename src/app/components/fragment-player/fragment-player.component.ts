@@ -11,6 +11,7 @@ import {
   untracked,
   viewChild,
 } from '@angular/core';
+import { ChallengeStore } from '../../core/challenge.store';
 import { CompositionStore } from '../../core/composition.store';
 import { ConfirmService } from '../../core/confirm.service';
 import { ExportService } from '../../core/export.service';
@@ -18,6 +19,7 @@ import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { FragmentDto, MidiActivityDto, MidiNotesDto, TimelineCommentDto } from '../../core/models';
+import { NavStore } from '../../core/nav.store';
 import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
 import { SessionStore } from '../../core/session.store';
@@ -50,7 +52,9 @@ export class FragmentPlayerComponent {
   readonly fragment = input.required<FragmentDto>();
   readonly index = input(0);
 
-  private readonly api = inject(TauriApiService);
+  protected readonly api = inject(TauriApiService);
+  private readonly challenges = inject(ChallengeStore);
+  private readonly nav = inject(NavStore);
   private readonly store = inject(SessionStore);
   protected readonly playback = inject(PlaybackStore);
   private readonly toast = inject(ToastService);
@@ -345,6 +349,14 @@ export class FragmentPlayerComponent {
     const f = this.fragment();
     if (choice.pieceId === f.piece_id && choice.passage === f.passage) return;
     await this.pieces.assign(f, choice.pieceId, choice.passage);
+  }
+
+  /** Copies the fragment as a challenge melody and opens it in the Challenges view. */
+  protected async useAsChallenge(): Promise<void> {
+    const m = await this.challenges.createFromFragment(this.fragment());
+    if (!m) return;
+    this.nav.view.set('challenges');
+    await this.challenges.select(m.id);
   }
 
   protected async deleteFragment(): Promise<void> {

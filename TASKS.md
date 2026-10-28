@@ -174,3 +174,21 @@ This document breaks down the sequential and parallelizable tasks needed to buil
   - Export the WAV and the MIDI and open the `.mid` in another program (one track per voice).
   - Delete a fragment used in the composition: the confirmation says so and its clip disappears.
   - Reopen the vault: the composition is still there.
+
+## Phase 16: Challenge Mode
+- [x] **16.1. Scoring core (`challenge.rs`):** notes from MIDI events, hit window scaled by the tempo, matching (hit / wrong / extra / missed), score and accuracy, latency compensation; the same `Matcher` live and offline.
+- [x] **16.2. Schema v5 (`db.rs`):** `melodies` and `challenge_attempts`, files in `midi/melodies/` and `midi/attempts/` (created on the first write), CRUD with paths relative to the vault; migration test from a v4 vault.
+- [x] **16.3. Live challenge:** `ChallengeRunner` (count-in, ticker, auto end), capture without a session take and scripted simulator in `midi_recorder`, metronome aligned with the count-in, guide at the challenge tempo, commands and `challenge-*` events.
+- [x] **16.4. Challenges view:** `ChallengeStore`, melody list in the sidebar, challenge view, piano roll, result card, history and "Use as a challenge" on fragments.
+- [x] **16.5. Challenge progress in Statistics:** melody table with sparklines, key figures, accuracy and tempo charts, and the error map.
+- [x] **16.6. Translations (English and Spanish) and specs for `challenge-stats` and `music`.**
+- [x] **16.8. Starter melodies:** five public-domain tunes added once per vault, and "Add the starter melodies" to bring back the deleted ones.
+- [ ] **16.7. Manual check with `npm run tauri dev`:**
+  - Open an existing v4 vault: it migrates to v5, keeps sessions, pieces and compositions, and the five starter melodies appear in Challenges.
+  - Listen to each starter melody at 100 % and check it sounds right.
+  - Turn a fragment into a challenge and import an external `.mid`.
+  - With the simulator, play attempts at 60 % and 100 %: the count-in matches the metronome, notes change colour live, the ghost appears, and the result lists the mistakes and suggests a tempo.
+  - "Listen" at 80 % and then check that the speed selector of the players still shows the previous speed.
+  - Stop an attempt halfway: it shows as incomplete and does not count for the record.
+  - Check the challenge progress in Statistics and switch the language without reloading.
+  - With a real keyboard, play "on time" and check that the mean offset stays close to 0 ms.

@@ -331,8 +331,156 @@ export interface PlaybackProgress {
   is_playing: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Challenge mode
+// ---------------------------------------------------------------------------
+
+export type MelodySource = 'fragment' | 'import' | 'starter';
+
+/** A reference melody: a frozen copy of a fragment or of an imported file, or a starter melody. */
+export interface MelodyDto {
+  id: string;
+  title: string;
+  source: MelodySource;
+  /** Fragment it was copied from (informative: it may no longer exist). */
+  source_fragment_id: string | null;
+  /** Absolute path. */
+  file_path: string;
+  /** Original tempo: the one at 100 %. */
+  bpm: number;
+  duration_ms: number;
+  note_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MelodySummaryDto {
+  melody: MelodyDto;
+  attempt_count: number;
+  /** Best score among the completed attempts (at any tempo). */
+  best_score: number | null;
+  last_attempt_at: string | null;
+  /** Accuracy (0-1) of the last completed attempts, oldest first (at most 12). */
+  recent_accuracy: number[];
+  /** Highest tempo with a completed attempt of at least 90 % accuracy. */
+  mastered_tempo_pct: number | null;
+}
+
+/** A note in the melody's original time (the first one starts at 0). */
+export interface NoteDto {
+  key: number;
+  start_ms: number;
+  end_ms: number;
+  velocity: number;
+}
+
+export type NoteStatus = 'perfect' | 'good' | 'missed';
+
+export interface NoteOutcome {
+  status: NoteStatus;
+  /** Played minus expected time (negative = early); null if missed. */
+  offset_ms: number | null;
+}
+
+export type PlayedErrorKind = 'wrong' | 'extra';
+
+export interface PlayedError {
+  /** In the attempt's timeline (scaled by the tempo), relative to the first note. */
+  time_ms: number;
+  kind: PlayedErrorKind;
+  played_key: number;
+  /** The closest note that was due (only for `wrong`). */
+  expected_key: number | null;
+}
+
+export interface AttemptDetails {
+  /** One per note of the melody, in the same order as `MelodyDetailDto.notes`. */
+  notes: NoteOutcome[];
+  errors: PlayedError[];
+}
+
+export interface AttemptSummaryDto {
+  id: string;
+  melody_id: string;
+  created_at: string;
+  tempo_pct: number;
+  /** Effective BPM. */
+  bpm: number;
+  /** false if it was stopped before the end: it does not count for records or charts. */
+  completed: boolean;
+  /** 0-1000. */
+  score: number;
+  /** Fraction of notes hit, 0-1. */
+  accuracy: number;
+  hits: number;
+  perfect: number;
+  misses: number;
+  wrong: number;
+  extra: number;
+  mean_offset_ms: number;
+  mean_abs_offset_ms: number;
+  latency_comp_ms: number;
+  duration_ms: number;
+}
+
+export interface AttemptDto {
+  summary: AttemptSummaryDto;
+  played_midi_path: string | null;
+  details: AttemptDetails;
+}
+
+export interface MelodyDetailDto {
+  melody: MelodyDto;
+  notes: NoteDto[];
+  /** Newest first. */
+  attempts: AttemptDto[];
+}
+
+/** Returned by `start_challenge`. */
+export interface ChallengeStarted {
+  melody_id: string;
+  tempo_pct: number;
+  bpm: number;
+  /** The first note is due this long after the start. */
+  count_in_ms: number;
+  latency_comp_ms: number;
+  /** Half-width of the hit window. */
+  window_ms: number;
+}
+
+export type ChallengeNoteKind = 'perfect' | 'good' | 'wrong' | 'extra';
+
+/** Payload of `challenge-note`: a played note, already classified. */
+export interface ChallengeNoteEvent {
+  time_ms: number;
+  key: number;
+  kind: ChallengeNoteKind;
+  expected_index: number | null;
+  offset_ms: number | null;
+}
+
+/** Payload of `challenge-progress` (every 50 ms while a challenge runs). */
+export interface ChallengeProgress {
+  /** Negative during the count-in. */
+  elapsed_ms: number;
+  hits: number;
+  misses: number;
+  errors: number;
+  /** Notes missed since the previous event. */
+  missed: number[];
+}
+
+/** Payload of `challenge-finished` (the attempt ended on its own). */
+export interface ChallengeFinished {
+  attempt: AttemptDto | null;
+  error: string | null;
+}
+
 /** Names of the Tauri events emitted by the backend. */
 export const EVENT_PLAYBACK_PROGRESS = 'playback-progress';
+export const EVENT_CHALLENGE_NOTE = 'challenge-note';
+export const EVENT_CHALLENGE_PROGRESS = 'challenge-progress';
+export const EVENT_CHALLENGE_FINISHED = 'challenge-finished';
 
 /** Id of the MIDI simulator port (always present in `list_midi_ports`). */
 export const SIMULATOR_PORT_ID = 'simulator';

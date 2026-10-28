@@ -1,0 +1,210 @@
+@if (store.melody(); as m) {
+  <div class="mx-auto flex max-w-[1100px] flex-col gap-6 px-6 pt-8 pb-11 xl:px-11">
+    <!-- Header -->
+    <header class="flex flex-wrap items-start gap-4">
+      <div class="flex min-w-0 flex-1 flex-col gap-2">
+        @if (editingTitle()) {
+          <input
+            #titleInput
+            class="field h-12 text-2xl font-semibold"
+            [value]="m.title"
+            [attr.aria-label]="'challenge.titleLabel' | t"
+            (keydown.enter)="commitTitle(titleInput)"
+            (keydown.escape)="editingTitle.set(false)"
+            (blur)="commitTitle(titleInput)"
+          />
+        } @else {
+          <h1 class="truncate text-[28px] leading-tight font-semibold tracking-tight text-fg-strong">{{ m.title }}</h1>
+        }
+        <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
+          <span class="chip h-7">{{ sourceLabel[m.source] | t }}</span>
+          <span>{{ 'challenge.noteCount' | tp: m.note_count }}</span>
+          <span aria-hidden="true">·</span>
+          <span class="tabular">{{ formatMs(m.duration_ms) }}</span>
+          <span aria-hidden="true">·</span>
+          <span>{{ 'challenge.originalBpm' | t: { bpm: m.bpm } }}</span>
+        </p>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <button type="button" class="btn btn-ghost btn-icon" (click)="editingTitle.set(true)" [disabled]="store.isRunning()" [attr.aria-label]="'challenge.rename' | t" [title]="'challenge.rename' | t">
+          <app-icon name="pencil" [size]="17" />
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon hover:text-rec-soft" (click)="store.removeMelody()" [disabled]="store.isRunning()" [attr.aria-label]="'challenge.delete' | t" [title]="'challenge.delete' | t">
+          <app-icon name="trash" [size]="17" />
+        </button>
+      </div>
+    </header>
+
+    <!-- Controls: gap-px over the line background draws the separators -->
+    <section class="@container overflow-hidden rounded-2xl border border-line bg-line" [attr.aria-label]="'challenge.controls' | t">
+      <div class="grid grid-cols-1 gap-px @2xl:grid-cols-[1.1fr_1fr_1fr]">
+        <!-- Start / stop -->
+        <div class="flex items-center gap-5 p-6 transition-colors" [class]="store.isRunning() ? 'bg-[#1e1a12]' : 'bg-ink-800'">
+          <button
+            type="button"
+            class="flex h-[76px] w-[76px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+            [class]="store.isRunning() ? 'bg-accent hover:bg-accent-hover text-on-accent' : 'border-2 border-accent/40 bg-accent/10 text-accent hover:border-accent/70'"
+            [disabled]="store.busy() || !api.available || rec.isRecording()"
+            [attr.aria-label]="(store.isRunning() ? 'challenge.stop' : 'challenge.start') | t"
+            (click)="toggleAttempt()"
+          >
+            <app-icon [name]="store.isRunning() ? 'stop' : 'play'" [size]="30" />
+          </button>
+          <div class="flex min-w-0 flex-col gap-1.5">
+            <span class="text-lg font-semibold text-fg" role="status">{{ status() }}</span>
+            @if (store.record(); as r) {
+              <span class="flex items-center gap-1.5 text-[13px] text-muted">
+                <app-icon name="trophy" [size]="14" class="text-accent" />
+                {{ 'challenge.recordAt' | t: { tempo: store.tempoPct(), score: r.summary.score, accuracy: pct(r.summary.accuracy) } }}
+              </span>
+            } @else {
+              <span class="text-[13px] text-muted">{{ 'challenge.noRecord' | t }}</span>
+            }
+            <span class="truncate text-xs text-faint">{{ 'challenge.input' | t: { port: portLabel() } }}</span>
+          </div>
+        </div>
+
+        <!-- Tempo -->
+        <div class="flex flex-col gap-2.5 bg-ink-800 px-[22px] py-5">
+          <label for="challenge-tempo" class="text-[13px] font-semibold text-fg-soft">{{ 'challenge.tempo' | t }}</label>
+          <div class="flex items-center gap-1.5">
+            <button type="button" class="btn btn-icon h-11 w-11 text-xl" (click)="nudgeTempo(-TEMPO_STEP)" [disabled]="store.isRunning()" [attr.aria-label]="'challenge.tempoDown' | t">−</button>
+            <span class="tabular flex h-11 w-[84px] items-center justify-center rounded-[10px] border border-line-strong bg-ink-900 text-xl font-medium text-accent">{{ store.tempoPct() }} %</span>
+            <button type="button" class="btn btn-icon h-11 w-11 text-xl" (click)="nudgeTempo(TEMPO_STEP)" [disabled]="store.isRunning()" [attr.aria-label]="'challenge.tempoUp' | t">+</button>
+            <span class="ml-1 text-[13px] text-muted">= {{ store.bpm() }} BPM</span>
+          </div>
+          <input
+            id="challenge-tempo"
+            type="range"
+            class="range w-full"
+            [min]="TEMPO_MIN"
+            [max]="TEMPO_MAX"
+            [step]="TEMPO_STEP"
+            [value]="store.tempoPct()"
+            [disabled]="store.isRunning()"
+            (input)="onTempoInput($any($event.target).value)"
+          />
+          @if (suggestion(); as sg) {
+            <button type="button" class="btn btn-link -ml-3 h-8 w-fit" (click)="store.setTempo(sg.tempo)" [disabled]="store.isRunning()">
+              <app-icon [name]="sg.direction === 'up' ? 'arrow-up' : 'arrow-down'" [size]="14" />
+              {{ (sg.direction === 'up' ? 'challenge.suggestUp' : 'challenge.suggestDown') | t: { tempo: sg.tempo } }}
+            </button>
+          }
+        </div>
+
+        <!-- Sound -->
+        <div class="flex flex-col justify-center bg-ink-800 px-[22px] py-3.5">
+          <div class="flex min-h-[48px] items-center gap-3">
+            <app-icon name="metronome" [size]="20" class="text-muted" />
+            <span id="lbl-ch-metronome" class="flex-1 cursor-pointer text-sm font-medium" (click)="store.metronomeOn.set(!store.metronomeOn())">{{ 'challenge.metronome' | t }}</span>
+            <button type="button" role="switch" class="switch" [attr.aria-checked]="store.metronomeOn()" aria-labelledby="lbl-ch-metronome" [disabled]="store.isRunning()" (click)="store.metronomeOn.set(!store.metronomeOn())"></button>
+          </div>
+          <div class="flex min-h-[48px] items-center gap-3 border-t border-line">
+            <app-icon name="speaker" [size]="20" class="text-muted" />
+            <span id="lbl-ch-guide" class="flex flex-1 cursor-pointer flex-col" (click)="store.guideOn.set(!store.guideOn())">
+              <span class="text-sm font-medium">{{ 'challenge.guide' | t }}</span>
+              <span class="text-xs text-faint">{{ 'challenge.guideHint' | t }}</span>
+            </span>
+            <button type="button" role="switch" class="switch" [attr.aria-checked]="store.guideOn()" aria-labelledby="lbl-ch-guide" [disabled]="store.isRunning()" (click)="store.guideOn.set(!store.guideOn())"></button>
+          </div>
+          <div class="flex min-h-[48px] items-center gap-3 border-t border-line">
+            <app-icon name="headphones" [size]="20" class="text-muted" />
+            <span id="lbl-ch-synth" class="flex-1 cursor-pointer text-sm font-medium" (click)="store.liveSynthOn.set(!store.liveSynthOn())">{{ 'recorder.liveSynth' | t }}</span>
+            <button type="button" role="switch" class="switch" [attr.aria-checked]="store.liveSynthOn()" aria-labelledby="lbl-ch-synth" [disabled]="store.isRunning()" (click)="store.liveSynthOn.set(!store.liveSynthOn())"></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Piano roll -->
+    <section class="flex flex-col gap-3" [attr.aria-label]="'challenge.rollLabel' | t">
+      <div class="flex flex-wrap items-center gap-3">
+        <button type="button" class="btn" (click)="store.togglePreview()" [disabled]="store.isRunning() || !api.available">
+          <app-icon [name]="store.isPreviewing() ? 'pause' : 'play'" [size]="15" />
+          {{ (store.isPreviewing() ? 'challenge.pausePreview' : 'challenge.preview') | t: { tempo: store.tempoPct() } }}
+        </button>
+        <div class="ml-auto flex flex-wrap items-center gap-2 text-[13px]" aria-live="polite">
+          @if (store.isRunning() && store.progress(); as p) {
+            <span class="chip"><span class="dot bg-ok"></span>{{ 'challenge.live.hits' | t: { n: p.hits } }}</span>
+            <span class="chip"><span class="dot bg-rec"></span>{{ 'challenge.live.misses' | t: { n: p.misses } }}</span>
+            <span class="chip"><span class="dot bg-rec-soft"></span>{{ 'challenge.live.errors' | t: { n: p.errors } }}</span>
+          }
+          @if (store.isRunning() && store.ghostDelta() !== null) {
+            @let g = store.ghostDelta()!;
+            <span class="chip" [class]="g > 0 ? 'text-ok' : g < 0 ? 'text-rec-soft' : ''" [title]="'challenge.live.ghostHint' | t">
+              <app-icon name="trophy" [size]="13" /> {{ 'challenge.live.ghost' | t: { delta: signed(g) } }}
+            </span>
+          }
+        </div>
+      </div>
+      <div class="relative">
+        <app-piano-roll
+          [notes]="store.notes()"
+          [tempoPct]="store.run()?.tempo_pct ?? store.tempoPct()"
+          [states]="store.noteStates()"
+          [marks]="store.marks()"
+          [mode]="store.isRunning() ? 'live' : 'static'"
+          [running]="store.isRunning()"
+          [clock]="clock"
+          [focusMs]="focusMs()"
+          [height]="280"
+        />
+        @if (countdown(); as c) {
+          <div class="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
+            <span class="tabular text-[96px] leading-none font-semibold text-accent/90">{{ c }}</span>
+          </div>
+        }
+      </div>
+      @if (!store.isRunning() && !store.result()) {
+        <p class="text-[13px] text-muted"><app-rich-text [text]="'challenge.howTo' | t" /></p>
+      }
+    </section>
+
+    @if (store.result(); as r) {
+      <app-attempt-result
+        [attempt]="r"
+        [notes]="store.notes()"
+        [rival]="store.rival()"
+        [previous]="store.previous()"
+        [newRecord]="store.isNewRecord()"
+        (retry)="retry()"
+        (changeTempo)="changeTempoAndRetry($event)"
+        (viewProgress)="nav.view.set('stats')"
+        (focus)="focusMs.set($event)"
+      />
+    }
+
+    <section class="flex flex-col gap-3">
+      <h2 class="text-base font-semibold text-fg">{{ 'challenge.history.title' | t }}</h2>
+      <app-attempt-history [attempts]="store.attempts()" [highlightId]="store.result()?.summary?.id ?? null" (remove)="store.removeAttempt($event)" />
+    </section>
+  </div>
+} @else if (store.detailLoading()) {
+  <div class="flex h-full items-center justify-center text-sm text-faint">{{ 'common.loading' | t }}</div>
+} @else {
+  <div class="flex min-h-full justify-center px-6 py-[clamp(32px,8vh,96px)] xl:px-11">
+    <div class="flex w-full max-w-[720px] flex-col items-start gap-4">
+      <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/15 text-accent">
+        <app-icon name="target" [size]="30" />
+      </span>
+      <h1 class="text-[34px] leading-tight font-semibold tracking-tight text-fg-strong">{{ 'challenge.emptyTitle' | t }}</h1>
+      <p class="max-w-[560px] text-base leading-relaxed text-muted">{{ 'challenge.emptyText' | t }}</p>
+      <ul class="flex flex-col gap-2 text-sm text-muted">
+        <li class="flex gap-2"><app-icon name="check" [size]="16" class="mt-0.5 text-accent" /><app-rich-text [text]="'challenge.emptyStep1' | t" /></li>
+        <li class="flex gap-2"><app-icon name="check" [size]="16" class="mt-0.5 text-accent" /><app-rich-text [text]="'challenge.emptyStep2' | t" /></li>
+        <li class="flex gap-2"><app-icon name="check" [size]="16" class="mt-0.5 text-accent" /><app-rich-text [text]="'challenge.emptyStep3' | t" /></li>
+      </ul>
+      <div class="mt-2 flex flex-wrap gap-3">
+        <button type="button" class="btn btn-primary h-12 rounded-xl px-5 text-[15px]" (click)="store.importMidi()" [disabled]="!api.available">
+          <app-icon name="upload" [size]="18" /> {{ 'challenge.import' | t }}
+        </button>
+        <button type="button" class="btn h-12 rounded-xl px-5 text-[15px]" (click)="store.addStarters()" [disabled]="!api.available">
+          <app-icon name="music" [size]="18" /> {{ 'challenge.starters.add' | t }}
+        </button>
+        <button type="button" class="btn btn-ghost h-12 rounded-xl px-5 text-[15px]" (click)="nav.view.set('sessions')">
+          <app-icon name="scissors" [size]="18" /> {{ 'challenge.fromFragments' | t }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

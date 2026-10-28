@@ -5,6 +5,7 @@ import type { VaultInfo } from './models';
 import { PlaybackStore } from './playback.store';
 import { RecordingStore } from './recording.store';
 import { NavStore } from './nav.store';
+import { ChallengeStore } from './challenge.store';
 import { CompositionStore } from './composition.store';
 import { PieceStore } from './piece.store';
 import { SessionStore } from './session.store';
@@ -26,6 +27,7 @@ export class VaultStore {
   private readonly stats = inject(StatsStore);
   private readonly nav = inject(NavStore);
   private readonly pieces = inject(PieceStore);
+  private readonly challenges = inject(ChallengeStore);
   private readonly compositions = inject(CompositionStore);
   private readonly playback = inject(PlaybackStore);
   private readonly recording = inject(RecordingStore);
@@ -48,7 +50,9 @@ export class VaultStore {
     }
     try {
       this.apply(await this.api.getVaultInfo(), true);
-      if (this.isOpen()) await Promise.all([this.sessions.refreshList(), this.pieces.refreshList()]);
+      if (this.isOpen()) {
+        await Promise.all([this.sessions.refreshList(), this.pieces.refreshList(), this.challenges.refreshList()]);
+      }
     } catch (err) {
       this.toast.error(err, this.i18n.t('vault.errors.read'));
     } finally {
@@ -115,7 +119,7 @@ export class VaultStore {
 
   /** Closes the current vault and goes back to the welcome screen. */
   async close(): Promise<boolean> {
-    if (this.recording.isRecording()) {
+    if (this.recording.isRecording() || this.challenges.isRunning()) {
       this.toast.warning(this.i18n.t('vault.stopRecordingFirst'));
       return false;
     }
@@ -165,13 +169,14 @@ export class VaultStore {
     this.apply(info, true);
     this.resetVaultData();
     this.settingsOpen.set(false);
-    await Promise.all([this.sessions.refreshList(), this.pieces.refreshList()]);
+    await Promise.all([this.sessions.refreshList(), this.pieces.refreshList(), this.challenges.refreshList()]);
   }
 
   /** Forgets everything loaded from the previous vault. */
   private resetVaultData(): void {
     this.sessions.reset();
     this.pieces.reset();
+    this.challenges.reset();
     this.compositions.reset();
     this.stats.reset();
     this.nav.view.set('sessions');

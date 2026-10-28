@@ -1,0 +1,150 @@
+<section class="flex flex-col gap-5" [attr.aria-label]="'challengeStats.title' | t">
+@if (store.melody(); as m) {
+    <header class="flex flex-wrap items-center gap-3">
+      <button type="button" class="btn btn-ghost btn-icon" (click)="store.select(null)" [attr.aria-label]="'challengeStats.back' | t" [title]="'challengeStats.back' | t">
+        <app-icon name="back" [size]="18" />
+      </button>
+      <div class="flex min-w-0 flex-1 flex-col">
+        <p class="text-xs font-semibold text-faint">{{ 'challengeStats.title' | t }}</p>
+        <h2 class="truncate text-xl leading-tight font-semibold tracking-tight text-fg-strong">{{ m.title }}</h2>
+      </div>
+      <button type="button" class="btn btn-primary btn-lg" (click)="play()"><app-icon name="play" [size]="15" /> {{ 'challengeStats.play' | t }}</button>
+    </header>
+
+    <dl class="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-4">
+      <div class="flex flex-col gap-1 bg-ink-800 px-5 py-4">
+        <dt class="text-xs font-semibold text-fg-soft">{{ 'challengeStats.kpi.attempts' | t }}</dt>
+        <dd class="tabular text-3xl text-fg-strong">{{ completed().length }}</dd>
+        <dd class="text-xs text-faint">{{ 'challengeStats.kpi.attemptsHint' | tp: store.attempts().length }}</dd>
+      </div>
+      <div class="flex flex-col gap-1 bg-ink-800 px-5 py-4">
+        <dt class="text-xs font-semibold text-fg-soft">{{ 'challengeStats.kpi.best' | t }}</dt>
+        <dd class="tabular text-3xl text-accent">{{ completed().length ? best() : '—' }}</dd>
+        <dd class="text-xs text-faint">{{ 'challenge.result.outOf' | t }}</dd>
+      </div>
+      <div class="flex flex-col gap-1 bg-ink-800 px-5 py-4">
+        <dt class="text-xs font-semibold text-fg-soft">{{ 'challengeStats.kpi.mastered' | t }}</dt>
+        <dd class="tabular text-3xl text-fg-strong">{{ mastered() !== null ? mastered() + ' %' : '—' }}</dd>
+        <dd class="text-xs text-faint">{{ 'challengeStats.kpi.masteredHint' | t }}</dd>
+      </div>
+      <div class="flex flex-col gap-1 bg-ink-800 px-5 py-4">
+        <dt class="text-xs font-semibold text-fg-soft">{{ 'challengeStats.kpi.trend' | t }}</dt>
+        <dd class="tabular flex items-center gap-1.5 text-3xl text-fg-strong">
+          @if (trendIcon(accuracyTrend()); as icon) {
+            <app-icon [name]="icon" [size]="22" [class]="icon === 'arrow-up' ? 'text-ok' : 'text-rec-soft'" />
+          }
+          {{ trendText(accuracyTrend()) }}
+        </dd>
+        <dd class="text-xs text-faint">{{ 'challengeStats.kpi.trendHint' | t }}</dd>
+      </div>
+    </dl>
+
+    @if (completed().length) {
+      <section class="panel flex flex-col gap-3 p-5">
+        <h3 class="text-sm font-semibold text-fg">{{ 'challengeStats.accuracyChart' | t }}</h3>
+        <app-line-chart
+          [series]="accuracySeries()"
+          [labels]="labels()"
+          [yMin]="0"
+          [yMax]="1"
+          [yTicks]="[0, 0.25, 0.5, 0.75, 1]"
+          [format]="pctFormat"
+          [height]="220"
+          [ariaLabel]="'challengeStats.accuracyChartAria' | t: { n: completed().length }"
+          [legendLabel]="'challengeStats.legend' | t"
+        />
+        <p class="text-xs text-faint">{{ 'challengeStats.xAxis' | t }}</p>
+      </section>
+
+      <section class="panel flex flex-col gap-3 p-5">
+        <h3 class="text-sm font-semibold text-fg">{{ 'challengeStats.tempoChart' | t }}</h3>
+        <app-line-chart
+          [series]="tempoSeries()"
+          [labels]="labels()"
+          [yMin]="tempoRange().lo"
+          [yMax]="tempoRange().hi"
+          [yTicks]="tempoRange().ticks"
+          [format]="tempoFormat"
+          [height]="160"
+          [ariaLabel]="'challengeStats.tempoChartAria' | t"
+        />
+      </section>
+
+      <section class="panel flex flex-col gap-3 p-5">
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h3 class="text-sm font-semibold text-fg">{{ 'challengeStats.heatTitle' | t }}</h3>
+          <p class="flex items-center gap-3 text-xs text-muted">
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-4 rounded-sm bg-[rgba(169,167,176,0.5)]"></span>{{ 'challengeStats.heatNever' | t }}</span>
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-4 rounded-sm bg-[rgba(242,97,95,0.45)]"></span>{{ 'challengeStats.heatSometimes' | t }}</span>
+            <span class="flex items-center gap-1.5"><span class="h-2.5 w-4 rounded-sm bg-rec"></span>{{ 'challengeStats.heatAlways' | t }}</span>
+          </p>
+        </div>
+        <p class="text-xs text-faint">{{ 'challengeStats.heatHint' | t: { n: heatCount() } }}</p>
+        <app-piano-roll [notes]="store.notes()" [tempoPct]="100" [heat]="heat()" mode="static" [height]="220" />
+      </section>
+    } @else {
+      <div class="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-line-hover px-6 py-6 text-sm text-muted">
+        <p>{{ 'challengeStats.noAttempts' | t }}</p>
+        <button type="button" class="btn" (click)="play()"><app-icon name="target" [size]="16" /> {{ 'challengeStats.play' | t }}</button>
+      </div>
+    }
+
+    <div class="flex flex-col gap-3">
+      <h3 class="text-sm font-semibold text-fg">{{ 'challenge.history.title' | t }}</h3>
+      <app-attempt-history [attempts]="store.attempts()" (remove)="store.removeAttempt($event)" />
+    </div>
+} @else if (store.detailLoading()) {
+  <p class="py-6 text-sm text-faint">{{ 'common.loading' | t }}</p>
+} @else {
+    <header class="flex flex-col gap-1">
+      <h2 class="text-lg font-semibold text-fg">{{ 'challengeStats.title' | t }}</h2>
+      <p class="text-sm text-muted">{{ 'challengeStats.overviewHint' | t }}</p>
+    </header>
+    @if (store.melodies().length) {
+      <div class="overflow-x-auto rounded-2xl border border-line">
+        <table class="w-full text-left text-[13px]">
+          <caption class="sr-only">{{ 'challengeStats.overview' | t }}</caption>
+          <thead class="bg-ink-850 text-xs text-faint">
+            <tr>
+              <th scope="col" class="px-4 py-3 font-medium">{{ 'challengeStats.table.melody' | t }}</th>
+              <th scope="col" class="px-4 py-3 text-right font-medium">{{ 'challengeStats.table.attempts' | t }}</th>
+              <th scope="col" class="px-4 py-3 text-right font-medium">{{ 'challengeStats.table.best' | t }}</th>
+              <th scope="col" class="px-4 py-3 text-right font-medium">{{ 'challengeStats.table.mastered' | t }}</th>
+              <th scope="col" class="px-4 py-3 font-medium">{{ 'challengeStats.table.recent' | t }}</th>
+              <th scope="col" class="px-4 py-3 text-right font-medium">{{ 'challengeStats.table.trend' | t }}</th>
+              <th scope="col" class="px-4 py-3 font-medium">{{ 'challengeStats.table.last' | t }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (s of store.melodies(); track s.melody.id) {
+              @let t = trendOf(s.recent_accuracy);
+              <tr class="cursor-pointer border-t border-line bg-ink-800 transition-colors hover:bg-ink-750" (click)="open(s)">
+                <td class="px-4 py-2.5">
+                  <button type="button" class="text-left font-medium text-fg hover:text-accent" (click)="$event.stopPropagation(); open(s)">{{ s.melody.title }}</button>
+                </td>
+                <td class="tabular px-4 py-2.5 text-right">{{ s.attempt_count }}</td>
+                <td class="tabular px-4 py-2.5 text-right">{{ s.best_score ?? '—' }}</td>
+                <td class="tabular px-4 py-2.5 text-right">{{ s.mastered_tempo_pct !== null ? s.mastered_tempo_pct + ' %' : '—' }}</td>
+                <td class="px-4 py-1.5"><app-sparkline [values]="s.recent_accuracy" [label]="sparkLabel(s)" /></td>
+                <td class="tabular px-4 py-2.5 text-right">
+                  <span class="inline-flex items-center gap-1">
+                    @if (trendIcon(t); as icon) {
+                      <app-icon [name]="icon" [size]="13" [class]="icon === 'arrow-up' ? 'text-ok' : 'text-rec-soft'" />
+                    }
+                    {{ trendText(t) }}
+                  </span>
+                </td>
+                <td class="px-4 py-2.5 text-muted">{{ s.last_attempt_at ? i18n.shortDate(s.last_attempt_at) : '—' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <div class="flex flex-col items-start gap-4 rounded-2xl border border-dashed border-line-hover px-6 py-6 text-sm text-muted">
+        <p>{{ 'challengeStats.empty' | t }}</p>
+        <button type="button" class="btn" (click)="play()"><app-icon name="target" [size]="16" /> {{ 'challengeStats.goToChallenges' | t }}</button>
+      </div>
+    }
+}
+</section>

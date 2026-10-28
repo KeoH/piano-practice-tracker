@@ -3,6 +3,7 @@ import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
 import { HEAT_THRESHOLDS_MIN, heatmapWeeks, lastDays, monthStarts } from '../../core/stats';
 import { StatsStore } from '../../core/stats.store';
+import { ChallengeProgressComponent } from '../challenge-progress/challenge-progress.component';
 import { IconComponent } from '../icon/icon.component';
 
 /** Heatmap geometry (SVG units): cell, gap between cells (surface gap), and label margins. */
@@ -36,7 +37,7 @@ interface Tip {
   selector: 'app-stats-view',
   host: { class: 'block' },
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, ChallengeProgressComponent, TranslatePipe, PluralPipe],
   templateUrl: './stats-view.component.html',
 })
 export class StatsViewComponent {

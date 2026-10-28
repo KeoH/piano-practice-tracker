@@ -290,7 +290,8 @@
     "loopOn": "Bucle activo: arrastra sobre la línea de tiempo para cambiar el pasaje",
     "loopOff": "Repetir un pasaje en bucle",
     "loopStart": "Inicio del bucle",
-    "loopEnd": "Fin del bucle"
+    "loopEnd": "Fin del bucle",
+    "useAsChallenge": "Usar como reto"
   },
   "slicer": {
     "analyzing": "Analizando…",
@@ -411,6 +412,192 @@
       "folder": "Abrir carpeta…"
     }
   },
+  "challenge": {
+    "import": "Importar .mid…",
+    "importTitle": "Importar un archivo MIDI como reto",
+    "starters": {
+      "add": "Añadir las melodías de ejemplo",
+      "added_one": "1 melodía de ejemplo añadida",
+      "added_other": "{n} melodías de ejemplo añadidas",
+      "none": "Ya tienes todas las melodías de ejemplo"
+    },
+    "imported": "«{title}» añadida a tus retos",
+    "created": "«{title}» ya es un reto",
+    "listLabel": "Melodías de los retos",
+    "listTitle": "Melodías",
+    "listEmpty": "Aún no hay melodías. Importa un archivo .mid o convierte un fragmento en reto.",
+    "attemptCount_zero": "Sin intentos",
+    "attemptCount_one": "1 intento",
+    "attemptCount_other": "{n} intentos",
+    "bestScore": "Mejor puntuación",
+    "noteCount_one": "1 nota",
+    "noteCount_other": "{n} notas",
+    "originalBpm": "{bpm} BPM al 100 %",
+    "source": {
+      "fragment": "De un fragmento",
+      "import": "Importada",
+      "starter": "Melodía de ejemplo"
+    },
+    "titleLabel": "Título de la melodía",
+    "rename": "Renombrar",
+    "delete": "Eliminar melodía",
+    "deleteMessage_zero": "Se eliminará «{title}». No se puede deshacer.",
+    "deleteMessage_one": "Se eliminarán «{title}» y su intento. No se puede deshacer.",
+    "deleteMessage_other": "Se eliminarán «{title}» y sus {n} intentos. No se puede deshacer.",
+    "deleted": "Melodía eliminada",
+    "controls": "Ajustes del reto",
+    "start": "Empezar el intento",
+    "stop": "Parar el intento",
+    "status": {
+      "ready": "Preparado",
+      "countin": "Prepárate…",
+      "playing": "¡Toca!",
+      "done": "Intento terminado"
+    },
+    "recordAt": "Récord al {tempo} %: {score} · {accuracy}",
+    "noRecord": "Aún no hay récord a este tempo",
+    "input": "Entrada: {port}",
+    "tempo": "Tempo",
+    "tempoDown": "Más lento",
+    "tempoUp": "Más rápido",
+    "suggestUp": "Siguiente reto: {tempo} %",
+    "suggestDown": "Prueba más despacio: {tempo} %",
+    "metronome": "Metrónomo",
+    "guide": "Guía",
+    "guideHint": "La melodía suena mientras tocas",
+    "rollLabel": "Piano roll",
+    "preview": "Escuchar al {tempo} %",
+    "pausePreview": "Pausa",
+    "howTo": "Pulsa **Empezar**: tras un compás de cuenta atrás, toca cada nota cuando llegue a la línea. Las notas se ponen **verdes** al acertarlas y **rojas** si las fallas.",
+    "live": {
+      "hits": "{n} aciertos",
+      "misses": "{n} falladas",
+      "errors": "{n} erróneas",
+      "ghost": "{delta} vs récord",
+      "ghostHint": "Notas acertadas comparadas con tu récord en este mismo momento"
+    },
+    "stopFirst": "Detén primero el reto",
+    "stopRecordingFirst": "Detén la grabación antes de empezar un reto",
+    "emptyTitle": "Retos",
+    "emptyText": "Toca una melodía junto a la app y supera a tu yo anterior: cada intento recibe una puntuación y se guarda, para que veas cómo mejoras.",
+    "emptyStep1": "**Importa un archivo .mid**, o convierte uno de tus fragmentos en reto desde su tarjeta.",
+    "emptyStep2": "**Elige el tempo**: empieza despacio y sube cuando te salga bien.",
+    "emptyStep3": "**Bate tu récord**: la app compara cada nota con tu mejor intento.",
+    "fromFragments": "Ir a mis fragmentos",
+    "result": {
+      "label": "Resultado del intento",
+      "accuracy": "Notas acertadas",
+      "notesHit": "{hits} de {total} notas",
+      "score": "Puntuación",
+      "outOf": "sobre 1000",
+      "incomplete": "Parado antes del final: no cuenta para los récords",
+      "newRecord": "¡Nuevo récord!",
+      "newRecordToast": "¡Nuevo récord: {score} puntos!",
+      "vsRecord": "{delta} puntos frente al récord",
+      "vsPrevious": "{delta} puntos de precisión frente al intento anterior",
+      "early": "Tiendes a adelantarte ({ms} ms de media)",
+      "late": "Tiendes a retrasarte ({ms} ms de media)",
+      "steady": "Ritmo estable (±{ms} ms de media)",
+      "perfect": "Perfectas",
+      "good": "Desplazadas",
+      "missed": "Falladas",
+      "wrong": "Equivocadas",
+      "extra": "De más",
+      "mistakes_zero": "Errores",
+      "mistakes_one": "1 error",
+      "mistakes_other": "{n} errores",
+      "noMistakes": "Sin errores. ¡Impecable!",
+      "kind": {
+        "missed": "Fallada",
+        "wrong": "Nota equivocada",
+        "extra": "Nota de más"
+      },
+      "wrongInstead": "Tocaste {played} en vez de {expected}",
+      "retry": "Reintentar",
+      "tempoUp": "Otra vez al {tempo} %",
+      "tempoDown": "Otra vez al {tempo} %",
+      "viewProgress": "Ver progreso"
+    },
+    "history": {
+      "title": "Intentos",
+      "empty": "Aún no hay intentos.",
+      "date": "Fecha",
+      "tempo": "Tempo",
+      "score": "Puntuación",
+      "accuracy": "Precisión",
+      "missed": "Falladas",
+      "errors": "Errores",
+      "actions": "Acciones",
+      "record": "Récord a este tempo",
+      "incomplete": "incompleto",
+      "delete": "Eliminar intento",
+      "deleteMessage": "Se eliminará el intento del {date}. No se puede deshacer."
+    },
+    "errors": {
+      "loadList": "No se pudieron cargar los retos",
+      "loadDetail": "No se pudo cargar la melodía",
+      "import": "No se pudo importar el archivo",
+      "create": "No se pudo crear el reto",
+      "rename": "No se pudo renombrar la melodía",
+      "delete": "No se pudo eliminar la melodía",
+      "deleteAttempt": "No se pudo eliminar el intento",
+      "start": "No se pudo empezar el reto",
+      "stop": "No se pudo parar el reto",
+      "save": "No se pudo guardar el intento",
+      "starters": "No se pudieron añadir las melodías de ejemplo"
+    }
+  },
+  "challengeStats": {
+    "title": "Progreso en los retos",
+    "overview": "Resumen",
+    "overviewHint": "Tu progreso en cada melodía de reto. Elige una para ver el detalle de sus intentos.",
+    "back": "Volver al resumen",
+    "play": "Tocarla",
+    "kpi": {
+      "attempts": "Intentos completos",
+      "attemptsHint_zero": "ninguno todavía",
+      "attemptsHint_one": "1 en total",
+      "attemptsHint_other": "{n} en total",
+      "best": "Mejor puntuación",
+      "mastered": "Tempo dominado",
+      "masteredHint": "el más rápido con al menos un 90 % de precisión",
+      "trend": "Tendencia",
+      "trendHint": "puntos de precisión: últimos 5 frente a los 5 anteriores"
+    },
+    "accuracyChart": "Precisión por intento",
+    "accuracyChartAria": "Gráfica de líneas de la precisión de {n} intentos completos",
+    "tempoChart": "Tempo por intento",
+    "tempoChartAria": "Gráfica escalonada del tempo de cada intento completo",
+    "legend": "Leyenda",
+    "xAxis": "Eje horizontal: intentos completos en orden.",
+    "series": {
+      "accuracy": "Precisión",
+      "bestSoFar": "Mejor hasta la fecha",
+      "tempo": "Tempo"
+    },
+    "pointLabel": "{date} · {tempo} %",
+    "heatTitle": "Dónde fallas",
+    "heatHint": "Cada nota se colorea según cuántas veces se falló en los últimos {n} intentos completos.",
+    "heatNever": "nunca",
+    "heatSometimes": "a veces",
+    "heatAlways": "siempre",
+    "noAttempts": "Aún no hay intentos completos: toca esta melodía para ver tu progreso.",
+    "table": {
+      "melody": "Melodía",
+      "attempts": "Intentos",
+      "best": "Mejor",
+      "mastered": "Tempo dominado",
+      "recent": "Precisión reciente",
+      "trend": "Tendencia",
+      "last": "Última vez"
+    },
+    "sparkLabel": "Precisión de los últimos intentos; el último, {accuracy} %",
+    "empty": "Aún no hay retos.",
+    "goToChallenges": "Ir a Retos"
+  },
+  "music": {
+    "noteNames": "Do,Do♯,Re,Re♯,Mi,Fa,Fa♯,Sol,Sol♯,La,La♯,Si"
+  },
   "backend": {
     "noVault": "No hay ninguna bóveda abierta",
     "stopRecordingToSwitchVault": "Detén la grabación antes de cambiar de bóveda",
@@ -427,7 +614,8 @@
       "sessionTitle": "Sesión de práctica",
       "pieceTitle": "Obra sin título",
       "compositionTitle": "Composición sin título",
-      "trackName": "Pista {n}"
+      "trackName": "Pista {n}",
+      "melodyTitle": "Melodía sin título"
     },
     "image": {
       "invalidBase64": "Imagen en base64 inválida: {e}",
@@ -497,6 +685,8 @@
       "sessionMissing": "La sesión '{id}' no existe",
       "fragmentMissing": "El fragmento '{id}' no existe",
       "commentMissing": "El comentario '{id}' no existe",
+      "melodyMissing": "La melodía '{id}' no existe",
+      "attemptMissing": "El intento '{id}' no existe",
       "removeTemp": "No se pudo eliminar el temporal {path}: {e}",
       "invalidBackupPath": "Ruta de copia de seguridad no válida: {path}",
       "backupFailed": "No se pudo crear la copia de seguridad: {e}",
@@ -528,6 +718,19 @@
       "transpose": "La transposición va de -{max} a +{max} semitonos",
       "program": "Instrumento desconocido {program}",
       "volume": "Volumen de pista no válido {volume}"
+    },
+    "challenge": {
+      "noNotes": "El archivo MIDI no tiene notas que tocar",
+      "busy": "Detén primero la grabación o el reto en curso",
+      "titleEmpty": "El título está vacío",
+      "melodyInUse": "Esta melodía se está tocando; detén primero el reto"
+    },
+    "starter": {
+      "scale": "Escala de Do mayor",
+      "twinkle": "Estrellita, ¿dónde estás?",
+      "frereJacques": "Martinillo (Frère Jacques)",
+      "odeToJoy": "Himno de la alegría (Beethoven)",
+      "minuet": "Minueto en Sol (Petzold)"
     }
   },
   "export": {
@@ -547,6 +750,7 @@
     "label": "Vistas",
     "sessions": "Sesiones",
     "pieces": "Repertorio",
+    "challenges": "Retos",
     "stats": "Estadísticas",
     "compose": "Componer"
   },
