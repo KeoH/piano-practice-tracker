@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.2...v0.6.0) (2026-10-28)
+
+
+### Features
+
+* Challenge merge conflict ([df4e4f8](https://github.com/KeoH/piano-practice-tracker/commit/df4e4f8fee84795e64ca795a4fe48ecc35f9fc45))
+* challenge mode with live scoring, progress statistics and starter melodies ([28d52e5](https://github.com/KeoH/piano-practice-tracker/commit/28d52e5ed23658faa04690512092978cd10c612e))
+* challenge mode with live scoring, progress statistics and starter melodies ([2aa9fc3](https://github.com/KeoH/piano-practice-tracker/commit/2aa9fc37e225f130c03e462aaaa0811a46044441))
+
 ## [0.5.2](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.1...v0.5.2) (2026-10-22)
 
 
