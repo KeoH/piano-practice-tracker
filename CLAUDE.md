@@ -15,6 +15,7 @@ npm run tauri build        # .deb / AppImage packages
 npm test                   # frontend tests (Vitest via `ng test`, watch mode in a TTY)
 npm run test:ci            # frontend tests once, with coverage in coverage/piano-tracker/
 npx ng test --include src/app/core/format.spec.ts  # a single spec file
+node scripts/screenshots/capture.mjs               # README screenshots (needs `npm start` running and Google Chrome)
 
 cd src-tauri
 cargo test --lib                                   # all Rust tests
@@ -25,7 +26,13 @@ cargo llvm-cov --lib --summary-only                # Rust coverage (needs `cargo
 cargo check
 ```
 
-Frontend specs are `*.spec.ts` next to the code (Vitest globals, jsdom; `TestBed` for services). They cover mostly pure code (`format`, `markdown`, `music`, `challenge-stats`, `I18nService`…). No linter is configured (there is a `.prettierrc`; clippy is not installed).
+Tests:
+- **Frontend specs** are `*.spec.ts` next to the code (Vitest globals, jsdom). Stores and components use `TestBed` with `mockApi()` from `src/app/testing/` (a recording `Proxy` of `TauriApiService`, provided with `mock.provider`) and the DTO builders in `testing/fixtures.ts`. That folder is excluded from the app build (`tsconfig.app.json`) and from coverage (`angular.json`).
+  - Zoneless: call `fixture.detectChanges()` after changing signals, and `await fixture.whenStable()` after async actions. With fake timers `whenStable()` never settles: advance the timers instead.
+  - jsdom has no canvas, so the canvas-heavy components (`timeline-canvas`, `midi-slicer`, `fragment-player`, `composer-timeline`) have no specs yet.
+- **`commands.rs` tests** build the real state with `tauri::test::mock_app()` (the `test` feature of `tauri` in `[dev-dependencies]`): `AppDirs` in a tempdir, `AudioEngine::new_headless` and a vault, then `block_on(command(fx.state(), …))`. The vault commands take `AppHandle<R: Runtime>` so they also run with `MockRuntime`.
+
+No linter is configured (there is a `.prettierrc`; clippy is not installed).
 
 Environment on this machine:
 - `src-tauri/.cargo/config.toml` limits cargo to `jobs = 4` and `Cargo.toml` strips debuginfo from dependencies: the machine was running out of RAM. Don't raise the parallelism or run several heavy builds at once.
@@ -37,13 +44,15 @@ Environment on this machine:
 - **`.github/workflows/ci.yml`** runs on every PR:
   - `frontend`: build plus `npm run test:ci`;
   - `backend`: `cargo llvm-cov --lib`, with a placeholder `dist/` because `generate_context!` needs one to compile;
+  - `backend-macos`: `cargo test --lib` on macOS, so the macOS build doesn't break unnoticed;
   - `coverage`: joins both summaries with `.github/scripts/coverage-summary.mjs` into the job summary and a sticky PR comment.
 
   The apt packages live in the composite action `.github/actions/setup-linux`.
 - **`.github/workflows/release.yml`** runs on every push to `main`:
   1. it calls `ci.yml`;
   2. **release-please** updates the release PR;
-  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release, and the `bundle` job (ubuntu-22.04, for an older glibc) uploads the `.deb`, the `.AppImage` and `SHA256SUMS.txt`.
+  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release. The `bundle` matrix builds the `.deb` and `.AppImage` (ubuntu-22.04, for an older glibc) and a universal `.dmg` (macos-latest, `--target universal-apple-darwin`); `publish` uploads them with a single `SHA256SUMS.txt`.
+- **macOS:** `src-tauri/tauri.macos.conf.json` is merged over `tauri.conf.json` on macOS (`app` + `dmg` targets, ad-hoc signing with `signingIdentity: "-"`; the app is not notarized). Code that touches the OS must work on both: no `/proc` (the vault lock uses `libc::gethostname` / `kill(pid, 0)`), and links and folders open with `open` on macOS and `xdg-open` elsewhere (`open_with_desktop`). The frontend only tells them apart for hints (`core/platform.ts`).
 - **Versioning:**
   - Commits on `main` (squash-merge PR titles) follow **Conventional Commits**: `feat:` bumps the minor while on 0.x, `fix:` the patch, and `feat!:` or `BREAKING CHANGE` bumps the major.
   - Never edit the version by hand. release-please keeps it in sync in `.release-please-manifest.json`, `version.txt`, `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json` (see `release-please-config.json`), and writes `CHANGELOG.md`.
@@ -122,7 +131,7 @@ Environment on this machine:
 - **SoundFont (`soundfont.rs` + `sf2_builder.rs`):**
   - **Order of preference:**
     1. the one chosen in Settings (`AppConfig.soundfont_path`; old vaults kept it in `app_settings` and it is moved over when they are opened);
-    2. a system GM one (`/usr/share/sounds/sf2/FluidR3_GM.sf2`…);
+    2. a system GM one (`/usr/share/sounds/sf2/FluidR3_GM.sf2`…; on macOS, a `.sf2` in `/Library/Audio/Sounds/Banks` or `~/Library/Audio/Sounds/Banks`, since it ships none and Settings → Sound links to a download instead of the `apt` command);
     3. the synthetic piano generated by `sf2_builder` as a last resort (it doesn't sound very realistic).
   - **Format:** only `.sf2` is supported; `rustysynth` cannot read `.sf3`.
   - **Performance:** `rustysynth`, `cpal` and `midly` are compiled with `opt-level = 3` in the dev profile too, so rendering keeps up with real time.

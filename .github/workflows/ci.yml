@@ -94,6 +94,29 @@ jobs:
           path: coverage-rust
           if-no-files-found: ignore
 
+  # Keeps the macOS release build from breaking unnoticed (CoreAudio/CoreMIDI instead of ALSA, no /proc).
+  backend-macos:
+    name: Backend (macOS)
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Placeholder frontend
+        working-directory: .
+        run: mkdir -p dist/piano-tracker/browser && echo '<!doctype html>' > dist/piano-tracker/browser/index.html
+
+      - name: Test
+        run: cargo test --lib
+
   coverage:
     name: Coverage report
     needs: [frontend, backend]

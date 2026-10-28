@@ -321,7 +321,7 @@ export interface AppInfo {
 }
 
 /** Links the "About" tab can open; the backend builds the URL. */
-export type AppLink = 'homepage' | 'repository' | 'license';
+export type AppLink = 'homepage' | 'repository' | 'license' | 'gm_soundfont';
 
 /** Payload of the `playback-progress` event (every 50 ms). */
 export interface PlaybackProgress {

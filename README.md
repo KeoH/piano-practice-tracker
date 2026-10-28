@@ -1,23 +1,81 @@
+<div align="center">
+
+<img src="public/app-icon.png" alt="" width="96" height="96" />
+
 # Piano Practice Tracker
 
-A desktop app for Ubuntu that records your piano practice over USB-MIDI, lets you slice the raw take into fragments, plays everything back through a SoundFont synthesizer, and keeps comments and notes next to the music.
+**Record your piano practice over USB-MIDI, slice it into fragments, compare takes and arrange them into compositions.**
 
-Built with **Tauri v2** (Rust) and **Angular 22**. Works fully offline.
+[![CI](https://img.shields.io/github/actions/workflow/status/KeoH/piano-practice-tracker/release.yml?branch=main&label=CI&logo=github)](https://github.com/KeoH/piano-practice-tracker/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/KeoH/piano-practice-tracker?logo=github)](https://github.com/KeoH/piano-practice-tracker/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/KeoH/piano-practice-tracker)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-informational)
+<br />
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
+[![Angular](https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white)](https://angular.dev)
+[![Rust](https://img.shields.io/badge/Rust-stable-B7410E?logo=rust&logoColor=white)](https://www.rust-lang.org)
+
+[Download](https://github.com/KeoH/piano-practice-tracker/releases/latest) · [Features](#features) · [Installation](#installation) · [Development](#development)
+
+<img src="docs/screenshots/session.png" alt="A practice session: the raw MIDI take on a piano roll, ready to slice into fragments" width="900" />
+
+</div>
+
+A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 22**. It works fully offline, and all your data lives in a folder you choose.
 
 ## Features
 
-- **Record over USB-MIDI** from any ALSA MIDI port, with a built-in metronome and optional live monitoring through the synthesizer (off by default, so you hear your own digital piano with no latency). Recording again in a session appends the new take to the end of the existing one.
-- **Slice the raw take.** The timeline shows note-activity blocks, so playing and silence are easy to tell apart. Select a range to extract it as a standalone **fragment**, or discard it (silences, mistakes). Either way the range is removed from the raw take and the gap is closed. Open notes and the sustain pedal are handled at the cut points.
-- **Playback** of the raw take and of fragments through `rustysynth`, with play, pause and seek.
-- **Timeline comments** anchored to an exact moment of a fragment.
-- **Markdown notes** per session, with images you can paste or drop in.
-- **Vaults.** All your data lives in a folder you choose, Obsidian-style. The app syncs nothing itself: put the vault in Dropbox, Syncthing or similar and that service copies it. A lock warns you before you open a vault that is already in use on another computer.
+### Record and trim
+- **Record over USB-MIDI** from any MIDI port, with a built-in metronome and optional live monitoring through the synthesizer (off by default, so you hear your own digital piano with no latency). Recording again in a session appends the new take to the end of the existing one.
+- **Slice the raw take** on a piano roll (or note-density bars). Select a range to extract it as a standalone **fragment**, or discard it (silences, mistakes). Either way the range is removed from the raw take and the gap is closed. Open notes and the sustain pedal are handled at the cut points.
+- **Suggested cuts** split the take into passages separated by silence, and every trim can be **undone**.
+
+### Listen and annotate
+- **Playback** through a SoundFont synthesizer (`rustysynth`), with seek, an **A-B loop** and **slower speeds** that keep the pitch.
+- **Timeline comments** anchored to an exact moment of a fragment, and **Markdown notes** per session, with images you can paste or drop in.
+- **Export** any take or fragment as WAV.
+
+### Repertoire
+- File fragments under a **piece** and a **passage** (for example "Bars 13-16"), and see every take of a passage in chronological order to hear your progress.
+- **Compare two takes** on the same time scale.
+
+### Composer
+- Arrange fragments on up to 15 **tracks**, each with its own General MIDI instrument, volume, mute and solo.
+- Trim, split, repeat and transpose **clips**, with undo and redo.
+- Export the result as **WAV** or as a **multitrack MIDI** file.
+
+### Statistics
+- Time practised today and this week against a **weekly goal**, current and best **streaks**, a **year heatmap** and the last 30 days.
+
+### Your data, your folder
+- **Vaults:** all your data lives in a folder you choose, Obsidian-style. The app syncs nothing itself: put the vault in Dropbox, Syncthing or similar and that service copies it. A lock warns you before you open a vault that is already in use on another computer.
 - **English and Spanish.** The app follows the system language and can be switched in Settings.
 - **Simulator port** that generates notes, for trying the app without a keyboard.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/fragments.png" alt="Fragments of a session, with comments pinned to the timeline" /></td>
+    <td width="50%"><img src="docs/screenshots/composer.png" alt="The composer: fragments arranged as clips on four instrument tracks" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Fragments</b> with comments at the exact second</td>
+    <td align="center"><b>Composer</b> with General MIDI tracks</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/pieces.png" alt="A piece of the repertoire with its takes grouped by passage" /></td>
+    <td width="50%"><img src="docs/screenshots/stats.png" alt="Practice statistics: streaks, weekly goal, year heatmap and last 30 days" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Repertoire</b>: takes grouped by passage</td>
+    <td align="center"><b>Statistics</b>: streaks, goal and heatmap</td>
+  </tr>
+</table>
+
 ## Installation
 
-Download the latest `.deb` or `.AppImage` from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
+Download the latest `.deb` or `.AppImage` (Linux) or `.dmg` (macOS) from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
 
 ```bash
 sha256sum -c SHA256SUMS.txt --ignore-missing
@@ -37,6 +95,16 @@ Or run the AppImage directly:
 chmod +x Piano*Practice*Tracker*.AppImage
 ./Piano*Practice*Tracker*.AppImage
 ```
+
+### macOS
+
+Download the `.dmg` (a universal build for Apple Silicon and Intel, macOS 11 or later), open it and drag the app to *Applications*. The app is not notarized by Apple, so the first launch is blocked: open **System Settings → Privacy & Security** and click **Open Anyway**, or run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
+```
+
+macOS has no system SoundFont, so the app starts with its synthetic piano and most instruments are unavailable in the composer. Download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) (**Settings → Sound** has a button for it) and either choose the `.sf2` there or copy it to `~/Library/Audio/Sounds/Banks`, where the app finds it on its own.
 
 ### Better piano sound
 
@@ -95,13 +163,24 @@ npm run tauri build     # build the .deb and .AppImage packages
 npm run build           # build the frontend only
 
 npm test                # frontend tests (Vitest, watch mode)
-npm run test:ci         # frontend tests once, with coverage
+npm run test:ci         # frontend tests once, with coverage in coverage/piano-tracker/
 
 cd src-tauri
-cargo test --lib        # backend tests
+cargo test --lib                     # backend tests
+cargo llvm-cov --lib --summary-only  # backend coverage (needs `cargo install cargo-llvm-cov`)
 ```
 
 Running `npm start` in a regular browser works for UI work, but calls to the backend fail gracefully because Tauri isn't there.
+
+### Screenshots
+
+The images in this README are generated from the dev server with invented demo data, so they can be refreshed after a UI change. With `npm start` running, in another terminal:
+
+```bash
+node scripts/screenshots/capture.mjs   # writes docs/screenshots/*.png (needs Google Chrome)
+```
+
+`scripts/screenshots/demo-ipc.js` stands in for the Tauri backend and holds the demo vault; `CHROME=/path/to/chromium` picks another browser.
 
 ### Project layout
 
