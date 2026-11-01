@@ -1,7 +1,9 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
+  afterNextRender,
   computed,
   effect,
   inject,
@@ -29,14 +31,17 @@ import { RangeHandlesComponent } from '../range-handles/range-handles.component'
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
 import { MIN_SELECTION_MS, TimelineDrag } from '../../core/timeline-drag';
+import { TimelineZoom } from '../../core/timeline-zoom';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineLegendComponent } from '../timeline-legend/timeline-legend.component';
 import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
+import { TimelineZoomControlsComponent } from '../timeline-zoom-controls/timeline-zoom-controls.component';
 
 /** Visual slicer for the session's raw take (selection, preview, extract and discard). */
 @Component({
   selector: 'app-midi-slicer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineLegendComponent, TimelineModeToggleComponent, TimelineZoomControlsComponent, RangeHandlesComponent, RateSelectComponent, RichTextComponent, TranslatePipe, PluralPipe],
   templateUrl: './midi-slicer.component.html',
 })
 export class MidiSlicerComponent {
@@ -80,6 +85,11 @@ export class MidiSlicerComponent {
     onSeek: (ms) => void this.playback.seek(this.rawPath(), ms),
   });
   protected readonly selection = this.drag.selection;
+  private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
+  protected readonly zoom = new TimelineZoom({
+    scroller: () => this.scroller()?.nativeElement,
+    durationMs: () => this.durationMs(),
+  });
 
   protected readonly rawPath = computed(() => this.session().raw_midi_path ?? '');
   protected readonly durationMs = computed(
@@ -117,6 +127,13 @@ export class MidiSlicerComponent {
   });
 
   constructor() {
+    const destroyRef = inject(DestroyRef);
+    afterNextRender(() => destroyRef.onDestroy(this.zoom.attach()));
+    // While zoomed in, the view follows the playhead
+    effect(() => {
+      const pos = this.position();
+      if (this.isPlaying()) untracked(() => this.zoom.follow(pos));
+    });
     // Reloads the activity when the raw take's path or duration changes
     effect(() => {
       this.rawKey();

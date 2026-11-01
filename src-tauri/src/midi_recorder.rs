@@ -1,7 +1,8 @@
 //! MIDI capture engine (section 4.1 of the specification).
 //!
 //! - Lists input ports with `midir` (ALSA on Linux). If ALSA is not available, only the
-//!   built-in simulator is offered; it always comes last.
+//!   built-in simulator is offered; it always comes last. `midir` has no Android backend: there
+//!   the ports come from a [`NativeMidi`] backend registered at startup (the Kotlin plugin).
 //! - Records NoteOn/NoteOff/ControlChange/PitchBend messages with a µs timestamp relative to the
 //!   `Instant` t0 (plus the raw take's offset when resuming).
 //! - Every accepted message is forwarded to `sink` (the app wires it to the live synthesizer,
@@ -12,7 +13,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -24,11 +25,70 @@ use crate::models::MidiPortInfo;
 
 pub const SIMULATOR_PORT_ID: &str = "simulator";
 pub const SIMULATOR_PORT_NAME: &str = "MIDI simulator (no keyboard)";
+#[cfg(not(target_os = "android"))]
 const MIDIR_PREFIX: &str = "midir:";
+const NATIVE_PREFIX: &str = "native:";
+#[cfg(not(target_os = "android"))]
 const CLIENT_NAME: &str = "piano-tracker";
 
 /// Destination of the captured MIDI messages (live monitoring).
 pub type MidiSink = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
+/// Receives the raw bytes of each message from a [`NativeMidi`] port.
+pub type NativeMidiHandler = Box<dyn Fn(&[u8]) + Send + Sync>;
+
+/// MIDI input provided by the platform instead of `midir` (the Android `MidiManager`, through
+/// the Kotlin plugin). It keeps this module independent from Tauri.
+pub trait NativeMidi: Send + Sync {
+    /// Available input ports as `(id, name)`.
+    fn list_ports(&self) -> Result<Vec<(String, String)>, String>;
+    /// Connects to `id`; every message goes to `on_message` until [`NativeMidi::close`].
+    fn open(&self, id: &str, on_message: NativeMidiHandler) -> Result<(), String>;
+    /// Disconnects the open port, if any.
+    fn close(&self);
+}
+
+/// Splits a chunk of raw MIDI bytes into whole messages. The Android MIDI service can deliver
+/// several in one buffer. Running status is not expanded (the service sends full messages);
+/// stray data bytes are skipped and a message cut short at the end is dropped.
+pub fn split_midi_messages(chunk: &[u8]) -> Vec<&[u8]> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chunk.len() {
+        let len = match chunk[i] {
+            0x80..=0xBF | 0xE0..=0xEF => 3,
+            0xC0..=0xDF => 2,
+            0xF0 => {
+                // SysEx: up to and including the closing 0xF7 (or the end of the chunk).
+                let end = chunk[i..].iter().position(|&b| b == 0xF7).map_or(chunk.len() - i, |p| p + 1);
+                out.push(&chunk[i..i + end]);
+                i += end;
+                continue;
+            }
+            0xF1 | 0xF3 => 2,
+            0xF2 => 3,
+            0xF4..=0xFF => 1,
+            _ => {
+                i += 1; // data byte without a status
+                continue;
+            }
+        };
+        if i + len <= chunk.len() {
+            out.push(&chunk[i..i + len]);
+        }
+        i += len;
+    }
+    out
+}
+
+static NATIVE_MIDI: OnceLock<Arc<dyn NativeMidi>> = OnceLock::new();
+
+/// Registers the platform MIDI backend (called once at startup, from `lib.rs`).
+pub fn set_native_backend(backend: Arc<dyn NativeMidi>) {
+    if NATIVE_MIDI.set(backend).is_err() {
+        log::warn!("midi_recorder: the native MIDI backend was already set");
+    }
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -38,6 +98,17 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// simulator, which always comes last.
 pub fn list_ports() -> Vec<MidiPortInfo> {
     let mut ports: Vec<MidiPortInfo> = Vec::new();
+    if let Some(native) = NATIVE_MIDI.get() {
+        match native.list_ports() {
+            Ok(found) => ports.extend(found.into_iter().map(|(id, name)| MidiPortInfo {
+                id: format!("{NATIVE_PREFIX}{id}"),
+                name,
+                is_virtual: false,
+            })),
+            Err(e) => log::warn!("midi_recorder: native MIDI not available ({e}); simulator only"),
+        }
+    }
+    #[cfg(not(target_os = "android"))]
     match midir::MidiInput::new(CLIENT_NAME) {
         Ok(input) => {
             for port in input.ports() {
@@ -95,7 +166,9 @@ impl RecShared {
 
 enum Source {
     Simulator,
+    #[cfg(not(target_os = "android"))]
     Midir,
+    Native(Arc<dyn NativeMidi>),
 }
 
 struct ActiveRecording {
@@ -103,7 +176,7 @@ struct ActiveRecording {
     base_events: Vec<TimedMidiEvent>,
     stop_tx: Sender<()>,
     thread: Option<JoinHandle<()>>,
-    _source: Source,
+    source: Source,
 }
 
 /// MIDI recorder. Safe to share between threads (Tauri managed state).
@@ -171,10 +244,44 @@ impl MidiRecorder {
                     None => run_simulator(sh, bpm, stop_rx),
                 })
                 .map_err(|e| t!("backend.recorder.simulatorFailed", e = e))?;
-            (handle, Source::Simulator)
-        } else {
-            let wanted = port_id.strip_prefix(MIDIR_PREFIX).unwrap_or(port_id).to_string();
+            (Some(handle), Source::Simulator)
+        } else if let Some(native_id) = port_id.strip_prefix(NATIVE_PREFIX) {
+            let backend = NATIVE_MIDI.get().cloned().ok_or_else(|| t!("backend.recorder.midiUnavailable", e = "no native backend"))?;
             let sh = Arc::clone(&shared);
+            backend.open(
+                native_id,
+                Box::new(move |chunk| split_midi_messages(chunk).into_iter().for_each(|m| sh.handle_message(m))),
+            )?;
+            (None, Source::Native(backend))
+        } else {
+            Self::start_midir(port_id, &shared, stop_rx, &stop_tx)?
+        };
+
+        *active = Some(ActiveRecording { shared, base_events, stop_tx, thread, source });
+        log::info!("midi_recorder: recording started on {port_id} at {bpm} BPM (offset {offset_ms} ms)");
+        Ok(())
+    }
+
+    #[cfg(target_os = "android")]
+    fn start_midir(
+        port_id: &str,
+        _shared: &Arc<RecShared>,
+        _stop_rx: mpsc::Receiver<()>,
+        _stop_tx: &Sender<()>,
+    ) -> Result<(Option<JoinHandle<()>>, Source), String> {
+        Err(t!("backend.recorder.portNotFound", port = port_id))
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn start_midir(
+        port_id: &str,
+        shared: &Arc<RecShared>,
+        stop_rx: mpsc::Receiver<()>,
+        stop_tx: &Sender<()>,
+    ) -> Result<(Option<JoinHandle<()>>, Source), String> {
+        {
+            let wanted = port_id.strip_prefix(MIDIR_PREFIX).unwrap_or(port_id).to_string();
+            let sh = Arc::clone(shared);
             let (ready_tx, ready_rx) = mpsc::channel::<Result<(), String>>();
             let handle = std::thread::Builder::new()
                 .name("midi-input".into())
@@ -191,12 +298,8 @@ impl MidiRecorder {
                     return Err(t!("backend.recorder.timeout"));
                 }
             }
-            (handle, Source::Midir)
-        };
-
-        *active = Some(ActiveRecording { shared, base_events, stop_tx, thread: Some(thread), _source: source });
-        log::info!("midi_recorder: recording started on {port_id} at {bpm} BPM (offset {offset_ms} ms)");
-        Ok(())
+            Ok((Some(handle), Source::Midir))
+        }
     }
 
     pub fn set_bpm(&self, bpm: u32) {
@@ -238,6 +341,9 @@ impl MidiRecorder {
     fn stop_capture(&self) -> Result<Vec<TimedMidiEvent>, String> {
         let mut rec = lock(&self.active).take().ok_or_else(|| t!("backend.recorder.notRunning"))?;
         let _ = rec.stop_tx.send(());
+        if let Source::Native(backend) = &rec.source {
+            backend.close();
+        }
         if let Some(t) = rec.thread.take() {
             if t.join().is_err() {
                 log::error!("midi_recorder: the capture thread panicked");
@@ -282,6 +388,9 @@ impl Drop for MidiRecorder {
     fn drop(&mut self) {
         if let Some(mut rec) = lock(&self.active).take() {
             let _ = rec.stop_tx.send(());
+            if let Source::Native(backend) = &rec.source {
+                backend.close();
+            }
             if let Some(t) = rec.thread.take() {
                 let _ = t.join();
             }
@@ -290,6 +399,7 @@ impl Drop for MidiRecorder {
 }
 
 /// Thread that owns the `midir` connection (the connection lives and is closed on this thread).
+#[cfg(not(target_os = "android"))]
 fn run_midir_connection(
     wanted: String,
     shared: Arc<RecShared>,
@@ -510,6 +620,67 @@ mod tests {
         (Arc::new(move |_b: &[u8]| {
             n2.fetch_add(1, Ordering::SeqCst);
         }), n)
+    }
+
+    /// Stand-in for the Android plugin: the test pushes messages through the stored handler.
+    struct FakeNative {
+        handler: Mutex<Option<NativeMidiHandler>>,
+        closed: std::sync::atomic::AtomicBool,
+    }
+
+    impl NativeMidi for FakeNative {
+        fn list_ports(&self) -> Result<Vec<(String, String)>, String> {
+            Ok(vec![("7:0".into(), "Fake Piano".into())])
+        }
+        fn open(&self, id: &str, on_message: NativeMidiHandler) -> Result<(), String> {
+            assert_eq!(id, "7:0");
+            *self.handler.lock().unwrap() = Some(on_message);
+            Ok(())
+        }
+        fn close(&self) {
+            self.closed.store(true, Ordering::SeqCst);
+            self.handler.lock().unwrap().take();
+        }
+    }
+
+    #[test]
+    fn native_backend_ports_are_listed_and_record() {
+        let fake = Arc::new(FakeNative { handler: Mutex::new(None), closed: Default::default() });
+        // The registration is process-wide and only this test makes it.
+        set_native_backend(fake.clone());
+
+        let ports = list_ports();
+        assert!(ports.iter().any(|p| p.id == "native:7:0" && p.name == "Fake Piano"));
+        assert_eq!(ports.last().unwrap().id, SIMULATOR_PORT_ID);
+
+        let rec = MidiRecorder::new();
+        let (sink, forwarded) = counting_sink();
+        rec.start("native:7:0", 120, None, sink).unwrap();
+        {
+            let guard = fake.handler.lock().unwrap();
+            let on_message = guard.as_ref().expect("port opened");
+            on_message(&[0x90, 60, 100]);
+            on_message(&[0xF8]); // clock: filtered out
+            on_message(&[0x80, 60, 0]);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("take.mid");
+        rec.stop(&out).unwrap();
+
+        assert!(fake.closed.load(Ordering::SeqCst), "the port is closed on stop");
+        assert_eq!(forwarded.load(Ordering::SeqCst), 2 + 1, "note on/off + the pedal release added on stop");
+        let (events, _) = read_timed_events(&out).unwrap();
+        assert_clean(&events);
+        assert!(events.iter().any(|e| as_note_on(&e.bytes).is_some()));
+    }
+
+    #[test]
+    fn splits_chunks_into_messages() {
+        let chunk = [0x90, 60, 100, 0x80, 60, 0, 0xF8, 0xC0, 5, 0xB0, 64];
+        let msgs = split_midi_messages(&chunk);
+        assert_eq!(msgs, vec![&[0x90, 60, 100][..], &[0x80, 60, 0][..], &[0xF8][..], &[0xC0, 5][..]]);
+        assert!(split_midi_messages(&[60, 100]).is_empty(), "data bytes without status are skipped");
+        assert_eq!(split_midi_messages(&[0xF0, 1, 2, 0xF7, 0xE0, 0, 64]).len(), 2);
     }
 
     #[test]

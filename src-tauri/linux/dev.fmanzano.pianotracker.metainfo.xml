@@ -2,7 +2,7 @@
 <!-- Installed by the .deb (bundle.linux.deb.files in tauri.conf.json). No <releases>:
      the version comes from the package and release-please owns it. -->
 <component type="desktop-application">
-  <id>com.keoh.pianotracker</id>
+  <id>dev.fmanzano.pianotracker</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
 

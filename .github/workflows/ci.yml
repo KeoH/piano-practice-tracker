@@ -67,7 +67,7 @@ jobs:
       - name: Validate AppStream metainfo
         run: |
           sudo apt-get install -y --no-install-recommends appstream
-          appstreamcli validate --no-net linux/com.keoh.pianotracker.metainfo.xml
+          appstreamcli validate --no-net linux/dev.fmanzano.pianotracker.metainfo.xml
 
       # `tauri::generate_context!` embeds `frontendDist` at compile time; the tests don't need the real one.
       - name: Placeholder frontend

@@ -1351,6 +1351,10 @@ pub async fn reveal_vault(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Opens a path or URL with the desktop's default application (`open` on macOS, `xdg-open` elsewhere).
 fn open_with_desktop(arg: &OsStr) -> std::io::Result<()> {
+    if cfg!(target_os = "android") {
+        // There is no `xdg-open` and no file manager to reveal a folder in.
+        return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "not available on Android"));
+    }
     let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     std::process::Command::new(program).arg(arg).spawn().map(|mut child| {
         // Reaps the process when it exits so no zombies are left.

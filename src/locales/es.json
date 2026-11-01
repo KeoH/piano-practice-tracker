@@ -354,7 +354,30 @@
   "timeline": {
     "noActivity": "Sin actividad de notas",
     "showActivity": "Ver densidad de notas",
-    "showRoll": "Ver las notas (piano roll)"
+    "showRoll": "Ver las notas (piano roll)",
+    "pedal": "Pedal de sustain",
+    "pedalShort": "Ped",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "zoomFit": "Ver la toma completa",
+    "legendGrid": "Cuadrícula: una línea por pulso (♩ = {bpm}, {ms} ms), más gruesa cada 4 pulsos",
+    "legendTail": "Cola tenue: la nota sigue sonando por el pedal",
+    "legendHint": "Pasa el ratón sobre una nota para ver su figura; Ctrl + rueda para hacer zoom",
+    "legendHintNoZoom": "Pasa el ratón sobre una nota para ver su figura",
+    "tooltipVelocity": "velocidad {velocity}",
+    "tooltipTail": "Suena unos {ms} ms con el pedal",
+    "tooltipBeats": "{beats} pulsos",
+    "tooltipPedal": "Pedal de sustain · {ms} ms",
+    "valueApprox": "aprox. {value}",
+    "valueDotted": "{value} con puntillo",
+    "value": {
+      "whole": "redonda",
+      "half": "blanca",
+      "quarter": "negra",
+      "eighth": "corchea",
+      "sixteenth": "semicorchea",
+      "thirtysecond": "fusa"
+    }
   },
   "notes": {
     "title": "Notas de la sesión",

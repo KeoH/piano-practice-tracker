@@ -2616,7 +2616,7 @@ dependencies = [
 
 [[package]]
 name = "piano-tracker"
-version = "0.5.2"
+version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -2625,12 +2625,14 @@ dependencies = [
  "log",
  "midir",
  "midly",
+ "oboe-sys",
  "rusqlite",
  "rustysynth",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "tauri-plugin-android-midi",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-log",
@@ -3687,6 +3689,17 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-android-midi"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]
