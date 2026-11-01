@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.6.0...v0.7.0) (2026-11-01)
+
+
+### Features
+
+* Android build with USB-MIDI input, and note values, beat grid and pedal lane in the piano roll ([08d9c0d](https://github.com/KeoH/piano-practice-tracker/commit/08d9c0d0fd7a43398d17a757ff50542c6ae5a96f))
+* Android version for tablet and notes representation with key durations ([5caa6e5](https://github.com/KeoH/piano-practice-tracker/commit/5caa6e51636b63f4edfe93fcd143dd9ec4ddf937))
+
 ## [0.6.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.5.2...v0.6.0) (2026-10-28)
 
 
