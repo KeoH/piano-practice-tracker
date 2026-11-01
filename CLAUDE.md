@@ -45,6 +45,7 @@ Environment on this machine:
   - `frontend`: build plus `npm run test:ci`;
   - `backend`: `cargo llvm-cov --lib`, with a placeholder `dist/` because `generate_context!` needs one to compile;
   - `backend-macos`: `cargo test --lib` on macOS, so the macOS build doesn't break unnoticed;
+  - `android`: `tauri android build --debug --apk` for arm64 and 32-bit ARM (SDK platform 37, NDK 27, JDK 17), uploaded as the `android-debug-apk` artifact. It is only built, never run or released;
   - `coverage`: joins both summaries with `.github/scripts/coverage-summary.mjs` into the job summary and a sticky PR comment.
 
   The apt packages live in the composite action `.github/actions/setup-linux`.

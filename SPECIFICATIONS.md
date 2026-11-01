@@ -1,7 +1,7 @@
 # Technical Specification: Piano Practice Tracker (Tauri v2 + Angular)
 
 ## 1. System Overview
-A native desktop application for **Ubuntu Linux** for recording, slicing and analyzing daily piano practice sessions over a USB-MIDI connection, with built-in playback through a SoundFont (`.sf2`) synthesizer, comments anchored to the timeline, Markdown notes with images, and storage in a **vault**: a folder chosen by the user (Obsidian-style) that holds all the data. The app syncs nothing on its own; if the user puts the vault inside Dropbox, Syncthing or similar, that service makes the copy.
+A native application for **Ubuntu Linux** (it also builds for macOS, and for Android as a debug APK) for recording, slicing and analyzing daily piano practice sessions over a USB-MIDI connection, with built-in playback through a SoundFont (`.sf2`) synthesizer, comments anchored to the timeline, Markdown notes with images, and storage in a **vault**: a folder chosen by the user (Obsidian-style) that holds all the data. The app syncs nothing on its own; if the user puts the vault inside Dropbox, Syncthing or similar, that service makes the copy.
 
 ### 1.1. Consolidated Design Decisions
 1. **Destructive Slicing of the Raw Take:**
@@ -23,8 +23,9 @@ A native desktop application for **Ubuntu Linux** for recording, slicing and ana
 6. **Trims can be undone:** before each trim the raw take is copied to `midi/history/`; the last 10 trims of each session can be undone (undoing an extraction deletes the fragment it created). Recording again clears that history.
 7. **Practice time is recorded, not derived:** `practice_log` keeps what was actually recorded each day, so trimming or deleting a session does not change the statistics.
 8. **Repertoire:** a fragment can be filed under a piece and a passage (free text), so the takes of the same passage can be compared across sessions.
-10. **Challenge mode (compete with your previous self):** a **melody** is a frozen copy of a fragment or of an imported `.mid` (leading silence removed), so its history never breaks if the fragment changes or is deleted. An **attempt** plays it at 40-150 % of its tempo after a one-bar count-in; every note is scored live and the attempt is saved with its score, accuracy, per-note detail, mistakes and the MIDI played. The **record** is the best completed attempt at the same tempo, and a "ghost" compares the notes hit so far with it at the same moment. Attempts stopped by hand are kept as incomplete and never count for records or charts. A vault gets five **starter melodies** the first time it is opened (C major scale, Twinkle Twinkle, Frère Jacques, Ode to Joy, Petzold's Minuet in G: public domain, right hand); deleted ones can be added again from the Challenges view.
 9. **Composer:** recorded fragments are laid out as clips on a multitrack timeline to build a larger piece. A clip points to its fragment (window, repeats, transposition) and never copies its MIDI; each track is one MIDI channel with a General MIDI instrument, and all tracks sound at once.
+10. **Challenge mode (compete with your previous self):** a **melody** is a frozen copy of a fragment or of an imported `.mid` (leading silence removed), so its history never breaks if the fragment changes or is deleted. An **attempt** plays it at 40-150 % of its tempo after a one-bar count-in; every note is scored live and the attempt is saved with its score, accuracy, per-note detail, mistakes and the MIDI played. The **record** is the best completed attempt at the same tempo, and a "ghost" compares the notes hit so far with it at the same moment. Attempts stopped by hand are kept as incomplete and never count for records or charts. A vault gets five **starter melodies** the first time it is opened (C major scale, Twinkle Twinkle, Frère Jacques, Ode to Joy, Petzold's Minuet in G: public domain, right hand); deleted ones can be added again from the Challenges view.
+11. **Android build:** the same code base runs on Android. `midir` has no Android backend, so the MIDI input comes from the platform through a `NativeMidi` backend (a Kotlin plugin over `MidiManager`). There is no folder picker the vault can use, so the app keeps a single vault in the app's external files directory, created on first launch, and the machine configuration lives in the app's private storage. Only a debug APK is supported: the CI builds it (arm64 and 32-bit ARM, uploaded as a workflow artifact) so the Android code does not break unnoticed, but it is not tested there and not part of the releases.
 
 ---
 
@@ -36,10 +37,12 @@ Native packages required to build Tauri v2 and the audio/MIDI subsystem (ALSA):
 - `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libwebkit2gtk-4.1-dev`
 - `libasound2-dev` (required by `midir` and `cpal` on Linux)
 
+For the Android build: JDK 17, the Android SDK (platform 37, build-tools 36), NDK 27 and the Rust targets `aarch64-linux-android`, `armv7-linux-androideabi`, `i686-linux-android` and `x86_64-linux-android`, with `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` set. `npx tauri android build --debug --apk --target <abi>` builds one ABI at a time (cargo is memory hungry); the minimum is Android 7 (API 24).
+
 ### 2.2. Backend: Rust (Tauri v2)
 - **Framework:** `tauri = "2"` (feature `protocol-asset`), `tauri-plugin-fs`, `tauri-plugin-dialog`
 - **Serialization:** `serde`, `serde_json`, `uuid` (features: `v4`), `chrono`, `base64` (images pasted into the notes)
-- **MIDI Input/Output:** `midir = "0.10"` (reading ALSA MIDI ports on a dedicated thread)
+- **MIDI Input/Output:** `midir = "0.10"` (reading ALSA MIDI ports on a dedicated thread; every target except Android). On Android: the local `tauri-plugin-android-midi` crate (`src-tauri/plugins/android-midi`, with its Kotlin `MidiPlugin`) and `oboe-sys` with `shared-stdcxx`, so `libc++_shared.so` is shipped in the APK (the static runtime leaves `__cxa_pure_virtual` unresolved when the library loads).
 - **MIDI Parsing and Slicing:** `midly = "0.5"` (reading, tick/tempo handling and SMF writing)
 - **Audio and Synthesizer:**
   - `cpal = "0.15"` (low-latency audio output to ALSA/PipeWire)
@@ -62,11 +65,14 @@ Layout of a vault (`<Vault>` is the folder chosen by the user):
 - `<Vault>/midi/raw/` (session raw takes)
 - `<Vault>/midi/fragments/` (sliced fragments)
 - `<Vault>/midi/history/<session_id>/` (copies of the raw take taken before each trim, to undo it)
+- `<Vault>/midi/melodies/` and `<Vault>/midi/attempts/` (challenge mode; created on the first write)
 - `<Vault>/media/` (images in the Markdown notes)
 
 Outside the vault:
 - `~/.config/piano-tracker/config.json` (current vault, recent ones, chosen SoundFont and language)
 - `~/.local/share/piano-tracker/assets/default_piano.sf2` (generated synthetic piano, can be regenerated)
+
+On Android there is no `$HOME`: both files live in the app's private storage (Tauri's `app_config_dir` / `app_data_dir`), and the vault is `Android/data/<id>/files/Documents/vault`, falling back to private storage if the external directory is not usable.
 
 The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
@@ -234,7 +240,7 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 ## 4. Rust Engine Specification
 
 ### 4.1. MIDI Capture Engine (`midi_recorder.rs`)
-- Lists input ports using `midir::MidiInput`.
+- Lists input ports using `midir::MidiInput`. On Android, `lib.rs` registers a `NativeMidi` backend (`android_midi.rs`, over the Kotlin plugin) at startup; its ports are listed as `native:<id>` and the capture uses it instead of `midir`. `split_midi_messages` cuts the chunks that the Android MIDI service delivers (several messages per buffer) into whole messages. The simulator port is always present.
 - When recording starts:
   - Opens a connection to the selected port.
   - Records `Instant::now()` as the $t_0$ reference (or resumes, accumulating the offset, if the session already has a raw take).
@@ -274,6 +280,14 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - **Channel mix:** volume and mute per MIDI channel, applied live (CC7, and All Sound Off when muting) and kept across seeks and synthesizer resets. Playing a file restores the default mix, and so does turning live monitoring on.
 - **WAV export:** a file is rendered offline with its own synthesizer and the current SoundFont (the live player is not touched), plus 2 s of tail, and written as 16-bit stereo PCM at 44.1 kHz block by block, so a long take does not have to fit in memory. The level is the same as playback (no normalization).
 
+### 4.4. Vaults (`vault.rs`)
+- **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
+- **Open:** accepts a folder with the marker or with `piano_tracker.sqlite` (the previous version's data folder). Applies migrations and writes `.piano-tracker/lock` with `{ host, pid, opened_at }`.
+- **Locking:** if, when opening, there is a lock from another computer, or from another live process on this one, the user is asked to confirm before opening. The lock is deleted when the vault or the app is closed. Opening the same database on two computers at once ends up in conflicting copies from the sync service.
+- **Conflicting copies:** on opening, the user is warned if there are `piano_tracker*conflict*.sqlite` files (Dropbox, Syncthing).
+- **Importing old data:** moves `piano_tracker.sqlite`, `midi/` and `media/` from `~/.local/share/piano-tracker` into a new vault, after flushing the WAL into the main file.
+- **Asset protocol:** when a vault is opened, its folder is added to the asset protocol scope so the images in the notes can be served.
+
 ### 4.5. Notes and Cut Suggestions (`midi_notes.rs`)
 - `extract_notes`: pairs NoteOn/NoteOff per channel and key (a repeated NoteOn closes the previous note) and returns the notes with velocity, the sustain pedal intervals and the key range, for the piano roll.
 - `suggest_segments`: the passages separated by at least a minimum silence (3 s by default). A note released with the pedal down rings until the pedal goes up. Passages shorter than 4 s join the closest neighbour, and each one keeps up to 0.5 s of silence around it.
@@ -299,14 +313,6 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - **Metrics:** `accuracy = hits / N`; each hit has quality $q = 1 - 0.5 \cdot |\Delta| / W$; `score = round(1000 · Σq / (N + 0.5 · (wrong + extra)))`; plus the mean signed and absolute offsets.
 - **Latency:** the user plays along with what they hear (count-in, metronome, guide), which comes out `output_latency_us` late; it is subtracted from the played times.
 - **Live runner:** the same `Matcher` scores live and offline. A ticker thread emits `challenge-progress` every 50 ms, starts the guide at the end of the count-in (at the challenge tempo through the global playback speed, restored afterwards) and ends the attempt 1.5 s after the last note's window. The capture reuses `midi_recorder` without writing a session take; with the simulator it plays the melody itself with some jitter and mistakes.
-
-### 4.4. Vaults (`vault.rs`)
-- **Create:** in a new or empty folder; creates the layout and the `.piano-tracker/vault.json` marker.
-- **Open:** accepts a folder with the marker or with `piano_tracker.sqlite` (the previous version's data folder). Applies migrations and writes `.piano-tracker/lock` with `{ host, pid, opened_at }`.
-- **Locking:** if, when opening, there is a lock from another computer, or from another live process on this one, the user is asked to confirm before opening. The lock is deleted when the vault or the app is closed. Opening the same database on two computers at once ends up in conflicting copies from the sync service.
-- **Conflicting copies:** on opening, the user is warned if there are `piano_tracker*conflict*.sqlite` files (Dropbox, Syncthing).
-- **Importing old data:** moves `piano_tracker.sqlite`, `midi/` and `media/` from `~/.local/share/piano-tracker` into a new vault, after flushing the WAL into the main file.
-- **Asset protocol:** when a vault is opened, its folder is added to the asset protocol scope so the images in the notes can be served.
 
 ---
 
@@ -419,7 +425,13 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
    - Metronome controls: numeric/slider BPM selector ($40 - 240$), metronome toggle, live synthesizer monitoring switch, and the main **Record / Stop** button with a live timer.
 3. **Raw Take and Slicer Area:**
    - Visible when the session has a master recording (`raw_midi_path`).
-   - Interactive timeline drawn as a **piano roll** (each note, with the pedal strip) or as density blocks; the choice is kept on this machine.
+   - Interactive timeline drawn as a **piano roll** or as density blocks; the choice is kept on this machine. The roll shows:
+     - each note, with opacity ∝ velocity;
+     - a **beat grid** from the session BPM, anchored at the first note and heavier every 4 beats (4/4 is assumed: no time signature is stored);
+     - a 12 px **sustain-pedal lane** with a "Ped" label at each press, and a faint **tail** on every note the pedal keeps sounding (until the pedal goes up or the key is struck again);
+     - a **tooltip** on the note under the pointer: name, value (whole ... 32nd, dotted half and quarter; boundaries lean downwards because players lift keys early) with its length in beats, milliseconds, velocity and, with the pedal, how long it rings. The value is the finger length (key down to key up), as in notation;
+     - a legend under the timeline.
+   - **Zoom** (buttons and Ctrl + wheel, up to 1 px per millisecond) on the raw take; the view follows the playhead while playing. The fragment player and the Repertoire comparison show the grid, pedal and tooltip but have no zoom.
    - **"Suggest cuts"** marks the passages separated by silences (minimum silence adjustable from 1 to 10 s); clicking one selects it, and **"Discard the silences"** removes every gap at once.
    - **Undo** (and Ctrl+Z) reverts the last trims, one by one.
    - Playback speed and WAV export of the raw take.

@@ -182,7 +182,6 @@ This document breaks down the sequential and parallelizable tasks needed to buil
 - [x] **16.4. Challenges view:** `ChallengeStore`, melody list in the sidebar, challenge view, piano roll, result card, history and "Use as a challenge" on fragments.
 - [x] **16.5. Challenge progress in Statistics:** melody table with sparklines, key figures, accuracy and tempo charts, and the error map.
 - [x] **16.6. Translations (English and Spanish) and specs for `challenge-stats` and `music`.**
-- [x] **16.8. Starter melodies:** five public-domain tunes added once per vault, and "Add the starter melodies" to bring back the deleted ones.
 - [ ] **16.7. Manual check with `npm run tauri dev`:**
   - Open an existing v4 vault: it migrates to v5, keeps sessions, pieces and compositions, and the five starter melodies appear in Challenges.
   - Listen to each starter melody at 100 % and check it sounds right.
@@ -192,3 +191,28 @@ This document breaks down the sequential and parallelizable tasks needed to buil
   - Stop an attempt halfway: it shows as incomplete and does not count for the record.
   - Check the challenge progress in Statistics and switch the language without reloading.
   - With a real keyboard, play "on time" and check that the mean offset stays close to 0 ms.
+- [x] **16.8. Starter melodies:** five public-domain tunes added once per vault, and "Add the starter melodies" to bring back the deleted ones.
+
+## Phase 17: Android Build
+- [x] **17.1. Android project:** `tauri android init` (`src-tauri/gen/android`), application id `dev.fmanzano.pianotracker` (the Tauri identifier and the AppStream id were renamed from `com.keoh.pianotracker`), minSdk 24.
+- [x] **17.2. Native MIDI input:**
+  - `NativeMidi` trait and `native:<id>` ports in `midi_recorder.rs` (`midir` only on non-Android targets), `split_midi_messages` for the chunks the Android service delivers, and tests with a fake backend.
+  - `plugins/android-midi` (Rust + Kotlin `MidiPlugin` over `MidiManager`) and `android_midi.rs` adapting it to the recorder.
+- [x] **17.3. Platform adaptations:** machine directories from Tauri's path resolver, a single vault in the external files directory (fallback: private storage), `open_with_desktop` unsupported on Android, `oboe-sys` with `shared-stdcxx` and `libc++_shared.so` copied into the APK, and a retry in `TauriApiService.call` for the "state not managed" error while the backend is still starting.
+- [x] **17.4. Build and run on a device:** debug APK with `source ~/.local/android-env.sh && npx tauri android build --debug --apk --target armv7`, installed with `adb install -r` on a Samsung Galaxy Tab A (SM-T510, Android 11, `armeabi-v7a`). Verified on the device by the author.
+- [ ] **17.5. Pending:**
+  - Build and try `aarch64` (a 64-bit device) and an emulator (`x86_64`).
+  - Record, slice and play back with a USB-MIDI keyboard through an OTG adapter, and check that the vault is readable over MTP.
+  - Check the first run of the `android` CI job (it builds a debug APK for arm64 and armv7 and uploads it as the `android-debug-apk` artifact; the workflow could not be run locally), and, if wanted, a signed release build and publishing the APK with the releases.
+  - Mobile layout: the UI is the desktop one.
+
+## Phase 18: Note Durations and Pedal on the Piano Roll
+- [x] **18.1. Note values (`core/music.ts`):** `noteValue` names a duration at a BPM (whole ... 32nd, dotted half and quarter) with boundaries that lean downwards, and always gives the length in beats; `beatMs`.
+- [x] **18.2. Timeline canvas (`timeline-canvas`):** beat grid anchored at the first note (4/4), 12 px pedal lane with "Ped" labels, faint tails for notes the pedal keeps sounding, hover tooltip, and a drawing window (`viewStartMs` / `viewSpanMs`) so the canvas stays as wide as the viewport.
+- [x] **18.3. Zoom (`core/timeline-zoom.ts`):** `TimelineZoom` (zoom, scroll, follow the playhead, Ctrl + wheel with a non-passive listener) and `timeline-zoom-controls`, in the slicer only: the fragment player's comment pins sit outside the track.
+- [x] **18.4. Legend and translations:** `timeline-legend` and the `timeline.*` keys in English and Spanish; specs for `noteValue` and the zoom math.
+- [ ] **18.5. Manual check with `npm run tauri dev`:**
+  - Record with the simulator at 90 BPM: the grid lines up with the first note and the metronome; a note held for 4 beats says "whole note" and spans four grid cells; a quarter released slightly early still says "quarter".
+  - The pedal lane is visible and labelled, distinct from the selection colour, and pedalled notes show their tail up to the pedal release.
+  - Zoom with the buttons and Ctrl + wheel: selecting, the handles, click-to-seek, the suggestion chips and the playhead stay right while zoomed and scrolled.
+  - Check the Fragments tab and the Repertoire comparison, switch to Spanish, and check that the density bars mode is unchanged.
