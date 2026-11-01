@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-android-midi"
+version = "0.1.0"
+description = "USB-MIDI input for Android (android.media.midi) as a Tauri plugin"
+authors = ["Francisco Manzano <keoh77@gmail.com>"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.80"
+# Lets tauri-build find the Android project of this plugin.
+links = "tauri-plugin-android-midi"
+# The version is not managed by release-please: it only exists inside this repository.
+publish = false
+
+[dependencies]
+tauri = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }

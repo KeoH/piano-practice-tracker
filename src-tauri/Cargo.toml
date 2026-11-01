@@ -28,8 +28,7 @@ serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# MIDI
-midir = "0.10"
+# MIDI (`midir` has no Android backend: there the ports come from the Kotlin plugin)
 midly = "0.5"
 
 # Audio
@@ -44,6 +43,15 @@ libc = "0.2"
 
 # Markdown images (they arrive as base64 from the frontend)
 base64 = "0.22"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+midir = "0.10"
+
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-android-midi = { path = "plugins/android-midi" }
+# cpal's Android backend (oboe) is C++: link the shared runtime and ship libc++_shared.so with the APK
+# (the static one leaves `__cxa_pure_virtual` and friends unresolved at load time).
+oboe-sys = { version = "0.6", features = ["shared-stdcxx"] }
 
 [dev-dependencies]
 tempfile = "3"

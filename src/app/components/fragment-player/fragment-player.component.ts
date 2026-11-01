@@ -32,6 +32,7 @@ import { PiecePickerComponent, type PieceChoice } from '../piece-picker/piece-pi
 import { RangeHandlesComponent } from '../range-handles/range-handles.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
 import { TimelineCanvasComponent } from '../timeline-canvas/timeline-canvas.component';
+import { TimelineLegendComponent } from '../timeline-legend/timeline-legend.component';
 import { TimelineModeToggleComponent } from '../timeline-mode-toggle/timeline-mode-toggle.component';
 
 /** How long a comment's automatic popup stays visible. */
@@ -45,7 +46,7 @@ const LANDING_WINDOW_MS = 350;
 @Component({
   selector: 'app-fragment-player',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
+  imports: [IconComponent, PiecePickerComponent, TimelineCanvasComponent, TimelineLegendComponent, TimelineModeToggleComponent, RangeHandlesComponent, RateSelectComponent, TranslatePipe],
   templateUrl: './fragment-player.component.html',
 })
 export class FragmentPlayerComponent {

@@ -354,7 +354,30 @@
   "timeline": {
     "noActivity": "No note activity",
     "showActivity": "Show note density",
-    "showRoll": "Show the notes (piano roll)"
+    "showRoll": "Show the notes (piano roll)",
+    "pedal": "Sustain pedal",
+    "pedalShort": "Ped",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomFit": "Fit the whole take",
+    "legendGrid": "Grid: one line per beat (♩ = {bpm}, {ms} ms), heavier every 4 beats",
+    "legendTail": "Faint tail: the note keeps sounding because of the pedal",
+    "legendHint": "Hover a note to see its value; Ctrl + wheel to zoom",
+    "legendHintNoZoom": "Hover a note to see its value",
+    "tooltipVelocity": "velocity {velocity}",
+    "tooltipTail": "Sounds about {ms} ms with the pedal",
+    "tooltipBeats": "{beats} beats",
+    "tooltipPedal": "Sustain pedal · {ms} ms",
+    "valueApprox": "about {value}",
+    "valueDotted": "dotted {value}",
+    "value": {
+      "whole": "whole note",
+      "half": "half note",
+      "quarter": "quarter note",
+      "eighth": "eighth note",
+      "sixteenth": "16th note",
+      "thirtysecond": "32nd note"
+    }
   },
   "notes": {
     "title": "Session notes",

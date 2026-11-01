@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Piano Practice Tracker",
   "version": "0.6.0",
-  "identifier": "com.keoh.pianotracker",
+  "identifier": "dev.fmanzano.pianotracker",
   "build": {
     "frontendDist": "../dist/piano-tracker/browser",
     "devUrl": "http://localhost:4200",
@@ -55,7 +55,7 @@
       "deb": {
         "section": "sound",
         "files": {
-          "/usr/share/metainfo/com.keoh.pianotracker.metainfo.xml": "linux/com.keoh.pianotracker.metainfo.xml",
+          "/usr/share/metainfo/dev.fmanzano.pianotracker.metainfo.xml": "linux/dev.fmanzano.pianotracker.metainfo.xml",
           "/usr/share/doc/piano-practice-tracker/copyright": "linux/copyright"
         }
       }

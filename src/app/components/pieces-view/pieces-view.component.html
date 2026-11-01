@@ -85,6 +85,7 @@
                   [durationMs]="compareDuration()"
                   [height]="96"
                   [progressMs]="progressOf(t)"
+                  [bpm]="t.fragment.bpm"
                 />
                 @if (progressOf(t) !== null) {
                   <div class="pointer-events-none absolute top-0 bottom-[18px] -ml-px w-0.5 bg-ivory" [style.left.%]="pct(progressOf(t)!, compareDuration())"></div>
@@ -131,7 +132,9 @@
                   [durationMs]="t.fragment.duration_ms"
                   [height]="34"
                   [showRuler]="false"
+                  [showGrid]="false"
                   [progressMs]="progressOf(t)"
+                  [bpm]="t.fragment.bpm"
                 />
               </div>
               <span class="tabular shrink-0 text-[13px] text-fg-soft">{{ formatMs(t.fragment.duration_ms) }}</span>

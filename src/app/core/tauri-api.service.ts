@@ -56,6 +56,14 @@ export class IpcError extends Error {
 }
 
 /**
+ * Tauri's error while the backend is still running `setup` (`init_state`: SoundFont, audio, vault).
+ * On Android the webview can load before it finishes, mostly on the first launch.
+ */
+const BACKEND_STARTING = /state not managed/i;
+const BACKEND_RETRY_MS = 100;
+const BACKEND_RETRY_LIMIT = 150; // 15 s
+
+/**
  * Typed facade over the Tauri IPC commands.
  * Arguments in camelCase (Tauri v2 convention), responses in snake_case (see models.ts).
  * Every promise rejects with `IpcError` (string message).
@@ -67,10 +75,17 @@ export class TauriApiService {
 
   private async call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
     if (!this.available) throw new IpcError(command, this.i18n.t('app.notTauri'));
-    try {
-      return await invoke<T>(command, args);
-    } catch (err) {
-      throw new IpcError(command, errorMessage(err));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await invoke<T>(command, args);
+      } catch (err) {
+        const message = errorMessage(err);
+        if (attempt < BACKEND_RETRY_LIMIT && BACKEND_STARTING.test(message)) {
+          await new Promise((resolve) => setTimeout(resolve, BACKEND_RETRY_MS));
+          continue;
+        }
+        throw new IpcError(command, message);
+      }
     }
   }
 

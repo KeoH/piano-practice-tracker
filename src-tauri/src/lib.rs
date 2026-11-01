@@ -1,6 +1,8 @@
 // First, so the `t!` macro is available in the other modules.
 #[macro_use]
 pub mod i18n;
+#[cfg(target_os = "android")]
+pub mod android_midi;
 pub mod audio_engine;
 pub mod challenge;
 pub mod commands;
@@ -35,9 +37,45 @@ pub const EVENT_CHALLENGE_NOTE: &str = "challenge-note";
 pub const EVENT_CHALLENGE_PROGRESS: &str = "challenge-progress";
 pub const EVENT_CHALLENGE_FINISHED: &str = "challenge-finished";
 
+/// Machine-level directories. Android has no `$HOME`: the config and the built-in SoundFont live
+/// in the app's private storage.
+#[cfg(target_os = "android")]
+fn app_dirs(app: &tauri::AppHandle) -> Result<AppDirs, String> {
+    let resolver = app.path();
+    let data = resolver.app_data_dir().map_err(|e| e.to_string())?;
+    let config = resolver.app_config_dir().map_err(|e| e.to_string())?;
+    Ok(AppDirs::new(data, config))
+}
+
+#[cfg(not(target_os = "android"))]
+fn app_dirs(_app: &tauri::AppHandle) -> Result<AppDirs, String> {
+    Ok(AppDirs::default_location())
+}
+
+/// Android has no folder picker the vault can use (`content://` URIs are not paths), so there is
+/// a single vault in the app's external files directory (`Android/data/<id>/files/Documents/vault`),
+/// which the computer sees over USB/MTP and which needs no permission. If that directory is not
+/// usable it falls back to the private one.
+#[cfg(target_os = "android")]
+fn android_vault_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let resolver = app.path();
+    match resolver.document_dir() {
+        Ok(docs) => {
+            let dir = docs.join("vault");
+            match std::fs::create_dir_all(&dir) {
+                Ok(()) => return Ok(dir),
+                Err(e) => log::warn!("Could not create {}: {e}", dir.display()),
+            }
+        }
+        Err(e) => log::warn!("The external files directory is not available: {e}"),
+    }
+    log::warn!("The vault stays in private storage");
+    Ok(resolver.app_data_dir().map_err(|e| e.to_string())?.join("vault"))
+}
+
 /// Builds the application state: directories, SoundFont, audio and the last open vault.
 fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
-    let dirs = AppDirs::default_location();
+    let dirs = app_dirs(app)?;
     dirs.ensure_dirs()?;
 
     // The SoundFont is generated locally if missing: the app never depends on downloads.
@@ -61,7 +99,16 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
     let config = AppConfig::load(&dirs.config_file);
     // Before reopening the vault, so its warnings already come out in the chosen language.
     i18n::set_language(i18n::resolve(config.language.as_deref()));
+    #[cfg(not(target_os = "android"))]
     let last_vault = config.current_vault.clone();
+    #[cfg(target_os = "android")]
+    let last_vault = {
+        let dir = android_vault_dir(app)?;
+        if !dir.join(paths::VAULT_MARKER_DIR).is_dir() {
+            vault::create_vault(&dir)?;
+        }
+        Some(dir.to_string_lossy().into_owned())
+    };
     let state = AppState {
         dirs,
         config: Mutex::new(config),
@@ -96,7 +143,10 @@ fn init_state(app: &tauri::AppHandle) -> Result<AppState, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(tauri_plugin_android_midi::init());
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(
@@ -105,6 +155,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            #[cfg(target_os = "android")]
+            midi_recorder::set_native_backend(Arc::new(android_midi::AndroidMidiBackend(app.handle().clone())));
             let state = init_state(app.handle())?;
             app.manage(state);
             Ok(())
