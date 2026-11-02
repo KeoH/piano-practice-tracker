@@ -9,7 +9,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/KeoH/piano-practice-tracker/release.yml?branch=main&label=CI&logo=github)](https://github.com/KeoH/piano-practice-tracker/actions/workflows/release.yml)
 [![Release](https://img.shields.io/github/v/release/KeoH/piano-practice-tracker?logo=github)](https://github.com/KeoH/piano-practice-tracker/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/KeoH/piano-practice-tracker)](LICENSE)
-![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-informational)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Android%20(from%20source)-informational)
 <br />
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 [![Angular](https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white)](https://angular.dev)
@@ -21,7 +21,7 @@
 
 </div>
 
-A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 22**. It works fully offline, and all your data lives in a folder you choose.
+A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 22**. It works fully offline, and all your data lives in a folder you choose. It also builds for Android tablets and phones with a USB-MIDI keyboard (a debug APK you build yourself; see [Android](#android)).
 
 ## Features
 
@@ -29,6 +29,7 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 - **Record over USB-MIDI** from any MIDI port, with a built-in metronome and optional live monitoring through the synthesizer (off by default, so you hear your own digital piano with no latency). Recording again in a session appends the new take to the end of the existing one.
 - **Slice the raw take** on a piano roll (or note-density bars). Select a range to extract it as a standalone **fragment**, or discard it (silences, mistakes). Either way the range is removed from the raw take and the gap is closed. Open notes and the sustain pedal are handled at the cut points.
 - **Suggested cuts** split the take into passages separated by silence, and every trim can be **undone**.
+- **Read the durations on the piano roll:** a beat grid from the session's BPM (heavier every 4 beats, assuming 4/4), a tooltip on each note with its value (quarter, eighth...), length and velocity, a labelled **sustain-pedal lane**, and a faint tail on notes the pedal keeps sounding. **Zoom** (buttons or Ctrl + wheel) on the raw take to see short notes.
 
 ### Listen and annotate
 - **Playback** through a SoundFont synthesizer (`rustysynth`), with seek, an **A-B loop** and **slower speeds** that keep the pitch.
@@ -43,6 +44,10 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 - Arrange fragments on up to 15 **tracks**, each with its own General MIDI instrument, volume, mute and solo.
 - Trim, split, repeat and transpose **clips**, with undo and redo.
 - Export the result as **WAV** or as a **multitrack MIDI** file.
+
+### Challenges
+- Play a melody (a fragment, an imported `.mid` or one of the five built-in starter tunes) at 40-150 % of its tempo and get scored live on every note, with a record to beat and a "ghost" of your best attempt.
+- Every attempt is saved with its accuracy, mistakes and timing; the Statistics view charts your progress per melody.
 
 ### Statistics
 - Time practised today and this week against a **weekly goal**, current and best **streaks**, a **year heatmap** and the last 30 days.
@@ -106,6 +111,26 @@ xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
 
 macOS has no system SoundFont, so the app starts with its synthetic piano and most instruments are unavailable in the composer. Download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) (**Settings → Sound** has a button for it) and either choose the `.sf2` there or copy it to `~/Library/Audio/Sounds/Banks`, where the app finds it on its own.
 
+### Android
+
+Android is built from source (there is no published APK yet; the CI builds a debug APK on every PR and attaches it to the run as the `android-debug-apk` artifact) and only a debug build has been tried, on a Samsung Galaxy Tab A (SM-T510, Android 11, 32-bit ARM) with a USB-MIDI keyboard.
+
+- The app keeps a **single vault** in the app's external files directory (`Android/data/dev.fmanzano.pianotracker/files/Documents/vault`), which a computer can read over USB (MTP) with no permissions. There is no folder picker and no "reveal vault".
+- MIDI input comes from the Android `MidiManager` (a Kotlin plugin), so a class-compliant USB keyboard needs an OTG adapter.
+
+Requirements: JDK 17, the Android SDK (platform 37, build-tools 36) and NDK 27, with `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` set, plus the Rust targets:
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+```
+
+Build one ABI at a time (cargo is memory hungry) and install over `adb`. `armv7` is the one that was tested; use `aarch64` for a 64-bit device:
+
+```bash
+npx tauri android build --debug --apk --target armv7
+adb install -r src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+
 ### Better piano sound
 
 The app picks a SoundFont in this order:
@@ -135,7 +160,8 @@ sudo apt install fluid-soundfont-gm
 | `<vault>/midi/raw/`, `<vault>/midi/fragments/` | MIDI files (SMF format 0) |
 | `<vault>/media/` | Images in the notes |
 | `<vault>/.piano-tracker/` | Vault marker and lock |
-| `~/.config/piano-tracker/config.json` | Per-machine settings: current and recent vaults, SoundFont, language |
+| `<vault>/midi/history/`, `<vault>/midi/melodies/`, `<vault>/midi/attempts/` | Undo snapshots, challenge melodies and your challenge attempts |
+| `~/.config/piano-tracker/config.json` | Per-machine settings: current and recent vaults, SoundFont, language (on Android, in the app's private storage) |
 
 Paths inside the database are relative to the vault, so you can move it or sync it between computers. Avoid having the same vault open on two computers at once: the sync service would end up creating conflicting copies of the database.
 
@@ -191,10 +217,13 @@ src/                 Angular frontend (standalone, zoneless, signals, Tailwind v
   locales/           translations shared by frontend and backend
 src-tauri/src/       Rust backend
   commands.rs        Tauri commands (the IPC surface)
-  midi_recorder.rs   MIDI capture (midir)
+  midi_recorder.rs   MIDI capture (midir; a native backend on Android)
+  android_midi.rs    adapts the Android MIDI plugin to the recorder (Android only)
   midi_slicer.rs     activity analysis, extraction and trimming (midly)
   audio_engine.rs    synthesizer, sequencer and metronome (cpal + rustysynth)
   vault.rs, db.rs    vaults, locking and SQLite storage
+src-tauri/plugins/android-midi/   Tauri plugin (Rust + Kotlin) over Android's MidiManager
+src-tauri/gen/android/            generated Android project (Gradle)
 ```
 
 More detail:
