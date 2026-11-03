@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.7.0...v0.7.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* build a debug Android APK on every PR, add a Makefile, and update the docs ([5122c9c](https://github.com/KeoH/piano-practice-tracker/commit/5122c9c09250e2c8144ad87720c0c1a33d992199))
+* Updated doc and android CI ([d108a10](https://github.com/KeoH/piano-practice-tracker/commit/d108a1049a1c682bd5dd9da2357bf5040afb262d))
+
 ## [0.7.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.6.0...v0.7.0) (2026-11-01)
 
 
