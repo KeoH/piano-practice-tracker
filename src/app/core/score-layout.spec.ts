@@ -42,8 +42,9 @@ describe('score layout: one system', () => {
   });
 
   it('is shorter by what the pickup bar lacks', () => {
-    // One beat of pickup in 4/4: the first bar is 80 px instead of 320.
-    expect(layoutOf({ ...meter, pickup_ticks: 480 }, 80).width).toBe(HEAD_W + 80 + 3 * 320 + END_PAD);
+    // One beat of pickup in 4/4: the first bar is 80 px and the closing bar 240 px (the 3 beats it lacks),
+    // so they are one whole bar of 320 px between them.
+    expect(layoutOf({ ...meter, pickup_ticks: 480 }, 80).width).toBe(HEAD_W + 3 * 320 + END_PAD);
   });
 
   it('maps ticks to x in proportion to time', () => {
@@ -159,7 +160,7 @@ describe('score layout: systems', () => {
     expect(l.systems.map((s) => [s.firstBar, s.lastBar])).toEqual([[0, 1], [2, 3]]);
     expect(l.systems[0].startTick).toBe(0);
     expect(l.systems[0].endTick).toBe(480 + 1920);
-    expect(l.systems[1].endTick).toBe(480 + 3 * 1920);
+    expect(l.systems[1].endTick).toBe(3 * 1920); // the closing bar makes the last bar short
   });
 
   it('finds the system of a tick, the last one past the end', () => {

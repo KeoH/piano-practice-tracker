@@ -4,7 +4,7 @@ import { I18nService } from '../../core/i18n/i18n.service';
 import type { ScoreDto, ScoreNoteDto } from '../../core/models';
 import { PlaybackStore } from '../../core/playback.store';
 import { newScore, scoreKey } from '../../core/score';
-import { RULER_H, layoutOf, noteX, yOfStep } from '../../core/score-layout';
+import { RULER_H, layoutOf, noteX, xOfTick, yOfStep } from '../../core/score-layout';
 import { ScoreStore } from '../../core/score.store';
 import { ScoreStaffComponent } from './score-staff.component';
 
@@ -28,7 +28,7 @@ describe('ScoreStaffComponent', () => {
   const pointer = (target: EventTarget, type: string, x: number, y: number, extra: MouseEventInit = {}) =>
     target.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: y, button: 0, bubbles: true, ...extra }));
   const svg = () => el.querySelector('svg')!;
-  const noteEls = () => [...el.querySelectorAll<SVGGElement>('g[role="button"]')];
+  const noteEls = () => [...el.querySelectorAll<SVGGElement>('g[role="button"], g[role="img"]')];
 
   async function render(score: Partial<ScoreDto> = {}) {
     store.doc.set({ ...newScore('s1', 'Étude', ''), ...score });
@@ -114,7 +114,8 @@ describe('ScoreStaffComponent', () => {
 
   it('does not put a note where there is no room, and deselects instead', async () => {
     await render({ treble: [n('a', 0, 960, 64)] });
-    store.selectNote('a');
+    store.selectNote('a'); // selecting a note puts its value in the palette...
+    store.setKind('quarter'); // ...and then a quarter note is chosen
     const l = layout();
     pointer(svg(), 'click', noteX(l, 480), yOfStep(l.systems[0], 'treble', 4)); // inside the half note
     expect(store.doc()!.treble).toHaveLength(1);
@@ -231,6 +232,25 @@ describe('ScoreStaffComponent', () => {
     expect(ys.every((y) => y >= layout().systems[1].top)).toBe(true);
   });
 
+  it('draws the closing bar of a pickup as short as what the pickup lacks, with its bar rest', async () => {
+    await render({ bars: 2, pickup_ticks: 3 * 480 }); // 4/4: a pickup of three beats and a closing bar of one
+    const sys = layout().systems[0];
+    expect(layout().systems).toHaveLength(1);
+    const xs = [...el.querySelectorAll('svg > line.stroke-muted')].map((x) => +x.getAttribute('x1')!);
+    const barLines = [...new Set(xs)].sort((a, b) => a - b).filter((x) => x > 20);
+    // The width of the pickup bar and of the closing bar add up to one whole bar (320 px at 80 px per beat).
+    const first = barLines[1] - barLines[0];
+    const last = sys.right - barLines[1];
+    expect(first).toBeCloseTo(240);
+    expect(last).toBeCloseTo(80);
+    expect(first + last).toBeCloseTo(320);
+    expect(sys.endTick).toBe(1920);
+    // Short bars are not whole rests: each staff has a quarter rest and a half rest in the pickup (3 beats) and a
+    // quarter rest in the closing bar (1 beat), so only the half rests are rectangles.
+    expect(el.querySelectorAll('g.fill-muted rect')).toHaveLength(2);
+    expect(el.querySelectorAll('g.fill-muted text')).toHaveLength(4);
+  });
+
   it('shows no accidental on the note a tie carries over the bar line', async () => {
     await render({ treble: [n('a', 1440, 480, 61, 'sharp', true), n('b', 1920, 480, 61, 'sharp')] });
     const signs = noteEls().map((g) => g.querySelector('text')?.textContent ?? null);
@@ -325,6 +345,78 @@ describe('ScoreStaffComponent', () => {
       fixture.detectChanges();
       expect(layout().systems).toHaveLength(1);
       expect(+svg().getAttribute('height')!).toBe(layout().height);
+    });
+  });
+
+  describe('read-only, for a challenge', () => {
+    const shown = (extra: Partial<ScoreDto> = {}): ScoreDto => ({ ...newScore('c', 'Challenge', ''), ...extra });
+    async function show(score: ScoreDto, inputs: Record<string, unknown> = {}) {
+      fixture.componentRef.setInput('score', score);
+      for (const [k, v] of Object.entries(inputs)) fixture.componentRef.setInput(k, v);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+    }
+
+    it('draws the score it is given, not the one being edited', async () => {
+      store.doc.set(shown({ treble: [n('x', 0, 480, 60)] }));
+      await show(shown({ treble: [n('a', 0, 480, 64), n('b', 480, 480, 67)] }));
+      expect(noteEls()).toHaveLength(2);
+      expect(svg().getAttribute('aria-label')).toBe('Score: Challenge');
+    });
+
+    it('cannot be edited: a click, a drag or the ruler change nothing', async () => {
+      const score = shown({ treble: [n('a', 0, 480, 64)] });
+      await show(score);
+      const l = layoutOf(score, 80);
+      pointer(svg(), 'click', noteX(l, 960), yOfStep(l.systems[0], 'treble', 2));
+      pointer(noteEls()[0], 'pointerdown', noteX(l, 0), yOfStep(l.systems[0], 'treble', 0));
+      pointer(window, 'pointermove', noteX(l, 960), yOfStep(l.systems[0], 'treble', 4));
+      pointer(window, 'pointerup', noteX(l, 960), yOfStep(l.systems[0], 'treble', 4));
+      pointer(svg(), 'pointerdown', noteX(l, 480), RULER_H / 2);
+      expect(score.treble).toHaveLength(1);
+      expect(store.doc()).toBeNull();
+      expect(store.selectedNoteId()).toBeNull();
+      expect(el.querySelector('g.text-rec[opacity], g.text-accent[opacity]')).toBeNull(); // no ghost
+      expect(noteEls()[0].getAttribute('role')).toBe('img');
+      expect(noteEls()[0].hasAttribute('tabindex')).toBe(false);
+    });
+
+    it('colours the notes by how they went', async () => {
+      await show(shown({ treble: [n('a', 0, 480, 60), n('b', 480, 480, 62), n('c', 960, 480, 64), n('d', 1440, 480, 65)] }), {
+        noteStates: { a: 'perfect', b: 'good', c: 'missed', d: null },
+      });
+      expect(noteEls().map((g) => ['text-ok', 'text-ok/60', 'text-rec', 'text-fg'].find((c) => g.classList.contains(c)))).toEqual([
+        'text-ok',
+        'text-ok/60',
+        'text-rec',
+        'text-fg',
+      ]);
+    });
+
+    it('draws a cross where a played note hit nothing, on the line of its key', async () => {
+      const score = shown();
+      await show(score, { marks: [{ tick: 480, key: 64 }, { tick: 960, key: 48 }] });
+      const crosses = [...el.querySelectorAll('path.stroke-rec')];
+      expect(crosses).toHaveLength(2);
+      const l = layoutOf(score, 80);
+      // E4 is the bottom line of the treble staff, C3 is below the bass staff's middle.
+      expect(crosses[0].getAttribute('d')).toContain(`M ${noteX(l, 480) - 5} ${yOfStep(l.systems[0], 'treble', 0) - 5}`);
+    });
+
+    it('draws the playhead where it is told, and none otherwise', async () => {
+      const score = shown({ bars: 2 });
+      await show(score);
+      expect(el.querySelector('svg > g line.stroke-accent')).toBeNull();
+      await show(score, { playheadTick: 960 });
+      const l = layoutOf(score, 80);
+      expect(+el.querySelector('svg > g line.stroke-accent')!.getAttribute('x1')!).toBe(xOfTick(l, 960));
+    });
+
+    it('uses its own zoom', async () => {
+      const score = shown();
+      await show(score, { zoom: 48 });
+      expect(+svg().getAttribute('width')!).toBe(layoutOf(score, 48).width);
     });
   });
 

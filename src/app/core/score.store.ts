@@ -16,6 +16,7 @@ import {
   durationTicks,
   findNote,
   moveNote,
+  notatedValue,
   msToTicks,
   pageTick,
   pitchAt,
@@ -76,6 +77,11 @@ export class ScoreStore {
   readonly doc = signal<ScoreDto | null>(null);
   readonly loading = signal(false);
   readonly selectedNoteId = signal<string | null>(null);
+  /**
+   * Whether the selected note was chosen by clicking it. Then the palette edits it (choosing another value
+   * changes it); a note that was just placed is selected too, but the palette is for the next ones.
+   */
+  private readonly editing = signal(false);
 
   /** The note value that is placed next. */
   readonly kind = signal<NoteKind>('quarter');
@@ -360,8 +366,27 @@ export class ScoreStore {
     if (!canDot(kind)) this.dotted.set(false);
   }
 
+  /** Sets the value and the dot of the tool without touching the selected note (a note dropped from the palette). */
+  setTool(kind: NoteKind, dotted: boolean): void {
+    this.kind.set(kind);
+    this.dotted.set(canDot(kind) && dotted);
+  }
+
+  /**
+   * Chooses a note value: the tool for the next notes and, if a note was selected by clicking it, that
+   * note's value at once, plain (the dot is a separate choice, so a dotted half note becomes a half note).
+   */
+  chooseKind(kind: NoteKind): void {
+    this.setKind(kind);
+    if (this.editedNote()) this.dotted.set(false);
+    this.applyToolToSelected();
+  }
+
+  /** Dots or undots: the tool for the next notes and, if a note was selected by clicking it, that note at once. */
   toggleDotted(): void {
-    if (canDot(this.kind())) this.dotted.update((v) => !v);
+    if (!canDot(this.kind())) return;
+    this.dotted.update((v) => !v);
+    this.applyToolToSelected();
   }
 
   /** Sharp or flat: for the notes placed next and for the selected note. */
@@ -373,8 +398,25 @@ export class ScoreStore {
 
   // ---- Notes ----
 
+  /** Selects a note (or none) the way a click does: the palette shows its value and edits it. */
   selectNote(id: string | null): void {
     this.selectedNoteId.set(id);
+    this.editing.set(id !== null);
+    this.syncTool();
+  }
+
+  /** The selected note if the palette edits it (it was clicked, not just placed). */
+  private editedNote(): ReturnType<ScoreStore['selectedNote']> {
+    return this.editing() ? this.selectedNote() : null;
+  }
+
+  /** The value and the dot of the tool become those of the selected note. */
+  private syncTool(): void {
+    const ref = this.selectedNote();
+    const value = ref ? notatedValue(ref.note.duration_ticks) : null;
+    if (!value) return;
+    this.kind.set(value.kind);
+    this.dotted.set(value.dotted);
   }
 
   /** Whether a note of the current value fits at `tick` on `staff` (where notes start it joins them as a chord). */
@@ -398,7 +440,9 @@ export class ScoreStore {
       this.toast.warning(this.i18n.t('score.noRoom'));
       return false;
     }
+    // The new note is selected for the arrow keys, but the palette stays the tool for the next one.
     this.selectedNoteId.set(id);
+    this.editing.set(false);
     this.audition(pitch.key);
     return true;
   }
@@ -422,11 +466,18 @@ export class ScoreStore {
     if (id && this.update((d) => removeNote(d, id))) this.selectedNoteId.set(null);
   }
 
-  /** The selected note takes the current value (if it fits). */
+  /**
+   * The note being edited takes the value of the tool (if it fits; otherwise the tool goes back to the
+   * note's value and it says so). Nothing happens if no note was selected by clicking it.
+   */
   applyToolToSelected(): void {
-    const id = this.selectedNoteId();
-    if (!id) return;
-    if (!this.update((d) => setNoteDuration(d, id, this.toolTicks()))) this.toast.warning(this.i18n.t('score.noRoom'));
+    const ref = this.editedNote();
+    if (!ref) return;
+    if (ref.note.duration_ticks !== this.toolTicks()) {
+      const id = ref.note.id;
+      if (!this.update((d) => setNoteDuration(d, id, this.toolTicks()))) this.toast.warning(this.i18n.t('score.noRoom'));
+    }
+    this.syncTool();
   }
 
   /** Ties the selected note to the next one of the same pitch (adding it if it is not there), or unties it. */

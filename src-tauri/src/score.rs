@@ -117,9 +117,28 @@ pub fn missing_ticks(score: &ScoreDto) -> u32 {
     }
 }
 
-/// Length of the whole score: its bars (the pickup bar being short).
+/// Length of the whole score. With a pickup the first bar is short and so is the last one (it holds what
+/// the pickup lacks), so they add up to one whole bar.
 pub fn score_ticks(score: &ScoreDto) -> u32 {
-    (score.bars * bar_ticks(score)).saturating_sub(missing_ticks(score))
+    let bar = bar_ticks(score);
+    if score.pickup_ticks > 0 {
+        if score.bars >= 2 {
+            (score.bars - 1) * bar
+        } else {
+            score.pickup_ticks
+        }
+    } else {
+        score.bars * bar
+    }
+}
+
+/// The fewest bars a score can have: a pickup needs its closing bar.
+fn min_bars(score: &ScoreDto) -> u32 {
+    if score.pickup_ticks > 0 {
+        2
+    } else {
+        1
+    }
 }
 
 /// Length of what is played: the score once, or twice when it ends with a repeat sign.
@@ -222,7 +241,7 @@ pub fn issues(score: &ScoreDto) -> Vec<Issue> {
         out.push(issue(IssueCode::TimeSignature));
         return out;
     }
-    if !(1..=MAX_BARS).contains(&score.bars) {
+    if !(min_bars(score)..=MAX_BARS).contains(&score.bars) {
         out.push(issue(IssueCode::Bars));
     }
     if !is_pickup(score) {
@@ -538,30 +557,46 @@ mod tests {
 
     #[test]
     fn a_pickup_bar_is_the_end_of_a_bar() {
-        // 4/4 with a one-beat pickup: bar 0 is [0, 480) and the whole bars follow.
+        // 4/4 with a one-beat pickup: bar 0 is [0, 480), a whole bar follows and the score ends with the
+        // 3 beats the pickup lacks, so the first and the last bar make one whole bar.
         let mut s = score(vec![], vec![]);
         s.bars = 3;
         s.pickup_ticks = Q;
         assert_eq!(missing_ticks(&s), 3 * Q);
-        assert_eq!(score_ticks(&s), 3 * 4 * Q - 3 * Q);
+        assert_eq!(score_ticks(&s), Q + 4 * Q + 3 * Q);
         assert_eq!(bar_of(&s, Q - 1), 0);
         assert_eq!(bar_of(&s, Q), 1);
         assert_eq!(bar_of(&s, 5 * Q), 2);
-        assert_eq!(duration_ms(&s), 4_500); // 9 beats at 120 BPM
+        assert_eq!(bar_of(&s, 8 * Q - 1), 2);
+        assert_eq!(duration_ms(&s), 4_000); // 8 beats at 120 BPM
+        // Without a pickup there is no closing bar.
+        s.pickup_ticks = 0;
+        assert_eq!(score_ticks(&s), 12 * Q);
     }
 
     #[test]
     fn notes_fit_inside_the_bars_of_a_pickup_score() {
-        let mut s = score(vec![note("a", 0, Q, 60), note("b", Q, 4 * Q, 62)], vec![]);
-        s.bars = 2;
+        let mut s = score(vec![note("a", 0, Q, 60), note("b", Q, 4 * Q, 62), note("c", 5 * Q, 3 * Q, 60)], vec![]);
+        s.bars = 3;
         s.pickup_ticks = Q;
         assert!(issues(&s).is_empty());
         // A half note from the pickup crosses its bar line.
         s.treble = vec![note("a", 0, 2 * Q, 60)];
         assert_eq!(codes(&s), vec![IssueCode::CrossesBar]);
-        // Nothing may go past the end of the (shorter) score.
-        s.treble = vec![note("a", Q, 4 * Q, 60), note("b", 5 * Q, 2 * Q, 60)];
+        // Nothing may go past the end of the closing bar, which is only 3 beats long.
+        s.treble = vec![note("a", 5 * Q, 4 * Q, 60)];
         assert_eq!(codes(&s), vec![IssueCode::Tick]);
+    }
+
+    #[test]
+    fn a_pickup_needs_its_closing_bar() {
+        let mut s = score(vec![], vec![]);
+        s.pickup_ticks = Q;
+        s.bars = 1;
+        assert_eq!(codes(&s), vec![IssueCode::Bars]);
+        s.bars = 2;
+        assert!(issues(&s).is_empty());
+        assert_eq!(score_ticks(&s), 4 * Q); // the pickup and the closing bar are one whole bar
     }
 
     #[test]

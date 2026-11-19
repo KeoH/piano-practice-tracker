@@ -138,17 +138,30 @@
         </div>
       </div>
       <div class="relative">
-        <app-piano-roll
-          [notes]="store.notes()"
-          [tempoPct]="store.run()?.tempo_pct ?? store.tempoPct()"
-          [states]="store.noteStates()"
-          [marks]="store.marks()"
-          [mode]="store.isRunning() ? 'live' : 'static'"
-          [running]="store.isRunning()"
-          [clock]="clock"
-          [focusMs]="focusMs()"
-          [height]="280"
-        />
+        @if (store.scoreMap(); as map) {
+          <!-- A melody that came from a score is shown as notation -->
+          <app-challenge-staff
+            [map]="map"
+            [tempoPct]="store.run()?.tempo_pct ?? store.tempoPct()"
+            [states]="store.scoreStates()"
+            [marks]="store.marks()"
+            [running]="store.isRunning()"
+            [clock]="clock"
+            [focusMs]="focusMs()"
+          />
+        } @else {
+          <app-piano-roll
+            [notes]="store.notes()"
+            [tempoPct]="store.run()?.tempo_pct ?? store.tempoPct()"
+            [states]="store.noteStates()"
+            [marks]="store.marks()"
+            [mode]="store.isRunning() ? 'live' : 'static'"
+            [running]="store.isRunning()"
+            [clock]="clock"
+            [focusMs]="focusMs()"
+            [height]="280"
+          />
+        }
         @if (countdown(); as c) {
           <div class="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
             <span class="tabular text-[96px] leading-none font-semibold text-accent/90">{{ c }}</span>

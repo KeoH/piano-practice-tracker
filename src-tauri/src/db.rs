@@ -29,7 +29,7 @@ use crate::models::{
 use crate::paths::relative_to;
 use crate::score;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 /// Trims of a raw take that can be undone; older snapshots are deleted.
 pub const RAW_HISTORY_LIMIT: usize = 10;
 /// Tracks of a composition: one MIDI channel each, skipping channel 10 (GM percussion).
@@ -269,6 +269,13 @@ CREATE TABLE IF NOT EXISTS scores (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_scores_fragment ON scores(fragment_id);
+"#;
+
+/// v7: a melody that comes from a score keeps a frozen copy of its notation (the whole `ScoreDto` as
+/// JSON), so the challenge screen can draw it on a staff and the history never breaks if the score
+/// changes. `NULL` for melodies recorded by hand, imported or bundled.
+const MIGRATION_V7: &str = r#"
+ALTER TABLE melodies ADD COLUMN score_json TEXT;
 "#;
 
 /// Vault sub-paths that identify each file type when converting old paths.
@@ -645,6 +652,10 @@ struct ScoreBody {
     pickup_ticks: u32,
     #[serde(default)]
     repeat: bool,
+    /// The score ends with the bar that completes its pickup, which `bars` counts. Scores stored before
+    /// that was so lack it (`false`): they are read with that bar added.
+    #[serde(default)]
+    closing_bar: bool,
 }
 
 fn map_score(r: &Row) -> rusqlite::Result<ScoreDto> {
@@ -657,7 +668,10 @@ fn map_score(r: &Row) -> rusqlite::Result<ScoreDto> {
         bpm: to_u32(r.get(2)?),
         beats: to_u32(r.get(3)?),
         beat_unit: to_u32(r.get(4)?),
-        bars: to_u32(r.get(5)?),
+        bars: {
+            let bars = to_u32(r.get(5)?);
+            if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
+        },
         pickup_ticks: body.pickup_ticks,
         repeat: body.repeat,
         treble: body.treble,
@@ -1027,7 +1041,20 @@ impl Database {
             tx.execute_batch("PRAGMA user_version = 6;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
+        if version < 7 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V7)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 7, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 7;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
         Ok(())
+    }
+
+    /// Runs raw SQL (tests of other modules that need to put the database in an older state).
+    #[cfg(test)]
+    pub(crate) fn execute_for_tests(&self, sql: &str) {
+        self.lock().unwrap().execute_batch(sql).unwrap();
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, String> {
@@ -1853,7 +1880,7 @@ impl Database {
             fragment_id = Some(f.fragment_id.clone());
             adapt_clips(&tx, &f.fragment_id, old.bpm, doc.bpm, f.duration_ms)?;
         }
-        let data = serde_json::to_string(&ScoreBody { treble: doc.treble.clone(), bass: doc.bass.clone(), pickup_ticks: doc.pickup_ticks, repeat: doc.repeat })
+        let data = serde_json::to_string(&ScoreBody { treble: doc.treble.clone(), bass: doc.bass.clone(), pickup_ticks: doc.pickup_ticks, repeat: doc.repeat, closing_bar: true })
             .map_err(|e| e.to_string())?;
         tx.execute(
             "UPDATE scores SET title = ?1, bpm = ?2, beats = ?3, beat_unit = ?4, bars = ?5, data_json = ?6, \
@@ -1874,6 +1901,38 @@ impl Database {
         let saved = fetch_score(&tx, &doc.id)?;
         tx.commit().map_err(db_err)?;
         Ok(saved)
+    }
+
+    /// The score a fragment was generated from, if it is one.
+    pub fn score_of_fragment(&self, fragment_id: &str) -> Result<Option<ScoreDto>, String> {
+        let conn = self.lock()?;
+        conn.query_row(&format!("SELECT {SCORE_COLS} FROM scores WHERE fragment_id = ?1"), params![fragment_id], map_score)
+            .optional()
+            .map_err(db_err)
+    }
+
+    /// Keeps a frozen copy of `score` with the melody, so it can be shown on a staff.
+    pub fn set_melody_score(&self, melody_id: &str, score: &ScoreDto) -> Result<(), String> {
+        let conn = self.lock()?;
+        let json = serde_json::to_string(score).map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute("UPDATE melodies SET score_json = ?1 WHERE id = ?2", params![json, melody_id])
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.challenge.melodyMissing", id = melody_id));
+        }
+        Ok(())
+    }
+
+    /// The frozen notation of a melody that came from a score.
+    pub fn get_melody_score(&self, melody_id: &str) -> Result<Option<ScoreDto>, String> {
+        let conn = self.lock()?;
+        let json: Option<String> = conn
+            .query_row("SELECT score_json FROM melodies WHERE id = ?1", params![melody_id], |r| r.get(0))
+            .optional()
+            .map_err(db_err)?
+            .flatten();
+        json.map(|j| serde_json::from_str(&j).map_err(|e| e.to_string())).transpose()
     }
 
     /// Deletes the score and its fragment (its clips go with it) and returns the absolute path of the
@@ -2868,14 +2927,15 @@ mod tests {
             let conn = db.lock().unwrap();
             conn.execute_batch(
                 "ALTER TABLE sessions DROP COLUMN kind; ALTER TABLE compositions DROP COLUMN bpm; \
-                 ALTER TABLE composition_clips DROP COLUMN rate_pct; DROP TABLE scores; PRAGMA user_version = 5;",
+                 ALTER TABLE composition_clips DROP COLUMN rate_pct; ALTER TABLE melodies DROP COLUMN score_json; \
+                 DROP TABLE scores; PRAGMA user_version = 5;",
             )
             .unwrap();
             (s.id, c.id)
         };
         let db = Database::open(&path, dir.path()).unwrap();
         let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 6);
+        assert_eq!(v, SCHEMA_VERSION);
         assert_eq!(db.get_session(&session_id).unwrap().title, "Before v6");
         assert_eq!(db.list_sessions().unwrap().len(), 1, "the old session is a practice session");
         assert_eq!(db.get_fragment("a").unwrap().comments.len(), 1);
@@ -2918,6 +2978,30 @@ mod tests {
         let read = db.get_score(&doc.id).unwrap();
         assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat), (0, false, false));
         assert!(score::issues(&read).is_empty());
+    }
+
+    #[test]
+    fn a_score_with_a_pickup_stored_before_the_closing_bar_gets_it_when_read() {
+        let db = db();
+        let doc = db.create_score("Old pickup").unwrap();
+        // The old format: a pickup, 4 bars counted without the closing bar, no flag.
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE scores SET bars = 4, data_json = ?1 WHERE id = ?2",
+                params![r#"{"treble":[],"bass":[],"pickup_ticks":480}"#, doc.id],
+            )
+            .unwrap();
+        let read = db.get_score(&doc.id).unwrap();
+        assert_eq!((read.bars, read.pickup_ticks), (5, 480));
+        assert!(score::issues(&read).is_empty());
+        // Saved once, it is in the new format and no bar is added again.
+        let saved = db.save_score(&read, None).unwrap();
+        assert_eq!(saved.bars, 5);
+        assert_eq!(db.get_score(&doc.id).unwrap().bars, 5);
+        // A score without a pickup is never touched.
+        let plain = db.create_score("Plain").unwrap();
+        assert_eq!(db.get_score(&plain.id).unwrap().bars, 4);
     }
 
     #[test]
@@ -3109,6 +3193,52 @@ mod tests {
         }
         c.bpm = Some(30);
         assert!(db.save_composition(&c).is_ok());
+    }
+
+    #[test]
+    fn migrates_a_v6_vault_to_v7_keeping_its_melodies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        {
+            let db = Database::open(&path, dir.path()).unwrap();
+            db.insert_melody(&melody("m1")).unwrap();
+            db.lock()
+                .unwrap()
+                .execute_batch("ALTER TABLE melodies DROP COLUMN score_json; PRAGMA user_version = 6;")
+                .unwrap();
+        }
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 7);
+        assert_eq!(db.get_melody("m1").unwrap().title, melody("m1").title);
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
+        // Reopening is idempotent.
+        drop(db);
+        assert_eq!(Database::open(&path, dir.path()).unwrap().list_melodies().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_melody_keeps_a_frozen_copy_of_its_score() {
+        let db = db();
+        db.insert_melody(&melody("m1")).unwrap();
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
+        let mut doc = db.create_score("Etude").unwrap();
+        doc.treble = vec![note("a", 0)];
+        doc.repeat = true;
+        let saved = db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
+        assert_eq!(db.score_of_fragment("f1").unwrap().unwrap().id, saved.id);
+        assert!(db.score_of_fragment("nope").unwrap().is_none());
+        db.set_melody_score("m1", &saved).unwrap();
+        // Editing the score afterwards does not touch the copy.
+        let mut edited = saved.clone();
+        edited.title = "Changed".into();
+        db.save_score(&edited, None).unwrap();
+        let copy = db.get_melody_score("m1").unwrap().unwrap();
+        assert_eq!((copy.title.as_str(), copy.repeat, copy.treble.len()), ("Etude", true, 1));
+        assert!(db.set_melody_score("nope", &saved).is_err());
+        // It goes with the melody.
+        db.delete_melody("m1").unwrap();
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
     }
 
     #[test]

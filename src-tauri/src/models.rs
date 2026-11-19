@@ -623,6 +623,10 @@ pub struct AttemptDto {
 pub struct MelodyDetailDto {
     pub melody: MelodyDto,
     pub notes: Vec<NoteDto>,
+    /// The notation the melody came from, if it came from a score: the frozen copy kept with it (or,
+    /// for a melody made before copies were kept, the score its fragment still belongs to). The
+    /// frontend draws it on a staff, after checking that it matches `notes`.
+    pub score: Option<ScoreDto>,
     /// Newest first, with their details (for the ghost, the history and the statistics).
     pub attempts: Vec<AttemptDto>,
 }

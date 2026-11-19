@@ -13,6 +13,7 @@ import {
   TIME_SIGNATURES,
   canDot,
   barTicks,
+  minBars,
   noteCount,
   notatedValue,
   scoreDurationMs,
@@ -58,6 +59,7 @@ export class ScoreEditorComponent {
   protected readonly MIN_BPM = MIN_BPM;
   protected readonly MAX_BPM = MAX_BPM;
   protected readonly canDot = canDot;
+  protected readonly minBars = minBars;
 
   protected readonly duration = computed(() => {
     const d = this.store.doc();

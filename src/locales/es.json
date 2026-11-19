@@ -1262,7 +1262,6 @@
     "sharp": "Sostenido (#)",
     "flat": "Bemol (b)",
     "selected": "Seleccionada: {note} · {value}",
-    "applyValue": "Usar la figura elegida",
     "removeNote": "Quitar nota",
     "nothingSelected": "Haz clic en una nota para seleccionarla. Arrástrala para moverla o usa las flechas.",
     "saveHint": "Se guarda sola. Aparece en la biblioteca del compositor como un fragmento y allí sigue el tempo de la composición.",

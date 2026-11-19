@@ -499,6 +499,8 @@ export interface AttemptDto {
 export interface MelodyDetailDto {
   melody: MelodyDto;
   notes: NoteDto[];
+  /** The notation the melody came from, if it came from a score (to draw it on a staff). */
+  score: ScoreDto | null;
   /** Newest first. */
   attempts: AttemptDto[];
 }

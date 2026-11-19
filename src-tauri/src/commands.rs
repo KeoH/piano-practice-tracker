@@ -1110,7 +1110,15 @@ pub async fn get_melody_detail(state: State<'_, AppState>, melody_id: String) ->
             .map_err(|e| t!("backend.internal", e = e))??
     };
     let attempts = vault.db.list_attempts(&melody_id)?;
-    Ok(MelodyDetailDto { melody, notes: challenge::note_dtos(&notes), attempts })
+    let score = match vault.db.get_melody_score(&melody_id)? {
+        Some(score) => Some(score),
+        // Made before copies were kept: the score its fragment still belongs to (the frontend checks it fits).
+        None => match &melody.source_fragment_id {
+            Some(fragment_id) => vault.db.score_of_fragment(fragment_id)?,
+            None => None,
+        },
+    };
+    Ok(MelodyDetailDto { melody, notes: challenge::note_dtos(&notes), score, attempts })
 }
 
 #[tauri::command]
@@ -1122,7 +1130,15 @@ pub async fn create_melody_from_fragment(
     let vault = state.vault()?;
     let fragment = vault.db.get_fragment(&fragment_id)?;
     let title = title.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).unwrap_or(fragment.title);
-    add_melody(vault, PathBuf::from(fragment.file_path), title, MelodySource::Fragment, Some(fragment_id)).await
+    let score = vault.db.score_of_fragment(&fragment_id)?;
+    let melody = add_melody(vault.clone(), PathBuf::from(fragment.file_path), title, MelodySource::Fragment, Some(fragment_id)).await?;
+    // A melody from a score keeps a frozen copy of the notation, to show it on a staff.
+    if let Some(score) = score {
+        if let Err(e) = vault.db.set_melody_score(&melody.id, &score) {
+            log::warn!("Could not keep the score of melody {}: {e}", melody.id);
+        }
+    }
+    Ok(melody)
 }
 
 #[tauri::command]
@@ -2015,6 +2031,48 @@ mod tests {
         assert!(!file.exists());
         assert!(block_on(get_score(fx.state(), saved.id)).is_err());
         assert!(block_on(get_composition(fx.state(), song.id)).unwrap().tracks[0].clips.is_empty());
+    }
+
+    #[test]
+    fn a_melody_made_from_a_score_carries_its_notation() {
+        let fx = Fixture::new();
+        let created = block_on(create_score(fx.state(), "Etude".into())).unwrap();
+        let mut doc = created.clone();
+        doc.treble = vec![score_note("a", 0, 60), score_note("b", 480, 64)];
+        doc.pickup_ticks = 0;
+        let saved = block_on(save_score(fx.state(), doc)).unwrap();
+        let fragment_id = saved.fragment_id.clone().unwrap();
+
+        let melody = block_on(create_melody_from_fragment(fx.state(), fragment_id.clone(), None)).unwrap();
+        let detail = block_on(get_melody_detail(fx.state(), melody.id.clone())).unwrap();
+        let score = detail.score.expect("the notation");
+        assert_eq!((score.id.as_str(), score.treble.len()), (saved.id.as_str(), 2));
+        assert_eq!(detail.notes.len(), 2);
+
+        // A later edit of the score does not change the melody's copy.
+        let mut edited = saved.clone();
+        edited.treble.push(score_note("c", 960, 67));
+        block_on(save_score(fx.state(), edited)).unwrap();
+        assert_eq!(block_on(get_melody_detail(fx.state(), melody.id.clone())).unwrap().score.unwrap().treble.len(), 2);
+
+        // A melody of a recorded fragment has none.
+        let session = fx.session_with_take();
+        let recorded = fx.add_fragment(&session.id);
+        let plain = block_on(create_melody_from_fragment(fx.state(), recorded.id, None)).unwrap();
+        assert!(block_on(get_melody_detail(fx.state(), plain.id)).unwrap().score.is_none());
+    }
+
+    #[test]
+    fn a_melody_made_before_copies_were_kept_uses_the_score_its_fragment_belongs_to() {
+        let fx = Fixture::new();
+        let created = block_on(create_score(fx.state(), "Etude".into())).unwrap();
+        let mut doc = created;
+        doc.treble = vec![score_note("a", 0, 60)];
+        let saved = block_on(save_score(fx.state(), doc)).unwrap();
+        let melody = block_on(create_melody_from_fragment(fx.state(), saved.fragment_id.clone().unwrap(), None)).unwrap();
+        fx.vault().db.execute_for_tests("UPDATE melodies SET score_json = NULL");
+        let detail = block_on(get_melody_detail(fx.state(), melody.id)).unwrap();
+        assert_eq!(detail.score.map(|s| s.id), Some(saved.id));
     }
 
     #[test]

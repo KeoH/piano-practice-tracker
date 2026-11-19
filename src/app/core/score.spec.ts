@@ -25,6 +25,8 @@ import {
   shiftStep,
   snapTickInBar,
   barSpans,
+  isClosingBar,
+  minBars,
   pageTick,
   playTicks,
   toggleRepeat,
@@ -502,22 +504,40 @@ describe('ties', () => {
 });
 
 describe('pickup bar', () => {
-  /** 4/4, one beat of pickup, three bars: [0, 480), [480, 2400), [2400, 4320). */
+  /** 4/4, one beat of pickup, three bars: [0, 480), [480, 2400), and the closing bar [2400, 3840) of the 3 beats it lacks. */
   const pickup = (extra: Partial<ScoreDto> = {}) => score([], [], { bars: 3, pickup_ticks: Q, ...extra });
 
-  it('is the end of a bar, so the score is shorter by what the first bar lacks', () => {
+  it('is the end of a bar, and the score ends with the bar that completes it', () => {
     const s = pickup();
     expect(missingTicks(s)).toBe(3 * Q);
-    expect(scoreTicks(s)).toBe(Q + 2 * 4 * Q);
+    expect(scoreTicks(s)).toBe(Q + 4 * Q + 3 * Q);
     expect(barSpans(s).map((b) => [b.start, b.end, b.virtualStart])).toEqual([
       [0, Q, -3 * Q],
       [Q, 5 * Q, Q],
-      [5 * Q, 9 * Q, 5 * Q],
+      [5 * Q, 8 * Q, 5 * Q], // the closing bar: 3 beats, as the pickup is 1
     ]);
     expect(barOf(s, Q - 1)).toBe(0);
     expect(barOf(s, Q)).toBe(1);
+    expect(barOf(s, 8 * Q - 1)).toBe(2);
     expect(barSpanAt(s, 99_999)).toBeNull();
-    expect(scoreDurationMs({ ...s, bpm: 120 })).toBe(4500);
+    expect(scoreDurationMs({ ...s, bpm: 120 })).toBe(4000);
+  });
+
+  it('adds up the pickup and the closing bar to one whole bar, whatever the pickup', () => {
+    for (const ticks of [240, Q, 3 * Q, 7 * 240]) {
+      const s = score([], [], { bars: 2, pickup_ticks: ticks });
+      expect(scoreTicks(s)).toBe(4 * Q);
+      const [first, last] = barSpans(s);
+      expect(first.end - first.start + (last.end - last.start)).toBe(4 * Q);
+    }
+    expect(isClosingBar(pickup(), 2)).toBe(true);
+    expect(isClosingBar(pickup(), 1)).toBe(false);
+    expect(isClosingBar(score(), 3)).toBe(false); // no pickup, no closing bar
+  });
+
+  it('has no closing bar without a pickup', () => {
+    expect(scoreTicks(score([], [], { bars: 3 }))).toBe(12 * Q);
+    expect(barSpans(score([], [], { bars: 3 })).map((b) => b.end - b.start)).toEqual([4 * Q, 4 * Q, 4 * Q]);
   });
 
   it('numbers the whole bars from 1 and gives the pickup none', () => {
@@ -535,14 +555,32 @@ describe('pickup bar', () => {
 
   it('counts beats from where a whole bar would start (rests align to them)', () => {
     const s = pickup({ treble: [note('a', 0, Q, 60)] });
-    expect(withRests(s, 'treble').slice(0, 3).map((i) => (i.kind === 'rest' ? `r${i.tick}:${i.duration_ticks}` : `n${i.note.tick}`))).toEqual([
+    expect(withRests(s, 'treble').slice(0, 4).map((i) => (i.kind === 'rest' ? `r${i.tick}:${i.duration_ticks}` : `n${i.note.tick}`))).toEqual([
       'n0',
       `r${Q}:${4 * Q}`, // an empty whole bar is one bar rest
-      `r${5 * Q}:${4 * Q}`,
+      `r${5 * Q}:${2 * Q}`, // the closing bar is short: a half rest on its first two beats...
+      `r${7 * Q}:${Q}`, // ...and a quarter rest on the third
     ]);
     const half = pickup({ treble: [note('a', 5 * Q, Q, 60)] });
-    // In the last bar a quarter note on beat 1 leaves a quarter rest and a half rest, as in any 4/4 bar.
-    expect(withRests(half, 'treble').filter((i) => i.kind === 'rest' && i.tick > 5 * Q).map((i) => (i.kind === 'rest' ? i.duration_ticks : 0))).toEqual([Q, 2 * Q]);
+    // In the closing bar a quarter note on beat 1 leaves the other two beats as quarter rests.
+    expect(withRests(half, 'treble').filter((i) => i.kind === 'rest' && i.tick > 5 * Q).map((i) => (i.kind === 'rest' ? i.duration_ticks : 0))).toEqual([Q, Q]);
+  });
+
+  it('fills an empty short bar with the rests of its beats, not with a whole rest', () => {
+    const rests = (s: ScoreDto) =>
+      withRests(s, 'bass')
+        .filter((i) => i.kind === 'rest')
+        .map((i) => (i.kind === 'rest' ? `${i.tick}:${i.duration_ticks}` : ''));
+    // A pickup of three beats in 4/4 is beats 2-4 of a bar: a quarter rest, then a half rest on beats 3-4.
+    const three = score([], [], { bars: 2, pickup_ticks: 3 * Q });
+    expect(rests(three).slice(0, 2)).toEqual([`0:${Q}`, `${Q}:${2 * Q}`]);
+    // The bar that closes it has the beat that is left: a quarter rest.
+    expect(rests(three).slice(2)).toEqual([`${3 * Q}:${Q}`]);
+    // One beat of pickup: a quarter rest; two beats: a half rest; three quarters... (beat 2 of 4 starts on its own multiple)
+    expect(rests(score([], [], { bars: 2, pickup_ticks: Q }))[0]).toBe(`0:${Q}`);
+    expect(rests(score([], [], { bars: 2, pickup_ticks: 2 * Q }))[0]).toBe(`0:${2 * Q}`);
+    // A whole bar that is empty keeps the whole rest.
+    expect(rests(score([], [], { bars: 1 }))).toEqual([`0:${4 * Q}`]);
   });
 
   it('snaps to the beats of the pickup as in a whole bar', () => {
@@ -564,8 +602,31 @@ describe('pickup bar', () => {
     expect(setPickup(pickup(), 0)!.pickup_ticks).toBe(0);
   });
 
+  it('keeps the length of the score: a pickup adds its closing bar and taking it away removes it', () => {
+    const plain = score([note('a', 0, Q, 60)], [], { bars: 4 });
+    const withPickup = setPickup(plain, Q)!;
+    expect([withPickup.bars, scoreTicks(withPickup)]).toEqual([5, scoreTicks(plain)]);
+    const back = setPickup(withPickup, 0)!;
+    expect([back.bars, scoreTicks(back)]).toEqual([4, scoreTicks(plain)]);
+    // Changing the pickup keeps the bars and the length.
+    const longer = setPickup(withPickup, 3 * Q)!;
+    expect([longer.bars, scoreTicks(longer)]).toEqual([5, scoreTicks(plain)]);
+    expect(setPickup(score([], [], { bars: 64 }), Q)).toBeNull(); // no room for the closing bar
+  });
+
+  it('cannot lose its closing bar', () => {
+    expect(resizeBars(pickup(), 2)!.bars).toBe(2);
+    expect(resizeBars(pickup(), 1)).toBeNull();
+    expect(resizeBars(score(), 1)!.bars).toBe(1);
+    expect(minBars(pickup())).toBe(2);
+    expect(minBars(score())).toBe(1);
+    expect(validateScore(pickup({ bars: 1 })).map((i) => i.code)).toContain('bars');
+    expect(validateScore(pickup({ bars: 2 }))).toEqual([]);
+  });
+
   it('is dropped when the time signature gets shorter than it', () => {
-    expect(setTimeSignature(pickup({ pickup_ticks: 3 * Q }), 2, 4)!.pickup_ticks).toBe(0);
+    const dropped = setTimeSignature(pickup({ pickup_ticks: 3 * Q }), 2, 4)!;
+    expect([dropped.pickup_ticks, dropped.bars]).toEqual([0, 2]); // the closing bar goes with it
     expect(setTimeSignature(pickup(), 3, 4)!.pickup_ticks).toBe(Q);
   });
 

@@ -81,7 +81,7 @@
 
       <span class="pl-2 text-[12.5px] text-muted" id="score-bars-label">{{ 'score.barsLabel' | t }}</span>
       <div class="flex items-center gap-1" role="group" aria-labelledby="score-bars-label">
-        <button type="button" class="btn btn-icon" [disabled]="doc.bars <= 1" (click)="store.setBars(doc.bars - 1)" [attr.aria-label]="'score.removeBar' | t" [title]="'score.removeBar' | t">
+        <button type="button" class="btn btn-icon" [disabled]="doc.bars <= minBars(doc)" (click)="store.setBars(doc.bars - 1)" [attr.aria-label]="'score.removeBar' | t" [title]="'score.removeBar' | t">
           <app-icon name="minus" [size]="15" />
         </button>
         <span class="tabular w-7 text-center text-[13px] text-fg">{{ doc.bars }}</span>
@@ -133,7 +133,7 @@
             [attr.aria-label]="valueLabel(k)"
             [title]="valueLabel(k)"
             (pointerdown)="startDrag($event, k)"
-            (click)="store.setKind(k)"
+            (click)="store.chooseKind(k)"
           >
             <span class="music pb-1" aria-hidden="true">{{ glyphs[k] }}</span>
           </button>
@@ -190,7 +190,6 @@
       <span class="ml-auto flex items-center gap-2 text-[12.5px] text-muted">
         @if (store.selectedNote()) {
           <span class="text-fg">{{ selectedLabel() }}</span>
-          <button type="button" class="btn h-8" (click)="store.applyToolToSelected()">{{ 'score.applyValue' | t }}</button>
           <button type="button" class="btn h-8 hover:text-rec-soft" (click)="store.removeSelected()">
             <app-icon name="trash" [size]="14" /> {{ 'score.removeNote' | t }}
           </button>

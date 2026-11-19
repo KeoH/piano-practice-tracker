@@ -11,7 +11,8 @@ import type { NoteKind } from './music';
  * - A note never crosses a bar line; to hold a note over one, **tie** it to a note of the same key that
  *   starts where it ends (they sound as a single note).
  * - The first bar can be shorter (a **pickup**, or anacrusis): it lasts `pickup_ticks` and is the end of
- *   a bar, so the beats still fall where they would in a whole one (`missingTicks`).
+ *   a bar, so the beats still fall where they would in a whole one (`missingTicks`). The score then ends
+ *   with a **closing bar** of what the pickup lacks, so the two together make one whole bar.
  * - A note is its sounding MIDI `key`; `accidental` only spells a black key (C♯ or D♭). The staff draws
  *   it, and a natural sign when a plain note follows an altered one on its line or space in the bar.
  * - Every function returns a new score, or `null` when the change is not allowed.
@@ -110,9 +111,25 @@ export function missingTicks(s: Pick<ScoreDto, 'beats' | 'beat_unit' | 'pickup_t
   return pickup > 0 ? Math.max(0, barTicks(s) - pickup) : 0;
 }
 
-/** Length of the whole score: its bars (the pickup bar being short), trailing rests included. */
+/**
+ * Length of the whole score, trailing rests included. With a pickup the first bar is short and so is the
+ * last one (it holds what the pickup lacks), so they add up to one whole bar.
+ */
 export function scoreTicks(s: TimeShape): number {
-  return s.bars * barTicks(s) - missingTicks(s);
+  const bar = barTicks(s);
+  const pickup = s.pickup_ticks ?? 0;
+  if (pickup > 0) return s.bars >= 2 ? (s.bars - 1) * bar : pickup;
+  return s.bars * bar;
+}
+
+/** Whether a bar is the closing bar of a score with a pickup (it lasts what the pickup lacks). */
+export function isClosingBar(s: TimeShape, index: number): boolean {
+  return (s.pickup_ticks ?? 0) > 0 && s.bars >= 2 && index === s.bars - 1;
+}
+
+/** The fewest bars a score can have: a pickup needs its closing bar. */
+export function minBars(s: Pick<ScoreDto, 'pickup_ticks'>): number {
+  return (s.pickup_ticks ?? 0) > 0 ? 2 : 1;
 }
 
 /** One bar on the timeline. */
@@ -126,7 +143,7 @@ export interface BarSpan {
 
 export function barSpan(s: TimeShape, index: number): BarSpan {
   const virtualStart = index * barTicks(s) - missingTicks(s);
-  return { index, start: Math.max(0, virtualStart), end: virtualStart + barTicks(s), virtualStart };
+  return { index, start: Math.max(0, virtualStart), end: Math.min(virtualStart + barTicks(s), scoreTicks(s)), virtualStart };
 }
 
 export function barSpans(s: TimeShape): BarSpan[] {
@@ -494,10 +511,10 @@ export function toggleRepeat(s: ScoreDto): ScoreDto {
   return { ...s, repeat: !s.repeat };
 }
 
-/** Changes the number of bars; it cannot cut a note off. */
+/** Changes the number of bars; it cannot cut a note off, nor take the closing bar from a pickup. */
 export function resizeBars(s: ScoreDto, bars: number): ScoreDto | null {
   const n = Math.round(bars);
-  if (n < 1 || n > MAX_BARS) return null;
+  if (n < minBars(s) || n > MAX_BARS) return null;
   const next = { ...s, bars: n };
   return fitsStructure(next) ? next : null;
 }
@@ -506,7 +523,11 @@ export function resizeBars(s: ScoreDto, bars: number): ScoreDto | null {
 export function setTimeSignature(s: ScoreDto, beats: number, beatUnit: number): ScoreDto | null {
   if (!isTimeSignature(beats, beatUnit)) return null;
   const next = { ...s, beats, beat_unit: beatUnit };
-  if (next.pickup_ticks >= barTicks(next)) next.pickup_ticks = 0;
+  if (next.pickup_ticks >= barTicks(next)) {
+    // The pickup no longer fits in a bar: it goes, and so does the closing bar that completed it.
+    next.pickup_ticks = 0;
+    next.bars = Math.max(1, next.bars - 1);
+  }
   return fitsStructure(next) ? next : null;
 }
 
@@ -519,10 +540,17 @@ export function isPickup(s: Pick<ScoreDto, 'beats' | 'beat_unit'>, ticks: number
   return ticks === 0 || (Number.isInteger(ticks) && ticks > 0 && ticks < barTicks(s) && ticks % 120 === 0);
 }
 
-/** Makes the first bar `ticks` long (0 = a whole bar). The notes stay where they are, so `null` if a bar line would cut one. */
+/**
+ * Makes the first bar `ticks` long (0 = a whole bar), and the score ends with the bar that completes it.
+ * The score keeps its length: a pickup adds that closing bar to the bars and taking it away removes it.
+ * The notes stay where they are, so `null` if a bar line would cut one.
+ */
 export function setPickup(s: ScoreDto, ticks: number): ScoreDto | null {
   if (!isPickup(s, ticks)) return null;
-  const next = { ...s, pickup_ticks: ticks };
+  const had = (s.pickup_ticks ?? 0) > 0;
+  const bars = ticks > 0 && !had ? s.bars + 1 : ticks === 0 && had ? Math.max(1, s.bars - 1) : s.bars;
+  if (bars > MAX_BARS) return null;
+  const next = { ...s, pickup_ticks: ticks, bars };
   return fitsStructure(next) ? next : null;
 }
 
@@ -551,7 +579,8 @@ function fillRests(start: number, length: number, barStart: number): StaffItem[]
 
 /**
  * The notes of a staff in order with the rests that fill every gap, bar by bar (the beats of a pickup bar
- * are counted as in a whole one). An empty bar is a single bar rest as long as the bar.
+ * are counted as in a whole one). An empty whole bar is a single bar rest; a short bar (the pickup, or the
+ * bar that closes it) is filled with the rests of its beats, as a quarter and a half rest for three beats.
  */
 export function withRests(s: ScoreDto, staff: StaffName): StaffItem[] {
   const notes = sortNotes(staffNotes(s, staff));
@@ -567,7 +596,7 @@ export function withRests(s: ScoreDto, staff: StaffName): StaffItem[] {
       cursor = Math.max(cursor, noteEnd(n));
       any = true;
     }
-    if (!any) out.push({ kind: 'rest', tick: span.start, duration_ticks: span.end - span.start });
+    if (!any && span.end - span.start === barTicks(s)) out.push({ kind: 'rest', tick: span.start, duration_ticks: span.end - span.start });
     else out.push(...fillRests(cursor, Math.max(0, span.end - cursor), span.virtualStart));
   }
   return out;
@@ -605,7 +634,7 @@ export function validateScore(s: ScoreDto): ScoreIssue[] {
     issues.push({ code: 'timeSignature' });
     return issues;
   }
-  if (!Number.isInteger(s.bars) || s.bars < 1 || s.bars > MAX_BARS) issues.push({ code: 'bars' });
+  if (!Number.isInteger(s.bars) || s.bars < minBars(s) || s.bars > MAX_BARS) issues.push({ code: 'bars' });
   if (!isPickup(s, s.pickup_ticks ?? 0)) {
     issues.push({ code: 'pickup' });
     return issues;

@@ -1262,7 +1262,6 @@
     "sharp": "Sharp (#)",
     "flat": "Flat (b)",
     "selected": "Selected: {note} · {value}",
-    "applyValue": "Use the chosen value",
     "removeNote": "Remove note",
     "nothingSelected": "Click a note to select it. Drag it to move it, or use the arrow keys.",
     "saveHint": "Saved automatically. It shows up in the composer's library as a fragment, and follows the composition's tempo there.",

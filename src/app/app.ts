@@ -107,7 +107,7 @@ export class App implements OnInit {
   /**
    * Score editor shortcuts; returns whether the key was handled.
    * Space plays/pauses, Ctrl+Z / Ctrl+Y undo and redo, 1-5 choose a note value (and give it to the
-   * selected note), . dots it, # and b sharpen and flatten, Delete removes the selected note, T ties it, Up and
+   * selected note), . dots or undots it, # and b sharpen and flatten, Delete removes the selected note, T ties it, Up and
    * Down move it a line or space (Shift: an octave), Left and Right a grid step, Esc deselects it.
    */
   private scoreKey(ev: KeyboardEvent, target: HTMLElement | null): boolean {
@@ -129,13 +129,11 @@ export class App implements OnInit {
     }
     const kinds = { '1': 'whole', '2': 'half', '3': 'quarter', '4': 'eighth', '5': 'sixteenth' } as const;
     if (key in kinds) {
-      s.setKind(kinds[key as keyof typeof kinds]);
-      s.applyToolToSelected();
+      s.chooseKind(kinds[key as keyof typeof kinds]);
       return true;
     }
     if (key === '.') {
       s.toggleDotted();
-      s.applyToolToSelected();
       return true;
     }
     if (key === 't') s.toggleTieSelected();

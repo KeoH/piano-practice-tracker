@@ -54,6 +54,7 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 ### Challenges
 - Play a melody (a fragment, an imported `.mid` or one of the five built-in starter tunes) at 40-150 % of its tempo and get scored live on every note, with a record to beat and a "ghost" of your best attempt.
 - Every attempt is saved with its accuracy, mistakes and timing; the Statistics view charts your progress per melody.
+- A challenge made from a **score** is shown as **notation** on the staff, with the notes coloured as you play them.
 
 ### Statistics
 - Time practised today and this week against a **weekly goal**, current and best **streaks**, a **year heatmap** and the last 30 days.

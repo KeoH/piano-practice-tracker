@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { Accidental } from '../../core/models';
-import { parseNoteNames, spelledNoteName } from '../../core/music';
+import type { Accidental, NoteStatus, ScoreDto } from '../../core/models';
+import { isBlackKey, parseNoteNames, spelledNoteName } from '../../core/music';
 import {
   LINE_SPACING,
   RULER_H,
@@ -123,6 +123,12 @@ interface Ghost {
   hollow: boolean;
 }
 
+/** A note that was played in a challenge and hit nothing: where in the score, and which key. */
+export interface StaffMark {
+  tick: number;
+  key: number;
+}
+
 interface NoteDrag {
   id: string;
   pointerId: number;
@@ -153,7 +159,7 @@ interface NoteDrag {
   },
   template: `
     @let l = layout();
-    @let sc = store.doc();
+    @let sc = doc();
     @if (sc) {
       <svg
         #svg
@@ -246,19 +252,19 @@ interface NoteDrag {
 
         <!-- Notes -->
         @for (n of notes(); track n.id) {
-          @let sel = store.selectedNoteId() === n.id;
+          @let sel = !readonly() && store.selectedNoteId() === n.id;
           @let now = playingIds().has(n.id);
           <g
-            role="button"
-            tabindex="0"
-            class="cursor-grab touch-none outline-none"
-            [class]="sel ? 'text-accent' : now ? 'text-ok' : 'text-fg'"
+            [attr.role]="readonly() ? 'img' : 'button'"
+            [attr.tabindex]="readonly() ? null : 0"
+            class="outline-none"
+            [class]="(readonly() ? '' : 'cursor-grab touch-none ') + (sel ? 'text-accent' : readonly() ? stateColor(n.id) : now ? 'text-ok' : 'text-fg')"
             [class.opacity-30]="draggingId() === n.id"
             [attr.aria-label]="n.label"
-            [attr.aria-pressed]="sel"
+            [attr.aria-pressed]="readonly() ? null : sel"
             (pointerdown)="noteDown($event, n)"
             (click)="$event.stopPropagation()"
-            (focus)="store.selectNote(n.id)"
+            (focus)="readonly() || store.selectNote(n.id)"
           >
             <!-- A bigger invisible target, easier to grab -->
             <rect [attr.x]="n.x - 11" [attr.y]="n.y - 9" width="22" height="18" fill="transparent" />
@@ -298,6 +304,11 @@ interface NoteDrag {
               <text class="music" [attr.x]="n.accX" [attr.y]="n.y + 5" font-size="40" fill="currentColor">{{ glyph[n.accidental] }}</text>
             }
           </g>
+        }
+
+        <!-- Notes played that hit nothing (challenges) -->
+        @for (m of markDraws(); track m.key) {
+          <path [attr.d]="m.d" fill="none" stroke-width="1.9" stroke-linecap="round" class="pointer-events-none stroke-rec" />
         }
 
         <!-- Ties -->
@@ -352,14 +363,30 @@ export class ScoreStaffComponent {
   /** Width of the view in pixels (0 until measured): the bars are broken into lines that fit it. */
   private readonly viewW = signal(0);
 
+  /** Shows this score read-only (a challenge) instead of the one being edited. */
+  readonly score = input<ScoreDto | null>(null);
+  /** Read-only: how each note went, by note id (`null` = not played yet). */
+  readonly noteStates = input<Record<string, NoteStatus | null> | null>(null);
+  /** Read-only: notes that were played and hit nothing. */
+  readonly marks = input<StaffMark[]>([]);
+  /** Read-only: where the playhead is, in ticks (`null` = none). */
+  readonly playheadTick = input<number | null>(null);
+  /** Read-only: keep the playhead's line in view. */
+  readonly follow = input(false);
+  /** Read-only: pixels per quarter note (the editor uses its own zoom). */
+  readonly zoom = input<number | null>(null);
+
+  protected readonly readonly = computed(() => this.score() !== null);
+  protected readonly doc = computed(() => this.score() ?? this.store.doc());
+
   protected readonly layout = computed(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     const width = this.viewW();
-    return layoutOf(d ?? { beats: 4, beat_unit: 4, bars: 1, pickup_ticks: 0 }, this.store.zoom(), width > 0 ? width : Number.POSITIVE_INFINITY);
+    return layoutOf(d ?? { beats: 4, beat_unit: 4, bars: 1, pickup_ticks: 0 }, this.zoom() ?? this.store.zoom(), width > 0 ? width : Number.POSITIVE_INFINITY);
   });
   /** Beat lines inside the bars (the bar lines are drawn apart); beats are counted from where a whole bar would start. */
   private readonly beatTicks = computed(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     if (!d) return [] as number[];
     const beat = 1920 / d.beat_unit;
     const lead = missingTicks(d);
@@ -371,7 +398,7 @@ export class ScoreStaffComponent {
 
   /** What each system draws apart from the notes. */
   protected readonly views = computed<SystemView[]>(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     if (!d) return [];
     const l = this.layout();
     const spans = barSpans(d);
@@ -387,7 +414,7 @@ export class ScoreStaffComponent {
   });
 
   protected readonly notes = computed<NoteDraw[]>(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     if (!d) return [];
     const l = this.layout();
     const names = parseNoteNames(this.i18n.t('music.noteNames'));
@@ -510,7 +537,7 @@ export class ScoreStaffComponent {
 
   /** Arcs joining a note to the one it is tied to, on the side opposite to the stem. */
   protected readonly ties = computed<TieDraw[]>(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     if (!d) return [];
     const draws = new Map(this.notes().map((n) => [n.id, n]));
     const out: TieDraw[] = [];
@@ -541,15 +568,15 @@ export class ScoreStaffComponent {
   });
 
   protected readonly rests = computed<RestDraw[]>(() => {
-    const d = this.store.doc();
+    const d = this.doc();
     if (!d) return [];
     const l = this.layout();
     const out: RestDraw[] = [];
     for (const staff of STAFF_NAMES) {
       for (const item of withRests(d, staff)) {
         if (item.kind !== 'rest') continue;
-        const span = barSpanAt(d, item.tick);
-        const shape = restShape(item.duration_ticks, span ? span.end - span.start : barTicks(d));
+        // Only a rest as long as a whole bar is drawn as the whole rest; a short bar is filled with its beats.
+        const shape = restShape(item.duration_ticks, barTicks(d));
         const x = shape === 'bar' ? xOfTick(l, item.tick + item.duration_ticks / 2) : noteX(l, item.tick);
         out.push({ key: `${staff}-${item.tick}`, staff, box: systemAt(l, item.tick).staves[staff], shape, x, tick: item.tick });
       }
@@ -560,8 +587,8 @@ export class ScoreStaffComponent {
   /** Notes under the playhead (they light up while the score plays). */
   protected readonly playingIds = computed(() => {
     const ids = new Set<string>();
-    const d = this.store.doc();
-    if (!d || !this.store.playing()) return ids;
+    const d = this.doc();
+    if (!d || this.readonly() || !this.store.playing()) return ids;
     const t = this.store.positionTicks();
     for (const staff of STAFF_NAMES) for (const n of staffNotes(d, staff)) if (n.tick <= t && t < noteEnd(n)) ids.add(n.id);
     return ids;
@@ -569,7 +596,13 @@ export class ScoreStaffComponent {
 
   /** The playhead: where it is and the top of the system it is in. */
   protected readonly playhead = computed(() => {
-    const d = this.store.doc();
+    const d = this.doc();
+    if (this.readonly()) {
+      const tick = this.playheadTick();
+      if (!d || tick === null) return null;
+      const l = this.layout();
+      return { x: xOfTick(l, tick), top: systemAt(l, tick).top };
+    }
     const key = this.store.key();
     if (!d || !key) return null;
     if (!this.store.playing() && !(this.store.position() > 0)) return null;
@@ -587,8 +620,8 @@ export class ScoreStaffComponent {
   private readonly dragTarget = signal<NoteDrag['target']>(null);
 
   protected readonly ghost = computed<Ghost | null>(() => {
-    const d = this.store.doc();
-    if (!d) return null;
+    const d = this.doc();
+    if (!d || this.readonly()) return null;
     const l = this.layout();
     const palette = this.store.paletteDrag();
     // Moving a note shows the target; otherwise the tool follows the pointer.
@@ -623,7 +656,7 @@ export class ScoreStaffComponent {
     // Keeps the playhead in view while the score plays: it scrolls to the line it is in.
     effect(() => {
       const ph = this.playhead();
-      if (!ph || !this.store.playing()) return;
+      if (!ph || !(this.readonly() ? this.follow() : this.store.playing())) return;
       untracked(() => this.scrollTo(ph.top));
     });
   }
@@ -644,6 +677,34 @@ export class ScoreStaffComponent {
     const y0 = box.top + top;
     if (y0 < view.top + 8 || y0 + SYSTEM_H > view.bottom - 8) parent.scrollTop += y0 - view.top - 80;
   }
+
+  /** Text colour of a note by how it went in the challenge. */
+  protected stateColor(id: string): string {
+    switch (this.noteStates()?.[id]) {
+      case 'perfect':
+        return 'text-ok';
+      case 'good':
+        return 'text-ok/60';
+      case 'missed':
+        return 'text-rec';
+      default:
+        return 'text-fg';
+    }
+  }
+
+  /** A cross where a played note hit nothing, on the line or space of its key. */
+  protected readonly markDraws = computed(() => {
+    const d = this.doc();
+    if (!d || !this.readonly()) return [];
+    const l = this.layout();
+    return this.marks().map((m, i) => {
+      const staff: StaffName = m.key >= 60 ? 'treble' : 'bass';
+      const sys = systemAt(l, m.tick);
+      const x = noteX(l, m.tick);
+      const y = yOfStep(sys, staff, staffStep(staff, m.key, isBlackKey(m.key) ? 'sharp' : null));
+      return { key: `${i}-${m.tick}-${m.key}`, d: `M ${x - 5} ${y - 5} L ${x + 5} ${y + 5} M ${x + 5} ${y - 5} L ${x - 5} ${y + 5}` };
+    });
+  });
 
   protected x(tick: number): number {
     return xOfTick(this.layout(), tick);
@@ -674,7 +735,7 @@ export class ScoreStaffComponent {
   /** Where a note of `duration` would be put for a pointer position, snapped to the grid of its value. */
   private hoverTarget(duration: number): NonNullable<NoteDrag['target']> | null {
     const hit = this.hover();
-    const d = this.store.doc();
+    const d = this.doc();
     if (!hit || !d) return null;
     return { staff: hit.staff, step: hit.step, tick: snapTickInBar(d, hit.tick, this.gridOf(duration), duration) };
   }
@@ -685,9 +746,10 @@ export class ScoreStaffComponent {
 
 
   protected onMove(ev: PointerEvent): void {
+    if (this.readonly()) return;
     const p = this.point(ev);
     const l = this.layout();
-    const d = this.store.doc();
+    const d = this.doc();
     if (!p || !d) return;
     const hit = hitAt(l, p.x, p.y);
     const inside = p.x >= 0 && p.x <= l.width && p.y >= 0 && p.y <= l.height;
@@ -707,14 +769,14 @@ export class ScoreStaffComponent {
   }
 
   protected onUp(ev: PointerEvent): void {
-    const d = this.store.doc();
+    if (this.readonly()) return;
+    const d = this.doc();
     const palette = this.store.paletteDrag();
     if (palette) {
       const g = this.ghost();
       this.store.paletteDrag.set(null);
       if (g?.fits && d) {
-        this.store.setKind(palette.kind);
-        if (palette.dotted !== this.store.dotted()) this.store.toggleDotted();
+        this.store.setTool(palette.kind, palette.dotted);
         this.store.placeNote(g.staff, g.tick, g.step);
       }
       this.hover.set(null);
@@ -743,7 +805,7 @@ export class ScoreStaffComponent {
   }
 
   protected noteDown(ev: PointerEvent, n: NoteDraw): void {
-    if (ev.button !== 0) return;
+    if (this.readonly() || ev.button !== 0) return;
     ev.stopPropagation();
     this.store.selectNote(n.id);
     const ref = this.store.selectedNote();
@@ -760,9 +822,9 @@ export class ScoreStaffComponent {
 
   /** Pressing the ruler moves the playhead. */
   protected rulerDown(ev: PointerEvent): void {
-    if (ev.button !== 0) return;
+    if (this.readonly() || ev.button !== 0) return;
     const p = this.point(ev);
-    const d = this.store.doc();
+    const d = this.doc();
     const l = this.layout();
     if (p && d && inRuler(l, p.x, p.y)) void this.store.seekToTick(rulerTick(l, d, p.x, p.y));
   }
@@ -772,9 +834,9 @@ export class ScoreStaffComponent {
    * touch screen a swipe scrolls the score instead of dropping notes.
    */
   protected background(ev: MouseEvent): void {
-    if (ev.button !== 0 || this.suppressClick) return;
+    if (this.readonly() || ev.button !== 0 || this.suppressClick) return;
     const p = this.point(ev);
-    const d = this.store.doc();
+    const d = this.doc();
     if (!p || !d) return;
     const l = this.layout();
     if (inRuler(l, p.x, p.y)) return;
