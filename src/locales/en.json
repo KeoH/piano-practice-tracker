@@ -203,7 +203,9 @@
       "none": "Connect a USB keyboard",
       "virtual": "Test notes, no keyboard",
       "connected": "Keyboard connected"
-    }
+    },
+    "collapse": "Collapse the menu",
+    "expand": "Expand the menu"
   },
   "header": {
     "saving": "Saving…",
@@ -1289,6 +1291,9 @@
     "noRoomTie": "There is no room to tie that note",
     "cantChangePickup": "A note would cross a bar line with that pickup",
     "repeat": "Repeat from the start",
-    "repeatHint": "Closes the score with a repeat sign: it is played twice, from the start (also in the fragment it generates)."
+    "repeatHint": "Closes the score with a repeat sign: it is played twice, from the start (also in the fragment it generates).",
+    "tools": "Tools",
+    "settings": "Settings",
+    "zoom": "Zoom"
   }
 }

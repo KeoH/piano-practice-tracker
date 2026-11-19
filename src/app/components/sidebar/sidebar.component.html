@@ -1,12 +1,59 @@
+@if (collapsed()) {
+  <!-- Collapsed: only the icons -->
+  <div class="flex flex-col items-center gap-3 px-2 pt-4 pb-3">
+    <span class="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] bg-accent/15 text-accent" aria-hidden="true">
+      <app-icon name="piano" [size]="22" />
+    </span>
+    <button type="button" class="btn btn-ghost btn-icon" (click)="prefs.toggleSidebar()" [attr.aria-label]="'sidebar.expand' | t" [title]="'sidebar.expand' | t">
+      <app-icon name="arrow-right" [size]="17" />
+    </button>
+  </div>
+
+  <nav class="flex flex-col items-center gap-1 px-2" [attr.aria-label]="'nav.label' | t">
+    @for (item of navItems; track item.view) {
+      @let active = nav.view() === item.view;
+      <button
+        type="button"
+        class="flex h-10 w-10 items-center justify-center rounded-[10px] transition-colors"
+        [class]="active ? 'bg-ink-700 text-fg-strong' : 'text-muted hover:bg-ink-800 hover:text-fg'"
+        [attr.aria-current]="active ? 'page' : null"
+        [attr.aria-label]="item.label | t"
+        [title]="item.label | t"
+        (click)="nav.view.set(item.view)"
+      >
+        <app-icon [name]="item.icon" [size]="18" />
+      </button>
+    }
+  </nav>
+
+  <div class="mt-auto flex flex-col items-center gap-1 border-t border-line px-2 py-3">
+    <span class="flex h-8 w-8 items-center justify-center" [title]="port().detail" role="img" [attr.aria-label]="port().detail">
+      <span class="dot" [class]="port().ok ? 'bg-ok' : 'bg-faint'"></span>
+    </span>
+    <button
+      type="button"
+      class="flex h-10 w-10 items-center justify-center rounded-[10px] text-muted transition-colors hover:bg-ink-800 hover:text-fg"
+      (click)="vault.settingsOpen.set(true)"
+      aria-haspopup="dialog"
+      [attr.aria-label]="'settings.title' | t"
+      [title]="'settings.title' | t"
+    >
+      <app-icon name="settings" [size]="18" />
+    </button>
+  </div>
+} @else {
 <!-- Brand -->
-<div class="flex items-center gap-3 px-5 pt-5 pb-4">
+<div class="flex items-center gap-3 pr-3 pl-5 pt-5 pb-4">
   <span class="flex h-[38px] w-[38px] items-center justify-center rounded-[10px] bg-accent/15 text-accent">
     <app-icon name="piano" [size]="22" />
   </span>
-  <div class="flex flex-col gap-0.5 leading-tight">
-    <p class="text-[15px] font-semibold text-fg">Piano Practice</p>
-    <p class="text-xs text-faint">{{ 'sidebar.tagline' | t }}</p>
+  <div class="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+    <p class="truncate text-[15px] font-semibold text-fg">Piano Practice</p>
+    <p class="truncate text-xs text-faint">{{ 'sidebar.tagline' | t }}</p>
   </div>
+  <button type="button" class="btn btn-ghost btn-icon shrink-0" (click)="prefs.toggleSidebar()" [attr.aria-label]="'sidebar.collapse' | t" [title]="'sidebar.collapse' | t">
+    <app-icon name="back" [size]="17" />
+  </button>
 </div>
 
 <!-- Views -->
@@ -268,3 +315,4 @@
     </span>
   </button>
 </div>
+}

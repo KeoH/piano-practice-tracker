@@ -11,6 +11,7 @@ import { PieceStore } from '../../core/piece.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { ToastService } from '../../core/toast.service';
 import { VaultStore } from '../../core/vault.store';
 import { IconComponent, type IconName } from '../icon/icon.component';
@@ -30,7 +31,7 @@ const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
   selector: 'app-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [IconComponent, MelodyListComponent, ScoreListComponent, TranslatePipe, PluralPipe],
-  host: { class: 'flex h-full w-[280px] shrink-0 flex-col border-r border-line bg-ink-950' },
+  host: { class: 'flex h-full shrink-0 flex-col overflow-hidden border-r border-line bg-ink-950', '[style.width.px]': 'collapsed() ? 64 : 280' },
   templateUrl: './sidebar.component.html',
 })
 export class SidebarComponent {
@@ -44,6 +45,8 @@ export class SidebarComponent {
   protected readonly pieces = inject(PieceStore);
   protected readonly compositions = inject(CompositionStore);
   protected readonly navItems = NAV_ITEMS;
+  protected readonly prefs = inject(UiPrefsStore);
+  protected readonly collapsed = this.prefs.sidebarCollapsed;
   protected readonly challenge = inject(ChallengeStore);
 
   protected readonly formatMs = formatMs;

@@ -90,6 +90,26 @@ describe('ScoreEditorComponent', () => {
     expect(store.doc()!.beats).toBe(3);
   });
 
+  it('keeps the transport, the palette and the settings in a fixed side panel, apart from the staff', async () => {
+    await open();
+    const aside = el.querySelector('aside')!;
+    expect(aside.classList.contains('sticky')).toBe(true);
+    const inside = (label: string) => !!aside.querySelector(`button[aria-label="${label}"]`);
+    for (const label of [
+      'Play', 'Stop', 'Quarter note', 'Dotted note (.)', 'Sharp (#)', 'Flat (b)', 'Tie to the next note (T)',
+      'Add a bar', 'Remove a bar', 'Repeat from the start', 'Zoom in', 'Zoom out',
+    ]) {
+      expect(inside(label), label).toBe(true);
+    }
+    for (const id of ['#score-bpm', '#score-meter', '#score-pickup']) expect(aside.querySelector(id), id).not.toBeNull();
+    expect(aside.querySelector('app-rate-select')).not.toBeNull();
+    // Nothing of the controls is left with the staff, which is not in the panel.
+    expect(aside.querySelector('app-score-staff')).toBeNull();
+    const main = el.querySelector('app-score-staff')!.parentElement!.parentElement!;
+    expect(main.querySelector('#score-bpm, #score-meter, button[aria-label="Zoom in"]')).toBeNull();
+    expect(aside.textContent).toContain('Drag a value onto the staff');
+  });
+
   it('toggles the repeat sign from the transport bar', async () => {
     await open();
     expect(button('Repeat from the start').getAttribute('aria-pressed')).toBe('false');

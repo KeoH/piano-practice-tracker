@@ -203,7 +203,9 @@
       "none": "Conecta un teclado USB",
       "virtual": "Notas de prueba, sin teclado",
       "connected": "Teclado conectado"
-    }
+    },
+    "collapse": "Contraer el menú",
+    "expand": "Expandir el menú"
   },
   "header": {
     "saving": "Guardando…",
@@ -1289,6 +1291,9 @@
     "noRoomTie": "No hay sitio para ligar esa nota",
     "cantChangePickup": "Una nota cruzaría una barra de compás con esa anacrusa",
     "repeat": "Repetir desde el principio",
-    "repeatHint": "Cierra la partitura con un signo de repetición: se toca dos veces, desde el principio (también en el fragmento que genera)."
+    "repeatHint": "Cierra la partitura con un signo de repetición: se toca dos veces, desde el principio (también en el fragmento que genera).",
+    "tools": "Herramientas",
+    "settings": "Ajustes",
+    "zoom": "Zoom"
   }
 }

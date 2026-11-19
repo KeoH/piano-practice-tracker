@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { pieceSummary, summary, vaultInfo } from '../../testing/fixtures';
 import { type MockApi, mockApi } from '../../testing/mock-api';
 import { CompositionStore } from '../../core/composition.store';
@@ -9,6 +9,7 @@ import { PieceStore } from '../../core/piece.store';
 import { RecordingStore } from '../../core/recording.store';
 import { SessionStore } from '../../core/session.store';
 import { ToastService } from '../../core/toast.service';
+import { UiPrefsStore } from '../../core/ui-prefs.store';
 import { VaultStore } from '../../core/vault.store';
 import { SidebarComponent } from './sidebar.component';
 
@@ -131,5 +132,90 @@ describe('SidebarComponent', () => {
 
     button(i18n.t('settings.title')).click();
     expect(TestBed.inject(VaultStore).settingsOpen()).toBe(true);
+  });
+});
+
+describe('SidebarComponent: collapsing', () => {
+  let fixture: ComponentFixture<SidebarComponent>;
+  let el: HTMLElement;
+  let prefs: UiPrefsStore;
+  const button = (label: string) => [...el.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label);
+
+  beforeEach(() => {
+    localStorage.clear();
+    TestBed.configureTestingModule({ providers: [mockApi().provider] });
+    TestBed.inject(I18nService).setLang('en');
+    prefs = TestBed.inject(UiPrefsStore);
+    fixture = TestBed.createComponent(SidebarComponent);
+    el = fixture.nativeElement;
+    fixture.detectChanges();
+  });
+
+  afterEach(() => localStorage.clear());
+
+  const width = () => el.style.width;
+
+  it('is wide by default, with the names of the views, the list and the settings', () => {
+    expect(width()).toBe('280px');
+    expect(el.textContent).toContain('Sessions');
+    expect(el.textContent).toContain('Repertoire');
+    expect(el.querySelector('input[type="search"]')).not.toBeNull();
+    expect(button('Collapse the menu')).toBeDefined();
+  });
+
+  it('collapses to a narrow bar with only the icons of the views, the keyboard status and the settings', () => {
+    button('Collapse the menu')!.click();
+    fixture.detectChanges();
+    expect(prefs.sidebarCollapsed()).toBe(true);
+    expect(width()).toBe('64px');
+    // Nothing but icons: no names, no search, no lists.
+    expect(el.textContent?.trim()).toBe('');
+    expect(el.querySelector('input')).toBeNull();
+    const views = ['Sessions', 'Repertoire', 'Challenges', 'Scores', 'Compose', 'Statistics'];
+    for (const v of views) {
+      const b = button(v)!;
+      expect(b, v).toBeDefined();
+      expect(b.getAttribute('title')).toBe(v); // the name shows on hover
+    }
+    expect(button('Settings')).toBeDefined();
+    expect(button('Expand the menu')).toBeDefined();
+  });
+
+  it('changes the view from the collapsed bar and marks the current one', () => {
+    const nav = TestBed.inject(NavStore);
+    button('Collapse the menu')!.click();
+    fixture.detectChanges();
+    button('Scores')!.click();
+    fixture.detectChanges();
+    expect(nav.view()).toBe('scores');
+    expect(button('Scores')!.getAttribute('aria-current')).toBe('page');
+    expect(button('Sessions')!.hasAttribute('aria-current')).toBe(false);
+  });
+
+  it('opens the settings from the collapsed bar', () => {
+    button('Collapse the menu')!.click();
+    fixture.detectChanges();
+    button('Settings')!.click();
+    expect(TestBed.inject(VaultStore).settingsOpen()).toBe(true);
+  });
+
+  it('expands again and remembers it', () => {
+    button('Collapse the menu')!.click();
+    fixture.detectChanges();
+    button('Expand the menu')!.click();
+    fixture.detectChanges();
+    expect(width()).toBe('280px');
+    expect(el.querySelector('input[type="search"]')).not.toBeNull();
+    expect(localStorage.getItem('piano-tracker.sidebarCollapsed')).toBe('0');
+  });
+
+  it('starts collapsed when it was left that way', () => {
+    TestBed.resetTestingModule();
+    localStorage.setItem('piano-tracker.sidebarCollapsed', '1');
+    TestBed.configureTestingModule({ providers: [mockApi().provider] });
+    TestBed.inject(I18nService).setLang('en');
+    const again = TestBed.createComponent(SidebarComponent);
+    again.detectChanges();
+    expect(again.nativeElement.style.width).toBe('64px');
   });
 });
