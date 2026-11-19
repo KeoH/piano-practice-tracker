@@ -20,6 +20,7 @@ import {
   findClip,
   fitStart,
   maxRepeats,
+  repetitionMs,
   snapMs,
   snapTargets,
   trackRgb,
@@ -126,6 +127,7 @@ export class ComposerTimelineComponent {
     { title: 'composer.empty.step3Title', body: 'composer.empty.step3Body' },
   ];
   protected readonly formatMs = formatMs;
+  protected readonly clipEnd = clipEnd;
 
   private readonly scroller = viewChild<ElementRef<HTMLElement>>('scroller');
   private readonly tracksEl = viewChild<ElementRef<HTMLElement>>('tracks');
@@ -204,9 +206,12 @@ export class ComposerTimelineComponent {
           length_ms: dragged.duration_ms,
           repeats: 1,
           transpose: 0,
+          rate_pct: 100,
           fragment_title: dragged.title,
           fragment_file_path: dragged.file_path,
           fragment_duration_ms: dragged.duration_ms,
+          fragment_bpm: dragged.bpm,
+          fragment_score_id: dragged.score_id,
         };
         clips.push(view(ghost, track, { ghost: true }));
       }
@@ -328,7 +333,7 @@ export class ComposerTimelineComponent {
       }
       case 'repeat': {
         const total = clipEnd(c) + delta - c.start_ms;
-        next = { ...c, repeats: clamp(Math.round(total / c.length_ms), 1, maxRepeats(c, span)) };
+        next = { ...c, repeats: clamp(Math.round(total / repetitionMs(c)), 1, maxRepeats(c, span)) };
         break;
       }
     }

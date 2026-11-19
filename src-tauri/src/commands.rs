@@ -20,8 +20,10 @@ use crate::midi_slicer;
 use crate::models::*;
 use crate::paths::AppDirs;
 use crate::raw_history::{remove_file_quietly, TrimAction};
+use crate::score;
 use crate::soundfont;
 use crate::starter_melodies;
+use crate::db::ScoreFragment;
 use crate::vault::{self, AppConfig, OpenOutcome, Vault};
 use crate::wav::WavWriter;
 
@@ -606,9 +608,10 @@ pub async fn export_composition_audio(state: State<'_, AppState>, composition_id
 pub async fn export_composition_midi(state: State<'_, AppState>, composition_id: String, dest_path: String) -> Result<String, String> {
     let doc = exportable_composition(&state, &composition_id)?;
     let dest = with_extension(dest_path, "mid");
+    let bpm = doc.bpm.unwrap_or(EXPORT_MIDI_BPM);
     tauri::async_runtime::spawn_blocking(move || {
         let (tracks, duration_us) = composition::build_named_tracks(&doc)?;
-        midi_slicer::write_smf_multitrack(&dest, &tracks, EXPORT_MIDI_BPM, duration_us)?;
+        midi_slicer::write_smf_multitrack(&dest, &tracks, bpm, duration_us)?;
         Ok(dest.to_string_lossy().into_owned())
     })
     .await
@@ -657,6 +660,109 @@ pub async fn count_composition_uses(
     session_id: Option<String>,
 ) -> Result<u32, String> {
     state.vault()?.db.count_compositions_using(&fragment_ids, session_id.as_deref())
+}
+
+// ---------------------------------------------------------------------------
+// Scores (the staff editor)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_scores(state: State<'_, AppState>) -> Result<Vec<ScoreSummaryDto>, String> {
+    state.vault()?.db.list_scores()
+}
+
+#[tauri::command]
+pub async fn create_score(state: State<'_, AppState>, title: String) -> Result<ScoreDto, String> {
+    let title = if title.trim().is_empty() { t!("backend.defaults.scoreTitle") } else { title.trim().to_string() };
+    state.vault()?.db.create_score(&title)
+}
+
+#[tauri::command]
+pub async fn get_score(state: State<'_, AppState>, score_id: String) -> Result<ScoreDto, String> {
+    state.vault()?.db.get_score(&score_id)
+}
+
+/// Saves the whole score and regenerates its fragment (`frag_<id>.mid`, kept under the same id so
+/// the clips that use it survive), then returns it as stored. A score without notes that never had a
+/// fragment only stores its notation. An invalid score is refused.
+#[tauri::command]
+pub async fn save_score(state: State<'_, AppState>, score: ScoreDto) -> Result<ScoreDto, String> {
+    let vault = state.vault()?;
+    let mut doc = score;
+    if doc.title.trim().is_empty() {
+        doc.title = t!("backend.defaults.scoreTitle");
+    }
+    score::check(&doc)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let stored = vault.db.get_score(&doc.id)?;
+        let fragment = if score::note_count(&doc) > 0 || stored.fragment_id.is_some() {
+            let fragment_id = stored.fragment_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let path = vault.paths.fragment_file(&fragment_id);
+            let duration_ms = score::write_midi(&doc, &path)?;
+            Some(ScoreFragment { fragment_id, file_path: path.to_string_lossy().into_owned(), duration_ms })
+        } else {
+            None
+        };
+        vault.db.save_score(&doc, fragment.as_ref()).inspect_err(|_| {
+            // A fragment that was just created has nothing pointing at its file.
+            if let (Some(f), None) = (&fragment, &stored.fragment_id) {
+                remove_file_quietly(Path::new(&f.file_path));
+            }
+        })
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Deletes the score and its fragment (and the clips that use it).
+#[tauri::command]
+pub async fn delete_score(state: State<'_, AppState>, score_id: String) -> Result<(), String> {
+    let vault = state.vault()?;
+    if state.audio.active_key() == Some(score::playback_key(&score_id)) {
+        state.audio.stop()?;
+    }
+    if let Some(path) = vault.db.delete_score(&score_id)? {
+        remove_file_quietly(Path::new(&path));
+    }
+    Ok(())
+}
+
+/// The score's MIDI with an explicit piano program, so a previous instrument does not leak in.
+fn score_playback(doc: &ScoreDto) -> Result<(Vec<midi_slicer::TimedMidiEvent>, u64), String> {
+    score::check(doc)?;
+    let (mut events, duration_us) = score::build_events(doc);
+    events.insert(0, midi_slicer::TimedMidiEvent::new(0, vec![0xC0, 0]));
+    Ok((events, duration_us))
+}
+
+/// Plays the score as it is in the editor (saved or not) from `start_ms`; progress reports it as
+/// `score:<id>`. Pause, seek, loop and speed are the usual playback commands.
+#[tauri::command]
+pub async fn play_score(state: State<'_, AppState>, score: ScoreDto, start_ms: u64) -> Result<(), String> {
+    let (events, duration_us) = score_playback(&score)?;
+    state.audio.set_channel_mix(&[(0, 100, false)]);
+    state.audio.play_sequence(&score::playback_key(&score.id), events, duration_us, start_ms)
+}
+
+/// Swaps the notes of the score that is playing for the edited ones, keeping the position. It does
+/// nothing if another score or file is loaded in the player.
+#[tauri::command]
+pub async fn update_score_playback(state: State<'_, AppState>, score: ScoreDto) -> Result<(), String> {
+    let key = score::playback_key(&score.id);
+    if state.audio.active_key().as_deref() == Some(key.as_str()) {
+        let (events, duration_us) = score_playback(&score)?;
+        state.audio.replace_sequence(&key, events, duration_us);
+    }
+    Ok(())
+}
+
+/// Plays one key for a moment, to hear a note being placed (it replaces what was playing).
+#[tauri::command]
+pub async fn preview_note(state: State<'_, AppState>, key: u8) -> Result<(), String> {
+    let key = key.clamp(score::MIN_KEY, score::MAX_KEY);
+    let (events, duration_us) = score::note_events(key);
+    state.audio.set_channel_mix(&[(0, 100, false)]);
+    state.audio.play_sequence(&score::note_key(key), events, duration_us, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,9 +1640,12 @@ mod tests {
             length_ms: fragment.duration_ms,
             repeats: 2,
             transpose: 0,
+            rate_pct: 100,
             fragment_title: String::new(),
             fragment_file_path: String::new(),
             fragment_duration_ms: 0,
+            fragment_bpm: 0,
+            fragment_score_id: None,
         });
         doc
     }
@@ -1815,6 +1924,97 @@ mod tests {
 
         block_on(delete_composition(fx.state(), saved.id.clone())).unwrap();
         assert!(block_on(get_compositions(fx.state())).unwrap().iter().all(|c| c.id != saved.id));
+    }
+
+    fn score_note(id: &str, tick: u32, key: u8) -> ScoreNoteDto {
+        ScoreNoteDto { id: id.into(), tick, duration_ticks: 480, key, accidental: None, tie: false }
+    }
+
+    #[test]
+    fn scores_are_saved_as_fragments_played_and_deleted() {
+        let fx = Fixture::new();
+        let created = block_on(create_score(fx.state(), "  ".into())).unwrap();
+        assert_eq!(created.title, t!("backend.defaults.scoreTitle"));
+        assert_eq!(block_on(get_scores(fx.state())).unwrap().len(), 1);
+
+        // Without notes it only stores the notation: no fragment, no file.
+        let mut doc = created.clone();
+        doc.title = String::new();
+        let empty = block_on(save_score(fx.state(), doc.clone())).unwrap();
+        assert_eq!((empty.title.as_str(), empty.fragment_id.clone()), (t!("backend.defaults.scoreTitle").as_str(), None));
+        assert!(block_on(get_library_fragments(fx.state())).unwrap().is_empty());
+
+        // An invalid score is refused and changes nothing.
+        let mut bad = created.clone();
+        bad.treble = vec![score_note("a", 0, 60), ScoreNoteDto { duration_ticks: 960, ..score_note("b", 0, 62) }];
+        let err = block_on(save_score(fx.state(), bad.clone())).unwrap_err();
+        assert_eq!(err, t!("backend.scores.issue.overlap"));
+        assert!(block_on(play_score(fx.state(), bad, 0)).is_err());
+        assert!(block_on(get_library_fragments(fx.state())).unwrap().is_empty());
+
+        // With notes it writes the fragment's MIDI and shows up in the library.
+        let mut doc = created.clone();
+        doc.bpm = 120;
+        doc.treble = vec![score_note("a", 0, 60), score_note("b", 480, 64)];
+        doc.bass = vec![ScoreNoteDto { duration_ticks: 1920, ..score_note("c", 0, 36) }];
+        let saved = block_on(save_score(fx.state(), doc.clone())).unwrap();
+        let fragment_id = saved.fragment_id.clone().expect("a fragment");
+        let file = fx.vault().paths.fragment_file(&fragment_id);
+        assert!(file.is_file());
+        let (events, ms) = midi_slicer::read_timed_events(&file).unwrap();
+        assert_eq!((events.iter().filter(|e| e.bytes[0] == 0x90).count(), ms), (3, 8_000));
+        let library = block_on(get_library_fragments(fx.state())).unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!((library[0].id.as_str(), library[0].score_id.as_deref()), (fragment_id.as_str(), Some(saved.id.as_str())));
+        assert!(block_on(get_sessions(fx.state())).unwrap().is_empty(), "the scores session is hidden");
+
+        // Saving again keeps the fragment id and the file.
+        doc.bars = 2;
+        let again = block_on(save_score(fx.state(), doc.clone())).unwrap();
+        assert_eq!(again.fragment_id, saved.fragment_id);
+        assert_eq!(midi_slicer::read_timed_events(&file).unwrap().1, 4_000);
+
+        // Playing the score as it is in the editor, and swapping the notes while it plays.
+        block_on(play_score(fx.state(), doc.clone(), 0)).unwrap();
+        let key = score::playback_key(&saved.id);
+        assert_eq!(fx.state().audio.active_key(), Some(key.clone()));
+        doc.treble.push(score_note("d", 960, 67));
+        block_on(update_score_playback(fx.state(), doc.clone())).unwrap();
+        assert_eq!(fx.state().audio.active_key(), Some(key));
+        // A score that is not the loaded one is left alone.
+        let mut other = doc.clone();
+        other.id = "other".into();
+        block_on(update_score_playback(fx.state(), other)).unwrap();
+        block_on(preview_note(fx.state(), 60)).unwrap();
+        assert_eq!(fx.state().audio.active_key(), Some(score::note_key(60)));
+
+        // A composition can use it, and deleting the score removes the clips and the file.
+        let composition = block_on(create_composition(fx.state(), "Song".into())).unwrap();
+        let mut song = composition.clone();
+        song.tracks[0].clips.push(CompositionClipDto {
+            id: String::new(),
+            fragment_id: fragment_id.clone(),
+            start_ms: 0,
+            trim_start_ms: 0,
+            length_ms: 4_000,
+            repeats: 1,
+            transpose: 0,
+            rate_pct: 100,
+            fragment_title: String::new(),
+            fragment_file_path: String::new(),
+            fragment_duration_ms: 0,
+            fragment_bpm: 0,
+            fragment_score_id: None,
+        });
+        let song = block_on(save_composition(fx.state(), song)).unwrap();
+        assert_eq!(song.tracks[0].clips[0].fragment_score_id.as_deref(), Some(saved.id.as_str()));
+        assert_eq!(song.tracks[0].clips[0].fragment_bpm, 120);
+        assert_eq!(block_on(count_composition_uses(fx.state(), vec![fragment_id.clone()], None)).unwrap(), 1);
+        block_on(play_score(fx.state(), doc, 0)).unwrap();
+        block_on(delete_score(fx.state(), saved.id.clone())).unwrap();
+        assert!(!file.exists());
+        assert!(block_on(get_score(fx.state(), saved.id)).is_err());
+        assert!(block_on(get_composition(fx.state(), song.id)).unwrap().tracks[0].clips.is_empty());
     }
 
     #[test]

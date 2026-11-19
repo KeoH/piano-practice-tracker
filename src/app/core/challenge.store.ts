@@ -225,7 +225,7 @@ export class ChallengeStore {
   }
 
   /** Turns a fragment into a challenge; returns the new melody. */
-  async createFromFragment(f: FragmentDto): Promise<MelodyDto | null> {
+  async createFromFragment(f: Pick<FragmentDto, 'id'>): Promise<MelodyDto | null> {
     try {
       const m = await this.api.createMelodyFromFragment(f.id);
       await this.refreshList();

@@ -91,6 +91,8 @@
 
 } @else if (nav.view() === 'challenges') {
 <app-melody-list />
+} @else if (nav.view() === 'scores') {
+<app-score-list />
 } @else if (nav.view() === 'compose') {
 <div class="flex flex-col gap-2.5 px-4 pb-4">
   <button type="button" class="btn btn-primary btn-lg w-full" (click)="compositions.create()" [disabled]="!api.available">

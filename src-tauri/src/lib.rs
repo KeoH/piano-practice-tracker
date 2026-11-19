@@ -14,6 +14,7 @@ pub mod midi_slicer;
 pub mod models;
 pub mod paths;
 pub mod raw_history;
+pub mod score;
 pub mod sf2_builder;
 pub mod soundfont;
 pub mod starter_melodies;
@@ -219,6 +220,14 @@ pub fn run() {
             commands::delete_melody,
             commands::delete_attempt,
             commands::add_starter_melodies,
+            commands::get_scores,
+            commands::create_score,
+            commands::get_score,
+            commands::save_score,
+            commands::delete_score,
+            commands::play_score,
+            commands::update_score_playback,
+            commands::preview_note,
             commands::start_challenge,
             commands::stop_challenge,
             commands::get_soundfont_info,

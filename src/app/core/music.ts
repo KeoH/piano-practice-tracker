@@ -6,6 +6,16 @@ export function noteName(key: number, names: readonly string[]): string {
   return `${names[pc] ?? '?'}${octave}`;
 }
 
+/**
+ * Name of a key as it is written: a flat spelling gives B♭4 where `noteName` would say A♯4. `names`
+ * is the translated list of the 12 pitch classes (its white keys are the plain letters).
+ */
+export function spelledNoteName(key: number, accidental: 'sharp' | 'flat' | null | undefined, names: readonly string[]): string {
+  if (accidental !== 'flat') return noteName(key, names);
+  const above = Math.round(key) + 1;
+  return `${names[((above % 12) + 12) % 12] ?? '?'}♭${Math.floor(above / 12) - 1}`;
+}
+
 /** `true` for the keys that are black on a piano. */
 export function isBlackKey(key: number): boolean {
   return [1, 3, 6, 8, 10].includes(((Math.round(key) % 12) + 12) % 12);

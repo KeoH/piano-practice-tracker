@@ -638,7 +638,8 @@
       "pieceTitle": "Obra sin título",
       "compositionTitle": "Composición sin título",
       "trackName": "Pista {n}",
-      "melodyTitle": "Melodía sin título"
+      "melodyTitle": "Melodía sin título",
+      "scoreTitle": "Partitura nueva"
     },
     "image": {
       "invalidBase64": "Imagen en base64 inválida: {e}",
@@ -740,7 +741,9 @@
       "repeats": "Un clip se repite entre 1 y {max} veces",
       "transpose": "La transposición va de -{max} a +{max} semitonos",
       "program": "Instrumento desconocido {program}",
-      "volume": "Volumen de pista no válido {volume}"
+      "volume": "Volumen de pista no válido {volume}",
+      "bpm": "El tempo de la composición debe estar entre {min} y {max} BPM",
+      "rate": "Un clip suena entre el {min} y el {max} % de su velocidad"
     },
     "challenge": {
       "noNotes": "El archivo MIDI no tiene notas que tocar",
@@ -754,6 +757,24 @@
       "frereJacques": "Martinillo (Frère Jacques)",
       "odeToJoy": "Himno de la alegría (Beethoven)",
       "minuet": "Minueto en Sol (Petzold)"
+    },
+    "scores": {
+      "sessionTitle": "Partituras",
+      "missing": "La partitura '{id}' no existe",
+      "issue": {
+        "bpm": "El tempo debe estar entre 30 y 240 BPM",
+        "timeSignature": "Ese compás no está soportado",
+        "bars": "Una partitura tiene entre 1 y 64 compases",
+        "duplicateId": "Dos notas comparten el mismo id",
+        "key": "Una nota está fuera del teclado del piano",
+        "accidental": "Una nota tiene una alteración que no corresponde a su tecla",
+        "duration": "Una nota tiene una duración que no se puede escribir",
+        "tick": "Una nota cae fuera de la partitura",
+        "crossesBar": "Una nota cruza una barra de compás",
+        "overlap": "Dos notas se solapan en el mismo pentagrama",
+        "tie": "Una ligadura no tiene nota con la que unirse",
+        "pickup": "La anacrusa debe ser más corta que un compás entero"
+      }
     }
   },
   "export": {
@@ -775,7 +796,8 @@
     "pieces": "Repertorio",
     "challenges": "Retos",
     "stats": "Estadísticas",
-    "compose": "Componer"
+    "compose": "Componer",
+    "scores": "Partituras"
   },
   "stats": {
     "title": "Estadísticas de práctica",
@@ -1136,7 +1158,14 @@
       "split": "Dividir en el cabezal",
       "splitHint": "Parte el clip en dos donde está el cabezal (S)",
       "duplicate": "Duplicar",
-      "remove": "Quitar"
+      "remove": "Quitar",
+      "speed": "Velocidad",
+      "speedLess": "Más lento",
+      "speedMore": "Más rápido",
+      "matchTempo": "Ajustar al tempo",
+      "matchTempoHint": "Reproducir este clip a la velocidad que lo mantiene a tempo con la composición",
+      "followsTempo": "Esta partitura sigue el tempo de la composición.",
+      "speedValue": "{pct} %"
     },
     "shortcuts": {
       "split": "divide el clip seleccionado en el cabezal",
@@ -1171,6 +1200,96 @@
     "exportWav": "Exportar WAV",
     "exportWavHint": "Guarda la composición tal como suena (con silencios, solos y volúmenes) en un archivo WAV",
     "exportMidi": "Exportar MIDI",
-    "exportMidiHint": "Guarda la composición como archivo MIDI con una pista por voz, para abrirla en otros programas"
+    "exportMidiHint": "Guarda la composición como archivo MIDI con una pista por voz, para abrirla en otros programas",
+    "tempo": {
+      "label": "Tempo",
+      "unit": "BPM",
+      "hint": "Tempo de la composición. Los clips de partituras lo siguen; los grabados se pueden ajustar a él.",
+      "needed": "Fija antes el tempo de la composición (campo BPM de la barra de transporte).",
+      "matchAll": "Ajustar todos",
+      "matchAllHint": "Poner todos los clips a tempo con la composición"
+    }
+  },
+  "score": {
+    "new": "Nueva partitura",
+    "searchLabel": "Buscar partituras",
+    "listLabel": "Partituras",
+    "noScores": "Aún no hay partituras. Crea una para escribir notas en un pentagrama.",
+    "noMatches": "Ninguna partitura coincide con la búsqueda",
+    "bars_one": "{n} compás",
+    "bars_other": "{n} compases",
+    "notes_one": "{n} nota",
+    "notes_other": "{n} notas",
+    "listMeta": "{bpm} BPM · {bars} · {notes}",
+    "deleted": "Partitura eliminada",
+    "eyebrow": "Partitura",
+    "staffLabel": "Partitura: {title}",
+    "noteLabel": "{note}, {value}, {staff}, compás {bar}",
+    "values": {
+      "whole": "Redonda",
+      "half": "Blanca",
+      "quarter": "Negra",
+      "eighth": "Corchea",
+      "sixteenth": "Semicorchea"
+    },
+    "staff": {
+      "treble": "mano derecha",
+      "bass": "mano izquierda"
+    },
+    "welcome": "Escribe un fragmento en un pentagrama: arrastra figuras a la clave de sol (mano derecha) y a la de fa (mano izquierda). Se guarda como un fragmento que puedes usar en el compositor.",
+    "createFirst": "Crear una partitura",
+    "titleLabel": "Título de la partitura",
+    "summary": "{bars} · {notes} · {duration}",
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "delete": "Eliminar partitura",
+    "deleteMessage": "¿Eliminar la partitura \"{title}\" y el fragmento generado a partir de ella? No se puede deshacer.",
+    "play": "Reproducir",
+    "pause": "Pausar",
+    "stop": "Detener",
+    "toStart": "Volver al principio",
+    "tempo": "Tempo",
+    "bpmUnit": "BPM",
+    "timeSignature": "Compás",
+    "barsLabel": "Compases",
+    "addBar": "Añadir un compás",
+    "removeBar": "Quitar un compás",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "palette": "Figuras",
+    "paletteHint": "Arrastra una figura al pentagrama, o elígela y haz clic en el pentagrama. Una nota puesta donde empieza otra se une a ella como acorde.",
+    "dotted": "Con puntillo (.)",
+    "sharp": "Sostenido (#)",
+    "flat": "Bemol (b)",
+    "selected": "Seleccionada: {note} · {value}",
+    "applyValue": "Usar la figura elegida",
+    "removeNote": "Quitar nota",
+    "nothingSelected": "Haz clic en una nota para seleccionarla. Arrástrala para moverla o usa las flechas.",
+    "saveHint": "Se guarda sola. Aparece en la biblioteca del compositor como un fragmento y allí sigue el tempo de la composición.",
+    "noRoom": "No hay sitio para esa nota ahí",
+    "cantResize": "Quita antes las notas de los últimos compases",
+    "cantChangeMeter": "Algunas notas cruzarían una barra de compás con ese compás",
+    "inLibrary": "Partitura",
+    "editScore": "Editar partitura",
+    "openScore": "Abrir partitura",
+    "shortcuts": "Atajos: Espacio reproduce · 1-5 eligen figura · . puntillo · # y b suben y bajan medio tono · T liga · las flechas mueven la nota · Supr la quita · Ctrl+Z deshace",
+    "errors": {
+      "loadList": "No se pudieron cargar las partituras",
+      "load": "No se pudo abrir la partitura",
+      "create": "No se pudo crear la partitura",
+      "save": "No se pudo guardar la partitura",
+      "delete": "No se pudo eliminar la partitura"
+    },
+    "tie": "Ligar con la nota siguiente (T)",
+    "tieHint": "Liga la nota seleccionada con la siguiente del mismo sonido, y la añade si no está. Púlsalo otra vez para desligar.",
+    "pickup": "Anacrusa",
+    "pickupNone": "Sin anacrusa",
+    "pickupBeats_one": "{n} pulso",
+    "pickupBeats_other": "{n} pulsos",
+    "pickupBar": "anacrusa",
+    "noRoomTie": "No hay sitio para ligar esa nota",
+    "cantChangePickup": "Una nota cruzaría una barra de compás con esa anacrusa",
+    "repeat": "Repetir desde el principio",
+    "repeatHint": "Cierra la partitura con un signo de repetición: se toca dos veces, desde el principio (también en el fragmento que genera)."
   }
 }

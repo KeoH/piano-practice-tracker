@@ -40,9 +40,15 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 - File fragments under a **piece** and a **passage** (for example "Bars 13-16"), and see every take of a passage in chronological order to hear your progress.
 - **Compare two takes** on the same time scale.
 
+### Scores
+- **Write a fragment on a staff:** treble clef for the right hand and bass clef for the left, in 4/4, 3/4 or 2/4. The bars continue on new lines like a printed score. Drag note values (whole to sixteenth, dotted, sharps and flats) onto the bars, move them, and listen while you write.
+- **Chords, ties, pickups and repeats:** put a note on the beat of another to make a chord, tie notes (also over bar lines), start with a shorter pickup bar and close the score with a repeat sign to play it twice.
+- A score is saved as a **fragment** you can place in the composer or turn into a challenge.
+
 ### Composer
 - Arrange fragments on up to 15 **tracks**, each with its own General MIDI instrument, volume, mute and solo.
 - Trim, split, repeat and transpose **clips**, with undo and redo.
+- Give the composition a **tempo**: the scores you add follow it, and recorded clips can be played faster or slower (the pitch does not change) to keep time with it.
 - Export the result as **WAV** or as a **multitrack MIDI** file.
 
 ### Challenges

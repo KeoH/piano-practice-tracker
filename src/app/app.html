@@ -23,6 +23,13 @@
           } @loading (minimum 200ms) {
             <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
           }
+        } @else if (nav.view() === 'scores') {
+          <!-- Loaded on demand, with the notation font -->
+          @defer (on immediate) {
+            <app-score-editor />
+          } @loading (minimum 200ms) {
+            <p class="px-6 py-10 text-[13px] text-faint">{{ 'common.loading' | t }}</p>
+          }
         } @else if (nav.view() === 'compose') {
           <!-- Loaded on demand: the composer is the largest view -->
           @defer (on immediate) {

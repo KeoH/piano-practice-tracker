@@ -201,10 +201,20 @@ export interface CompositionClipDto {
   repeats: number;
   /** Semitones. */
   transpose: number;
+  /**
+   * Speed of the window in percent (100 = as recorded, pitch unchanged). `length_ms` and
+   * `trim_start_ms` stay in the fragment's own time; each repetition lasts `length_ms × 100 / rate_pct`
+   * on the timeline.
+   */
+  rate_pct: number;
   /** Read only: filled in from the fragment when loading, ignored when saving. */
   fragment_title: string;
   fragment_file_path: string;
   fragment_duration_ms: number;
+  /** Read only: the fragment's tempo (a score's own, a recording's metronome setting). */
+  fragment_bpm: number;
+  /** Read only: the score the fragment was generated from, if it is one. */
+  fragment_score_id: string | null;
 }
 
 /** A track: one MIDI channel with a General MIDI instrument. The array order is the track order. */
@@ -228,9 +238,49 @@ export interface CompositionTrackDto {
 export interface CompositionDto {
   id: string;
   title: string;
+  /** Tempo of the composition; `null` until it is set. Clips of a score follow it. */
+  bpm: number | null;
   created_at: string;
   updated_at: string;
   tracks: CompositionTrackDto[];
+}
+
+/** Spelling of a black key. White keys have no accidental. */
+export type Accidental = 'sharp' | 'flat';
+
+/** A note on a staff of a score. Rests are not stored: they are the gaps between notes. */
+export interface ScoreNoteDto {
+  id: string;
+  /** Start from the beginning of the score, in ticks (480 per quarter note). */
+  tick: number;
+  duration_ticks: number;
+  /** Sounding MIDI key (21-108). */
+  key: number;
+  accidental: Accidental | null;
+  /** Tied to the note of the same key that starts where this one ends (they sound as one note). */
+  tie: boolean;
+}
+
+/** A piece written on a grand staff: treble clef (right hand) and bass clef (left hand). */
+export interface ScoreDto {
+  id: string;
+  title: string;
+  bpm: number;
+  /** Time signature: `beats` notes of `1 / beat_unit` per bar. */
+  beats: number;
+  beat_unit: number;
+  /** Bars, the pickup bar included. */
+  bars: number;
+  /** Length of a shorter first bar (a pickup or anacrusis), in ticks; 0 = the first bar is whole. */
+  pickup_ticks: number;
+  /** A repeat sign closes the score: it is played twice, going back to the start. */
+  repeat: boolean;
+  treble: ScoreNoteDto[];
+  bass: ScoreNoteDto[];
+  /** The library fragment generated from the score (`null` until it is first saved). */
+  fragment_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Mixer state of a track, applied live while a composition plays. */
@@ -253,6 +303,23 @@ export interface LibraryFragmentDto {
   piece_title: string | null;
   passage: string;
   created_at: string;
+  bpm: number;
+  /** The score the fragment was generated from, if it is one (then `session_title` is the system session's name). */
+  score_id: string | null;
+}
+
+/** A score in the list of the score editor. */
+export interface ScoreSummaryDto {
+  id: string;
+  title: string;
+  bpm: number;
+  beats: number;
+  beat_unit: number;
+  bars: number;
+  note_count: number;
+  duration_ms: number;
+  fragment_id: string | null;
+  updated_at: string;
 }
 
 export interface SoundfontCandidate {

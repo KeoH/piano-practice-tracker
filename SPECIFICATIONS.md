@@ -23,9 +23,10 @@ A native application for **Ubuntu Linux** (it also builds for macOS, and for And
 6. **Trims can be undone:** before each trim the raw take is copied to `midi/history/`; the last 10 trims of each session can be undone (undoing an extraction deletes the fragment it created). Recording again clears that history.
 7. **Practice time is recorded, not derived:** `practice_log` keeps what was actually recorded each day, so trimming or deleting a session does not change the statistics.
 8. **Repertoire:** a fragment can be filed under a piece and a passage (free text), so the takes of the same passage can be compared across sessions.
-9. **Composer:** recorded fragments are laid out as clips on a multitrack timeline to build a larger piece. A clip points to its fragment (window, repeats, transposition) and never copies its MIDI; each track is one MIDI channel with a General MIDI instrument, and all tracks sound at once.
+9. **Composer:** recorded fragments are laid out as clips on a multitrack timeline to build a larger piece. A clip points to its fragment (window, repeats, transposition, speed) and never copies its MIDI; each track is one MIDI channel with a General MIDI instrument, and all tracks sound at once. A composition can have a **tempo**: the clips of scores follow it, and recorded clips can be matched to it.
 10. **Challenge mode (compete with your previous self):** a **melody** is a frozen copy of a fragment or of an imported `.mid` (leading silence removed), so its history never breaks if the fragment changes or is deleted. An **attempt** plays it at 40-150 % of its tempo after a one-bar count-in; every note is scored live and the attempt is saved with its score, accuracy, per-note detail, mistakes and the MIDI played. The **record** is the best completed attempt at the same tempo, and a "ghost" compares the notes hit so far with it at the same moment. Attempts stopped by hand are kept as incomplete and never count for records or charts. A vault gets five **starter melodies** the first time it is opened (C major scale, Twinkle Twinkle, Frère Jacques, Ode to Joy, Petzold's Minuet in G: public domain, right hand); deleted ones can be added again from the Challenges view.
 11. **Android build:** the same code base runs on Android. `midir` has no Android backend, so the MIDI input comes from the platform through a `NativeMidi` backend (a Kotlin plugin over `MidiManager`). There is no folder picker the vault can use, so the app keeps a single vault in the app's external files directory, created on first launch, and the machine configuration lives in the app's private storage. Only a debug APK is supported: the CI builds it (arm64 and 32-bit ARM, uploaded as a workflow artifact) so the Android code does not break unnoticed, but it is not tested there and not part of the releases.
+12. **Score editor:** a fragment can be written on a grand staff (treble clef for the right hand, bass clef for the left) by dragging note values onto the bars. The **score** (notation as JSON in `scores`) is the source of truth; saving it regenerates a real fragment (`frag_<id>.mid`, same id every time), so the library, the composer, the exports and the challenge mode treat it like any recorded fragment. The fragments of scores live in a hidden *system session* (`sessions.kind = 'scores'`) that the list of sessions and the statistics never show. Both hands become one fragment on one MIDI channel. A score can end with a **repeat sign** (`repeat`): it is played twice, from the start, in the editor and in the fragment it generates (so the composer and the challenge mode get the piece as performed). A score has its own tempo while it is written; in a composition its clips follow the composition's tempo.
 
 ---
 
@@ -76,7 +77,7 @@ On Android there is no `$HOME`: both files live in the app's private storage (Ta
 
 The path columns (`raw_midi_path`, `file_path`, `local_path`) and the Markdown images store paths **relative to the vault** (`midi/raw/…`, `media/…`). The API returns them absolute.
 
-### 3.1. Full SQL Schema (version 5)
+### 3.1. Full SQL Schema (version 6)
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -229,11 +230,34 @@ CREATE TABLE IF NOT EXISTS challenge_attempts (
 );
 ```
 
+Version 6 adds the score editor and the composer's tempo. A score keeps its notation as JSON; the three columns are plain `ADD COLUMN`s, so no table is rebuilt (a rebuild of `midi_fragments` with foreign keys on would delete the clips and comments that point to it):
+
+```sql
+ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'practice';   -- 'practice' | 'scores' (hidden)
+ALTER TABLE compositions ADD COLUMN bpm INTEGER;                          -- NULL until it is set
+ALTER TABLE composition_clips ADD COLUMN rate_pct INTEGER NOT NULL DEFAULT 100;  -- 25-400
+
+CREATE TABLE IF NOT EXISTS scores (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    bpm INTEGER NOT NULL,              -- 30-240
+    beats INTEGER NOT NULL,            -- time signature: beats of 1 / beat_unit (4/4, 3/4 and 2/4 in the editor)
+    beat_unit INTEGER NOT NULL,
+    bars INTEGER NOT NULL,             -- 1-64
+    data_json TEXT NOT NULL,           -- { "treble": [Note], "bass": [Note] }, a note = id, tick, duration_ticks, key, accidental
+    fragment_id TEXT REFERENCES midi_fragments(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+```
+
 Version 1 included the `sync_queue` queue and the Google Drive `sync_status` and `drive_file_id` columns. The migration to version 2 drops them, deletes the `google_*` and `drive_*` settings, and turns the old absolute paths into relative ones (in `markdown_notes` too).
 
 The migration to version 3 adds `pieces`, `practice_log`, `raw_history` and the `piece_id` / `passage` columns. It fills `practice_log` with one entry per existing session: its raw take plus its fragments, on the session's date. It is an approximation: sections discarded before version 3 are not counted. The weekly goal is the `weekly_goal_minutes` key of `app_settings`.
 
 The migration to version 4 adds `compositions`, `composition_tracks` and `composition_clips`. A composition is saved whole (`save_composition` replaces its tracks and clips in one transaction) after checking that no two clips overlap on a track, that each window lies inside its fragment and the limits above.
+
+The migration to version 6 keeps every session, fragment, comment and clip as they were (the old sessions are `practice`, the clips play at 100 %, the compositions have no tempo).
 
 ---
 
@@ -304,6 +328,8 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - **Ordering:** simultaneous events go note-offs first, then controllers, then note-ons, so the seam between repeats never cuts the new note.
 - **Live vs export:** live playback leaves volume, mute and solo to the engine's channel mix; WAV and MIDI exports bake them in (silent tracks are left out). Solo wins: once a track is soloed, only the soloed ones sound, and a muted track never does.
 - **MIDI export:** SMF format 1 with a tempo track and one named track per voice (its program and volume at the start), timed at a nominal 120 BPM.
+- **Speed of a clip:** `rate_pct` (25-400) plays the window faster or slower without changing its pitch. `length_ms` and `trim_start_ms` stay in the fragment's own time, so on the timeline one repetition takes `length_ms × 100 / rate_pct`; the end of a clip is `start + ceil(length × repeats × 100 / rate)` ms (`db::clip_end_ms`, `clipEnd` in `core/composition.ts`), and the mixdown scales every event of the window, its closing events included, with the same formula so repetitions still meet at the seam.
+- **Tempo:** a composition's `bpm` (30-240). A clip of a score follows it (`rate_pct = composition_bpm / score_bpm × 100`) when it is placed or when the tempo changes, and the clips that grew push the next ones on their track. The first score added to a composition with no tempo decides it (the first recorded clip's tempo, if there is one). Recorded fragments are never matched on their own, because their `bpm` is only the metronome setting; "Match tempo" in the inspector and "Match all" do it on request. The MIDI export is written at the composition's tempo.
 - **Instrument preview:** a short arpeggio and chord with any General MIDI program; `soundfont::gm_programs` lists the programs (bank 0) the active SoundFont has.
 
 ### 4.8. Challenge Mode (`challenge.rs`)
@@ -313,6 +339,18 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - **Metrics:** `accuracy = hits / N`; each hit has quality $q = 1 - 0.5 \cdot |\Delta| / W$; `score = round(1000 · Σq / (N + 0.5 · (wrong + extra)))`; plus the mean signed and absolute offsets.
 - **Latency:** the user plays along with what they hear (count-in, metronome, guide), which comes out `output_latency_us` late; it is subtracted from the played times.
 - **Live runner:** the same `Matcher` scores live and offline. A ticker thread emits `challenge-progress` every 50 ms, starts the guide at the end of the count-in (at the challenge tempo through the global playback speed, restored afterwards) and ends the attempt 1.5 s after the last note's window. The capture reuses `midi_recorder` without writing a session take; with the simulator it plays the melody itself with some jitter and mistakes.
+
+---
+
+### 4.9. Scores (`score.rs`)
+- **Model:** ticks at 480 per quarter note; two staves of notes (`treble` = right hand, `bass` = left hand). Only notes are stored: **rests are the gaps** between them (the editor derives them). A staff has one rhythm: notes never overlap, except a **chord** (notes that start at the same tick, last the same and have different keys; a note put where others start joins them and takes their value). A note never crosses a bar line; to hold one over it, **tie** it (`tie = true`) to the note of the same key that starts where it ends, and the two sound as a single note. The first bar can be a shorter **pickup** (anacrusis): `pickup_ticks` is its length and it is the end of a bar, so beats keep their place (`barSpans` / `missing_ticks`); the score is shorter by what that first bar lacks, and its bar has no number (the first whole bar is 1). Allowed values: whole, half, quarter, eighth and sixteenth, plain or dotted (a dotted whole note never fits a bar). `key` is the sounding MIDI key (21-108) and `accidental` (`sharp` | `flat`) only spells a black key; a white key has none. Every black key is drawn with its sharp or flat, and the staff adds a natural sign when a plain note follows an altered one on the same line or space in the same bar (accidentals last until the barline); there are no key signatures.
+- **Validation:** `score::check` (mirrored by `validateScore` in `core/score.ts`): tempo 30-240, time signature, 1-64 bars, a pickup shorter than a bar in sixteenths, unique note ids, key and accidental, a valid value, inside the score, not crossing a bar line, no overlap that is not a chord, and every tie joined to a note.
+- **MIDI:** both hands on channel 0, notes sounding for their whole value, a chain of tied notes as one note, note-offs before everything else at the same instant so a repeated key is struck again, and the file lasts the whole score (trailing rests included).
+- **Repeat:** `repeat` closes the score with a repeat sign. The MIDI plays the whole score twice (`play_ticks`; the second pass is the first one shifted by the score's length, note-offs first at the seam), the file and `duration_ms` last both passes, and the editor's playhead shows the second pass over the first one (`pageTick`). The score itself (bars, `scoreTicks`, layout) is unchanged.
+- **Storage:** the notation that has no column of its own (both staves, `pickup_ticks` and `repeat`) is the JSON in `scores.data_json`, so adding to it needs no migration; a score stored before a field existed reads it as its default (no tie, no pickup).
+- **Saving (`save_score`):** validates, writes `frag_<id>.mid` atomically (the id is the stored fragment's, or a new one for the first save with notes), then in one transaction creates or updates the fragment in the hidden scores session, stores the notation and **adapts the clips** that use the fragment: their windows (in the fragment's time) follow the music when the tempo changes and are clamped to the new length (a clip left with nothing is deleted), their speed follows the composition's tempo, and the clips that grew push the next ones. A score with no notes that never had a fragment only stores the notation.
+- **Deleting:** the score, its fragment, its file and the clips that use it. Deleting the fragment by other means only detaches the score (`fragment_id = NULL`); the next save creates a new one.
+- **Playback:** `play_score` plays the score as it is in the editor, saved or not, under the key `score:<id>`; `update_score_playback` swaps the notes of the one that is playing, keeping the position.
 
 ---
 
@@ -365,6 +403,16 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 - `export_composition_audio(composition_id: String, dest_path: String) -> Result<String, String>`
 - `export_composition_midi(composition_id: String, dest_path: String) -> Result<String, String>`
 
+### Scores
+- `get_scores() -> Result<Vec<ScoreSummaryDto>, String>`
+- `create_score(title: String) -> Result<ScoreDto, String>` (an empty title gets the default one; no fragment yet)
+- `get_score(score_id: String) -> Result<ScoreDto, String>`
+- `save_score(score: ScoreDto) -> Result<ScoreDto, String>` (the whole score; regenerates its fragment; an invalid score is refused)
+- `delete_score(score_id: String) -> Result<(), String>`
+- `play_score(score: ScoreDto, start_ms: u64) -> Result<(), String>` (progress as `score:<id>`)
+- `update_score_playback(score: ScoreDto) -> Result<(), String>` (only if that score is the one loaded)
+- `preview_note(key: u8) -> Result<(), String>` (one piano key for a moment)
+
 ### Practice Statistics
 - `get_practice_stats(from: String, to: String) -> Result<PracticeStatsDto, String>` (ISO dates; only the days with practice)
 - `set_weekly_goal(minutes: u32) -> Result<u32, String>`
@@ -416,7 +464,7 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
 ## 6. User Interface Design (Angular UI/UX)
 
 1. **Left Sidebar (Navigation and Status):**
-   - Four views: **Sessions**, **Repertoire**, **Compose** and **Statistics**.
+   - Six views: **Sessions**, **Repertoire**, **Challenges**, **Scores**, **Compose** and **Statistics**.
    - "+ New Practice Session" button and the chronological list of sessions (in the Repertoire view: "+ New piece" and the list of pieces, the archived ones apart).
    - Quick USB-MIDI port selector and Settings button (with the name of the open vault) in the sidebar footer.
    - Without an open vault, the app shows a welcome screen: create a vault (name + location), open an existing one, recent ones and import of the previous version's data.
@@ -466,10 +514,20 @@ The migration to version 4 adds `compositions`, `composition_tracks` and `compos
    - In **Statistics**, a "Challenge progress" section: a table of every melody (attempts, best score, mastered tempo, recent accuracy sparkline, trend) and, per melody, key figures, accuracy per attempt with the best so far, tempo per attempt and a map of the notes missed most in the last 10 completed attempts.
 9. **Composer:**
    - The sidebar lists the compositions; a new one starts with one empty piano track and a drop zone that explains the three steps.
-   - Header (editable title, tracks · clips · length, Export MIDI / Export WAV, undo, redo, delete) and a transport bar (to the start, play/pause, stop, A-B loop, position, snap to clip edges / seconds / off, speed and zoom).
+   - Header (editable title, tracks · clips · length, Export MIDI / Export WAV, undo, redo, delete) and a transport bar (to the start, play/pause, stop, A-B loop, position, the composition's **tempo** in BPM with "Match all", snap to clip edges / seconds / off, speed and zoom).
    - Multitrack timeline: a ruler (click to seek, drag to set the loop) and one row per track with its colour, editable name, M / S, instrument and volume. Clips show their fragment's piano roll; they are dragged between tracks (Alt copies), trimmed by their edges and repeated with a tab on their corner. A row at the bottom takes a fragment onto a new track.
-   - Library of fragments grouped by piece, with search, a piece filter and "In use ×N"; a fragment is dragged onto the timeline or added at the playhead of the active track with a click or Enter.
-   - Inspector of the selected clip: start, length, trims, transposition and repeats steppers, Split at the playhead, Duplicate, Remove and a link to its session.
+   - Library of fragments grouped by piece, with search, a piece filter and "In use ×N"; a fragment is dragged onto the timeline or added at the playhead of the active track with a click or Enter. Fragments that come from a score carry a "Score" badge and their tempo.
+   - Inspector of the selected clip: start, length, trims, transposition, repeats and **speed** steppers, "Match tempo", Split at the playhead, Duplicate, Remove and a link to its session (to its score, for a clip of a score). A clip that does not play at 100 % shows its speed on the timeline.
    - Instrument dialog: 16 families, a search across the 128 programs, a preview of each one, the programs the SoundFont lacks disabled, and whether the track plays the sustain pedal.
    - Shortcuts: Space, Ctrl+Z / Ctrl+Shift+Z, S (split), Ctrl+D (duplicate), Delete, arrows (move 0.1 s, Shift: 1 s), Esc, Shift+M / Shift+S (mute / solo the active track).
    - Deleting a fragment or a session that a composition uses says so in the confirmation; its clips go with it.
+10. **Score editor:**
+   - The sidebar has "+ New score", a search box and the list of scores (tempo, bars and notes).
+   - Header (editable title, bars · notes · length, "Use as a challenge", undo, redo, delete) and a transport bar (to the start, play/pause, stop, position, tempo in BPM, time signature 4/4, 3/4 or 2/4, number of bars, speed and zoom).
+   - Palette: whole, half, quarter, eighth and sixteenth notes, a dot, a tie and sharp and flat buttons. The bar has a *Pickup* selector (none, or up to a bar less half a beat).
+   - Palette (cont.): A value is **dragged onto the staff** (pointer events, so it also works by touch) or chosen and then clicked on the staff; a note is dragged to move it in time, pitch and from one hand to the other, and a preview shows where it would land (red if it does not fit). Rests appear on their own in the gaps.
+   - The grand staff (SVG): treble clef above for the right hand, bass clef below for the left. Like a printed score it is broken into **systems** (lines) stacked from top to bottom: the bars fill the width of the view and the next ones continue on a new line, each with its own clefs (the time signature only on the first) and with the bars stretched to fill the line except on the last, so there is no horizontal scrolling; resizing the window or changing the zoom lays the lines out again. Each line has a ruler with bar numbers (click to move the playhead), beat guides, and a tie that crosses a line break is drawn as two arcs. The playhead follows playback, scrolls to its line and lights up the notes that sound. Playback uses the notes as they are in the editor and follows the edits while it plays.
+   - Saved automatically; it shows up in the composer's library as a fragment.
+   - Chords: a note put on the beat of another takes its value and joins it, with one stem and the neighbouring heads on either side of it. Ties are arcs on the side opposite the stem, across bar lines too; T ties the selected note to the next one of the same pitch (adding it, in the next bar if it ends at a bar line) or unties it.
+   - A repeat button in the transport bar closes the score with a repeat sign (two dots in each staff before the final double bar): the score is played twice, from the start, and its length shows both passes.
+   - Shortcuts: Space, Ctrl+Z / Ctrl+Y, 1-5 (value), `.` (dot), `#` and `b` (sharp, flat), `T` (tie), arrows (a line or space, an octave with Shift; a grid step in time), Delete, Esc.

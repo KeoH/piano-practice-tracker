@@ -4,7 +4,7 @@ import type { CompositionDto, LibraryFragmentDto } from './models';
 import { PlaybackStore } from './playback.store';
 import { TauriApiService } from './tauri-api.service';
 
-function fragment(id: string, duration: number): LibraryFragmentDto {
+function fragment(id: string, duration: number, extra: Partial<LibraryFragmentDto> = {}): LibraryFragmentDto {
   return {
     id,
     title: id.toUpperCase(),
@@ -17,6 +17,9 @@ function fragment(id: string, duration: number): LibraryFragmentDto {
     piece_title: null,
     passage: '',
     created_at: '',
+    bpm: 100,
+    score_id: null,
+    ...extra,
   };
 }
 
@@ -24,6 +27,7 @@ function composition(): CompositionDto {
   return {
     id: 'c1',
     title: 'Arrangement',
+    bpm: null,
     created_at: '',
     updated_at: '',
     tracks: [{ id: 't1', name: 'Track 1', program: 0, volume: 100, muted: false, solo: false, sustain: true, color: 0, clips: [] }],
@@ -102,6 +106,98 @@ describe('CompositionStore', () => {
     expect(store.selectedClip()).toBeNull();
     store.redo();
     expect(clips(1).length).toBe(1);
+  });
+
+  describe('tempo', () => {
+    const score = (id: string, duration: number, bpm: number) => fragment(id, duration, { bpm, score_id: `score-${id}` });
+
+    it('takes the tempo of the first score added and plays it at its own speed', () => {
+      store.addFragment(score('s', 4_000, 90), 0, 0);
+      expect(store.doc()!.bpm).toBe(90);
+      expect(clips()[0]).toMatchObject({ rate_pct: 100, fragment_bpm: 90, fragment_score_id: 'score-s' });
+    });
+
+    it('puts a score in time with the tempo of the recordings already there', () => {
+      store.addFragment(fragment('a', 4_000), 0, 0); // recorded at 100 BPM
+      expect(store.doc()!.bpm).toBeNull();
+      store.addFragment(score('s', 4_000, 80), 0, 4_000);
+      expect(store.doc()!.bpm).toBe(100);
+      expect(clips().map((c) => [c.fragment_id, c.rate_pct, c.start_ms])).toEqual([
+        ['a', 100, 0],
+        ['s', 125, 4_000],
+      ]);
+      expect(store.duration()).toBe(7_200); // 4 s of music at 125 % take 3.2 s
+    });
+
+    it('leaves a recording at its speed when the composition already has a tempo', () => {
+      store.addFragment(score('s', 4_000, 90), 0, 0);
+      store.addFragment(fragment('a', 2_000, { bpm: 70 }), 0, 4_000);
+      expect(clips()[1].rate_pct).toBe(100);
+    });
+
+    it('changing the tempo re-fits the scores, pushes what follows and undoes in one step', () => {
+      store.addFragment(score('s', 4_000, 120), 0, 0);
+      store.addFragment(fragment('a', 2_000), 0, 4_000);
+      store.setBpm(90); // 120 BPM music at 90: 75 %, so 4 s take 5.33 s
+      expect(store.doc()!.bpm).toBe(90);
+      expect(clips().map((c) => [c.rate_pct, c.start_ms])).toEqual([
+        [75, 0],
+        [100, 5_334],
+      ]);
+      store.undo();
+      expect(store.doc()!.bpm).toBe(120);
+      expect(clips().map((c) => [c.rate_pct, c.start_ms])).toEqual([
+        [100, 0],
+        [100, 4_000],
+      ]);
+    });
+
+    it('bounds the tempo and ignores one that does not change', () => {
+      store.addFragment(score('s', 4_000, 90), 0, 0);
+      store.setBpm(10);
+      expect(store.doc()!.bpm).toBe(30);
+      const past = store.canUndo();
+      store.setBpm(30);
+      expect(store.canUndo()).toBe(past);
+      store.undo();
+      expect(store.doc()!.bpm).toBe(90);
+    });
+
+    it('matches the selected clip, or all, to the tempo, but only when there is one', () => {
+      store.addFragment(fragment('a', 2_000, { bpm: 80 }), 0, 0);
+      store.addFragment(fragment('b', 2_000, { bpm: 80 }), 0, 2_000);
+      store.matchTempo(true);
+      expect(clips().map((c) => c.rate_pct)).toEqual([100, 100]); // no tempo: a warning, nothing changes
+      store.setBpm(120);
+      store.selectClip(clips()[0].id);
+      store.matchTempo(false);
+      expect(clips().map((c) => c.rate_pct)).toEqual([150, 100]);
+      store.matchTempo(true);
+      expect(clips().map((c) => c.rate_pct)).toEqual([150, 150]);
+      expect(clips()[1].start_ms).toBeGreaterThanOrEqual(clips()[0].start_ms + 1_333);
+    });
+
+    it('sets the speed of the selected clip within the allowed range and makes room', () => {
+      store.addFragment(fragment('a', 2_000), 0, 0);
+      store.addFragment(fragment('b', 2_000), 0, 2_000);
+      store.selectClip(clips()[0].id);
+      store.setSelectedRate(50); // 4 s on the timeline: pushes the next clip
+      expect(clips().map((c) => [c.rate_pct, c.start_ms])).toEqual([
+        [50, 0],
+        [100, 4_000],
+      ]);
+      store.setSelectedRate(5000);
+      expect(clips()[0].rate_pct).toBe(400);
+      store.setSelectedRate(1);
+      expect(clips()[0].rate_pct).toBe(25);
+    });
+
+    it('saves the tempo and the speed of the clips', async () => {
+      store.addFragment(score('s', 4_000, 90), 0, 0);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(mock.saved[0].bpm).toBe(90);
+      expect(mock.saved[0].tracks[0].clips[0].rate_pct).toBe(100);
+    });
   });
 
   it('saves a moment after the last edit, once', async () => {

@@ -74,6 +74,26 @@
 
       <span class="h-6 w-px bg-line-strong" aria-hidden="true"></span>
 
+      <label for="composer-bpm" class="pl-1.5 text-[12.5px] text-muted" [title]="'composer.tempo.hint' | t">{{ 'composer.tempo.label' | t }}</label>
+      <input
+        #bpmIn
+        id="composer-bpm"
+        type="number"
+        class="field tabular h-[34px] w-[72px] px-2 py-0 text-[13px]"
+        min="30"
+        max="240"
+        placeholder="—"
+        [title]="'composer.tempo.hint' | t"
+        [value]="doc.bpm ?? ''"
+        (change)="setBpm(bpmIn)"
+      />
+      <span class="text-[12.5px] text-faint">{{ 'composer.tempo.unit' | t }}</span>
+      <button type="button" class="btn h-[34px] px-2.5 text-[12.5px]" [disabled]="!doc.bpm || !clips()" [title]="'composer.tempo.matchAllHint' | t" (click)="store.matchTempo(true)">
+        {{ 'composer.tempo.matchAll' | t }}
+      </button>
+
+      <span class="h-6 w-px bg-line-strong" aria-hidden="true"></span>
+
       <label for="composer-snap" class="pl-1.5 text-[12.5px] text-muted">{{ 'composer.snap.label' | t }}</label>
       <select id="composer-snap" class="field h-[34px] w-auto px-2 py-0 text-[13px]" (change)="store.snap.set($any($event.target).value)">
         @for (o of snapOptions; track o.value) {

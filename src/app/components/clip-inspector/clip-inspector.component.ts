@@ -1,11 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { MAX_REPEATS, MAX_TRANSPOSE, clipEnd, maxRepeats, trackRgb } from '../../core/composition';
+import { MAX_RATE_PCT, MAX_REPEATS, MAX_TRANSPOSE, MIN_RATE_PCT, clipEnd, maxRepeats, trackRgb } from '../../core/composition';
 import { CompositionStore } from '../../core/composition.store';
 import { formatMs } from '../../core/format';
 import { programKey } from '../../core/gm';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import { NavStore } from '../../core/nav.store';
+import { ScoreStore } from '../../core/score.store';
 import { SessionStore } from '../../core/session.store';
 import { IconComponent } from '../icon/icon.component';
 
@@ -26,7 +27,11 @@ import { IconComponent } from '../icon/icon.component';
             <span class="truncate">{{ 'composer.inspector.track' | t: { track: v.trackName, instrument: (v.program | t) } }}</span>
           </span>
         </div>
-        @if (v.sessionId) {
+        @if (v.clip.fragment_score_id; as scoreId) {
+          <button type="button" class="btn btn-link h-8 px-1.5 text-[12.5px]" (click)="openScore(scoreId)">
+            {{ 'score.openScore' | t }} <app-icon name="external" [size]="13" />
+          </button>
+        } @else if (v.sessionId) {
           <button type="button" class="btn btn-link h-8 px-1.5 text-[12.5px]" (click)="openSession(v.sessionId)">
             {{ 'composer.inspector.openSession' | t }} <app-icon name="external" [size]="13" />
           </button>
@@ -76,6 +81,24 @@ import { IconComponent } from '../icon/icon.component';
             </button>
           </div>
         </div>
+        <div class="col-span-2">
+          <span class="label text-xs" id="speed-label">{{ 'composer.inspector.speed' | t }}</span>
+          <div class="flex items-center gap-1.5" role="group" aria-labelledby="speed-label">
+            <button type="button" class="btn btn-icon h-[34px] w-[34px]" [disabled]="v.clip.rate_pct <= minRate" [attr.aria-label]="'composer.inspector.speedLess' | t" (click)="store.setSelectedRate(v.clip.rate_pct - 5)">
+              <app-icon name="minus" [size]="15" />
+            </button>
+            <output class="value tabular w-[76px] justify-center" aria-live="polite" [class.text-accent]="v.clip.rate_pct !== 100">{{ 'composer.inspector.speedValue' | t: { pct: v.clip.rate_pct } }}</output>
+            <button type="button" class="btn btn-icon h-[34px] w-[34px]" [disabled]="v.clip.rate_pct >= maxRate" [attr.aria-label]="'composer.inspector.speedMore' | t" (click)="store.setSelectedRate(v.clip.rate_pct + 5)">
+              <app-icon name="plus" [size]="15" />
+            </button>
+            <button type="button" class="btn ml-auto h-[34px]" [disabled]="!store.doc()?.bpm" [title]="'composer.inspector.matchTempoHint' | t" (click)="store.matchTempo(false)">
+              {{ 'composer.inspector.matchTempo' | t }}
+            </button>
+          </div>
+          @if (v.clip.fragment_score_id) {
+            <p class="mt-1.5 text-xs text-faint">{{ 'composer.inspector.followsTempo' | t }}</p>
+          }
+        </div>
       </dl>
 
       <div class="mt-auto flex flex-wrap gap-2">
@@ -101,8 +124,11 @@ export class ClipInspectorComponent {
   private readonly i18n = inject(I18nService);
   private readonly nav = inject(NavStore);
   private readonly sessions = inject(SessionStore);
+  private readonly scores = inject(ScoreStore);
   protected readonly formatMs = formatMs;
   protected readonly maxTranspose = MAX_TRANSPOSE;
+  protected readonly minRate = MIN_RATE_PCT;
+  protected readonly maxRate = MAX_RATE_PCT;
 
   protected readonly view = computed(() => {
     const ref = this.store.selectedClip();
@@ -125,6 +151,11 @@ export class ClipInspectorComponent {
     if (t === 0) return this.i18n.t('composer.inspector.original');
     return this.i18n.plural('composer.inspector.semitones', Math.abs(t), { sign: t > 0 ? '+' : '−' });
   });
+
+  protected openScore(scoreId: string): void {
+    this.nav.view.set('scores');
+    void this.scores.select(scoreId);
+  }
 
   protected openSession(sessionId: string): void {
     this.nav.view.set('sessions');

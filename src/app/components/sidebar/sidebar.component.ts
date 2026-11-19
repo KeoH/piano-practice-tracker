@@ -15,11 +15,13 @@ import { ToastService } from '../../core/toast.service';
 import { VaultStore } from '../../core/vault.store';
 import { IconComponent, type IconName } from '../icon/icon.component';
 import { MelodyListComponent } from '../melody-list/melody-list.component';
+import { ScoreListComponent } from '../score-list/score-list.component';
 
 const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
   { view: 'sessions', label: 'nav.sessions', icon: 'calendar' },
   { view: 'pieces', label: 'nav.pieces', icon: 'book' },
   { view: 'challenges', label: 'nav.challenges', icon: 'target' },
+  { view: 'scores', label: 'nav.scores', icon: 'music' },
   { view: 'compose', label: 'nav.compose', icon: 'layers' },
   { view: 'stats', label: 'nav.stats', icon: 'chart' },
 ];
@@ -27,7 +29,7 @@ const NAV_ITEMS: { view: AppView; label: MessageKey; icon: IconName }[] = [
 @Component({
   selector: 'app-sidebar',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, MelodyListComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, MelodyListComponent, ScoreListComponent, TranslatePipe, PluralPipe],
   host: { class: 'flex h-full w-[280px] shrink-0 flex-col border-r border-line bg-ink-950' },
   templateUrl: './sidebar.component.html',
 })

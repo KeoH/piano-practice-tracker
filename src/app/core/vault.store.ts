@@ -7,6 +7,7 @@ import { RecordingStore } from './recording.store';
 import { NavStore } from './nav.store';
 import { ChallengeStore } from './challenge.store';
 import { CompositionStore } from './composition.store';
+import { ScoreStore } from './score.store';
 import { PieceStore } from './piece.store';
 import { SessionStore } from './session.store';
 import { StatsStore } from './stats.store';
@@ -29,6 +30,7 @@ export class VaultStore {
   private readonly pieces = inject(PieceStore);
   private readonly challenges = inject(ChallengeStore);
   private readonly compositions = inject(CompositionStore);
+  private readonly scores = inject(ScoreStore);
   private readonly playback = inject(PlaybackStore);
   private readonly recording = inject(RecordingStore);
 
@@ -178,6 +180,7 @@ export class VaultStore {
     this.pieces.reset();
     this.challenges.reset();
     this.compositions.reset();
+    this.scores.reset();
     this.stats.reset();
     this.nav.view.set('sessions');
   }
