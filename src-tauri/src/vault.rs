@@ -561,6 +561,8 @@ mod tests {
         assert_eq!(info.legacy_data_path, None);
     }
 
+    // The previous version only ran on Linux: its databases hold `/`-rooted absolute paths.
+    #[cfg(unix)]
     #[test]
     fn imports_legacy_data_with_relative_paths() {
         let dir = tempfile::tempdir().unwrap();

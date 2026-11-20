@@ -1077,7 +1077,8 @@ impl Database {
         if stored.is_empty() || Path::new(&stored).is_absolute() {
             stored
         } else {
-            self.root.join(&stored).to_string_lossy().into_owned()
+            // Component by component, so the separators are the platform's (no `C:\vault\midi/raw/x`).
+            self.root.join(stored.split('/').collect::<PathBuf>()).to_string_lossy().into_owned()
         }
     }
 
@@ -2233,6 +2234,18 @@ mod tests {
 
     const ROOT: &str = "/vault";
 
+    /// A path written with `/` as the database returns it: with the platform's separators after the
+    /// root (`ROOT` itself is given with `/`, so on Windows it stays `/vault\midi\raw\x.mid`).
+    fn native(path: &str) -> String {
+        if !cfg!(windows) {
+            return path.to_string();
+        }
+        match path.strip_prefix("/vault/") {
+            Some(rest) => format!("{ROOT}\\{}", rest.replace('/', "\\")),
+            None => path.replace('/', "\\"),
+        }
+    }
+
     fn db() -> Database {
         Database::open_in_memory(Path::new(ROOT)).unwrap()
     }
@@ -2278,7 +2291,7 @@ mod tests {
         let db = db();
         let s = db.create_session("S", 120).unwrap();
         let updated = db.set_session_raw_midi(&s.id, "/vault/midi/raw/raw.mid", 5000).unwrap();
-        assert_eq!(updated.raw_midi_path.as_deref(), Some("/vault/midi/raw/raw.mid"));
+        assert_eq!(updated.raw_midi_path.as_deref(), Some(native("/vault/midi/raw/raw.mid").as_str()));
         assert_eq!(updated.raw_duration_ms, 5000);
         assert_eq!(stored(&db, "SELECT raw_midi_path FROM sessions"), "midi/raw/raw.mid");
 
@@ -2338,10 +2351,10 @@ mod tests {
         assert_eq!(
             paths,
             vec![
-                "/vault/media/img.png",
-                "/vault/midi/fragments/f1.mid",
-                "/vault/midi/fragments/f2.mid",
-                "/vault/midi/raw/raw.mid"
+                native("/vault/media/img.png"),
+                native("/vault/midi/fragments/f1.mid"),
+                native("/vault/midi/fragments/f2.mid"),
+                native("/vault/midi/raw/raw.mid")
             ]
         );
         assert!(db.get_session(&s.id).is_err());
@@ -2358,7 +2371,7 @@ mod tests {
         let db = db();
         let s = db.create_session("S", 100).unwrap();
         db.insert_fragment("f2", &s.id, "Two", "", "/vault/midi/fragments/f2.mid", 100, 3000).unwrap();
-        assert_eq!(db.delete_fragment("f2").unwrap(), "/vault/midi/fragments/f2.mid");
+        assert_eq!(db.delete_fragment("f2").unwrap(), native("/vault/midi/fragments/f2.mid"));
         assert!(db.delete_fragment("f2").is_err());
     }
 
@@ -2422,9 +2435,9 @@ mod tests {
         let db = Database::open(&db_path, &vault).unwrap();
         let v = vault.to_string_lossy();
         let d = db.get_session_detail("s1").unwrap();
-        assert_eq!(d.session.raw_midi_path, Some(format!("{v}/midi/raw/raw_session_s1.mid")));
-        assert_eq!(d.fragments[0].file_path, format!("{v}/midi/fragments/frag_f1.mid"));
-        assert_eq!(d.media[0].local_path, format!("{v}/media/abc_photo.png"));
+        assert_eq!(d.session.raw_midi_path, Some(format!("{v}{}", native("/midi/raw/raw_session_s1.mid"))));
+        assert_eq!(d.fragments[0].file_path, format!("{v}{}", native("/midi/fragments/frag_f1.mid")));
+        assert_eq!(d.media[0].local_path, format!("{v}{}", native("/media/abc_photo.png")));
         assert_eq!(
             d.session.markdown_notes,
             "Hello\n![photo](media/abc_photo.png)\n![other](<media/with space.png>)\n![web](https://x.org/a.png)"
@@ -2529,13 +2542,16 @@ mod tests {
         // The two oldest were pruned.
         assert_eq!(
             pruned,
-            vec![format!("/vault/midi/history/{}/0.mid", s.id), format!("/vault/midi/history/{}/1.mid", s.id)]
+            vec![
+                native(&format!("/vault/midi/history/{}/0.mid", s.id)),
+                native(&format!("/vault/midi/history/{}/1.mid", s.id))
+            ]
         );
         assert_eq!(db.get_session_detail(&s.id).unwrap().undo_depth, RAW_HISTORY_LIMIT as u32);
         assert!(stored(&db, "SELECT file_path FROM raw_history LIMIT 1").starts_with("midi/history/"));
 
         let last = db.last_raw_history(&s.id).unwrap().unwrap();
-        assert_eq!(last.file_path, format!("/vault/midi/history/{}/{}.mid", s.id, RAW_HISTORY_LIMIT + 1));
+        assert_eq!(last.file_path, native(&format!("/vault/midi/history/{}/{}.mid", s.id, RAW_HISTORY_LIMIT + 1)));
         assert_eq!(last.duration_ms, (RAW_HISTORY_LIMIT as u64 + 1) * 100);
         db.delete_raw_history(&last.id).unwrap();
         let next = db.last_raw_history(&s.id).unwrap().unwrap();
@@ -2595,7 +2611,7 @@ mod tests {
         assert_eq!(ids, vec!["c", "a", "b"]);
         assert_eq!(detail.takes[1].session_title, "Monday");
         assert_eq!(detail.takes[2].fragment.comments.len(), 1);
-        assert_eq!(detail.takes[2].fragment.file_path, "/vault/midi/fragments/b.mid");
+        assert_eq!(detail.takes[2].fragment.file_path, native("/vault/midi/fragments/b.mid"));
 
         let list = db.list_pieces().unwrap();
         assert_eq!(list.len(), 2);
@@ -2676,7 +2692,7 @@ mod tests {
         let a2 = &saved.tracks[0].clips[1];
         assert_eq!((a2.start_ms, a2.trim_start_ms, a2.length_ms), (8_000, 1_000, 9_000));
         assert_eq!(a2.fragment_title, "Theme A");
-        assert_eq!(a2.fragment_file_path, "/vault/midi/fragments/a.mid");
+        assert_eq!(a2.fragment_file_path, native("/vault/midi/fragments/a.mid"));
         assert_eq!(a2.fragment_duration_ms, 10_000);
         let bass = &saved.tracks[1];
         assert_eq!((bass.program, bass.volume, bass.muted, bass.sustain, bass.color), (32, 90, true, false, 2));
@@ -2775,7 +2791,7 @@ mod tests {
         let a = lib.iter().find(|f| f.id == "a").unwrap();
         assert_eq!(a.piece_title.as_deref(), Some("Nocturne"));
         assert_eq!((a.passage.as_str(), a.session_title.as_str()), ("Theme A", "Monday"));
-        assert_eq!((a.file_path.as_str(), a.duration_ms), ("/vault/midi/fragments/a.mid", 10_000));
+        assert_eq!((a.file_path.as_str(), a.duration_ms), (native("/vault/midi/fragments/a.mid").as_str(), 10_000));
         assert_eq!(a.session_id, s.id);
         let b = lib.iter().find(|f| f.id == "b").unwrap();
         assert_eq!(b.piece_title, None);
@@ -2830,7 +2846,7 @@ mod tests {
     fn melodies_and_attempts() {
         let db = db();
         let m = db.insert_melody(&melody("m1")).unwrap();
-        assert_eq!(m.file_path, "/vault/midi/melodies/melody_m1.mid");
+        assert_eq!(m.file_path, native("/vault/midi/melodies/melody_m1.mid"));
         assert_eq!(stored(&db, "SELECT file_path FROM melodies"), "midi/melodies/melody_m1.mid");
         db.insert_melody(&melody("m2")).unwrap();
 
@@ -3036,7 +3052,7 @@ mod tests {
         assert_eq!(library[0].score_id.as_deref(), Some(doc.id.as_str()));
         assert_eq!((library[0].bpm, library[0].duration_ms), (120, 4_000));
         assert_eq!(library[0].session_title, t!("backend.scores.sessionTitle"));
-        assert_eq!(library[0].file_path, "/vault/midi/fragments/frag_f1.mid");
+        assert_eq!(library[0].file_path, native("/vault/midi/fragments/frag_f1.mid"));
         // The hidden session never shows up in the list of sessions.
         assert!(db.list_sessions().unwrap().is_empty());
         assert_eq!(stored(&db, "SELECT kind FROM sessions"), "scores");
@@ -3133,7 +3149,7 @@ mod tests {
         let (db, doc, c) = score_in_composition();
         assert_eq!(db.count_compositions_using(&["f1".to_string()], None).unwrap(), 1);
         let path = db.delete_score(&doc.id).unwrap();
-        assert_eq!(path.as_deref(), Some("/vault/midi/fragments/frag_f1.mid"));
+        assert_eq!(path.as_deref(), Some(native("/vault/midi/fragments/frag_f1.mid").as_str()));
         assert!(db.get_score(&doc.id).is_err());
         assert!(db.get_fragment("f1").is_err());
         assert!(db.get_composition(&c.id).unwrap().tracks[0].clips.is_empty());
