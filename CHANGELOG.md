@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.8.0...v0.8.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* build Android only on release and add the Windows installer ([affa878](https://github.com/KeoH/piano-practice-tracker/commit/affa87857d78fa7bf939569f377a749e14fe834d))
+* build Android only on release and add the Windows installer ([1b70769](https://github.com/KeoH/piano-practice-tracker/commit/1b70769af071486be7a19f0e58fff0e4abc72104))
+* embed the Windows manifest in the unit-test executable ([8ad021c](https://github.com/KeoH/piano-practice-tracker/commit/8ad021c50b208a07bc90491147f39fe070d75cec))
+* keep rooted stored paths as they are on Windows ([e7165eb](https://github.com/KeoH/piano-practice-tracker/commit/e7165eb19160a0fba016a582d15672e3c5d5bd72))
+* make the remaining database path assertions platform-independent ([5f6adbd](https://github.com/KeoH/piano-practice-tracker/commit/5f6adbd936ab8d096b8c5cd0dfb26d8eb89976ed))
+* use the platform's path separators for stored vault paths ([e9f8354](https://github.com/KeoH/piano-practice-tracker/commit/e9f83545cce17600e5c54a32a5f42ac5f0be5e6a))
+
 ## [0.8.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.7.1...v0.8.0) (2026-11-20)
 
 
