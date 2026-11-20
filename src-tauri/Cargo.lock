@@ -2621,6 +2621,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cpal",
+ "embed-resource",
  "libc",
  "log",
  "midir",
