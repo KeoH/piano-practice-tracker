@@ -45,15 +45,19 @@ Environment on this machine:
   - `frontend`: build plus `npm run test:ci`;
   - `backend`: `cargo llvm-cov --lib`, with a placeholder `dist/` because `generate_context!` needs one to compile;
   - `backend-macos`: `cargo test --lib` on macOS, so the macOS build doesn't break unnoticed;
-  - `android`: `tauri android build --debug --apk` for arm64 and 32-bit ARM (SDK platform 37, NDK 27, JDK 17), uploaded as the `android-debug-apk` artifact. It is only built, never run or released;
+  - `backend-windows`: `cargo test --lib` on Windows, so the Windows build doesn't break unnoticed;
   - `coverage`: joins both summaries with `.github/scripts/coverage-summary.mjs` into the job summary and a sticky PR comment.
 
   The apt packages live in the composite action `.github/actions/setup-linux`.
 - **`.github/workflows/release.yml`** runs on every push to `main`:
   1. it calls `ci.yml`;
   2. **release-please** updates the release PR;
-  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release. The `bundle` matrix builds the `.deb` and `.AppImage` (ubuntu-22.04, for an older glibc) and a universal `.dmg` (macos-latest, `--target universal-apple-darwin`); `publish` uploads them with a single `SHA256SUMS.txt`.
-- **macOS:** `src-tauri/tauri.macos.conf.json` is merged over `tauri.conf.json` on macOS (`app` + `dmg` targets, ad-hoc signing with `signingIdentity: "-"`; the app is not notarized). Code that touches the OS must work on both: no `/proc` (the vault lock uses `libc::gethostname` / `kill(pid, 0)`), and links and folders open with `open` on macOS and `xdg-open` elsewhere (`open_with_desktop`). The frontend only tells them apart for hints (`core/platform.ts`).
+  3. when that PR is merged, it creates the `vX.Y.Z` tag and the GitHub Release. The `bundle` matrix builds the `.deb` and `.AppImage` (ubuntu-22.04, for an older glibc), a universal `.dmg` (macos-latest, `--target universal-apple-darwin`) and the NSIS `.exe` installer (windows-latest); `bundle-android` builds the signed release APK (arm64 and 32-bit ARM; SDK platform 37, NDK 27, JDK 17); `publish` uploads them all with a single `SHA256SUMS.txt`.
+  - **Android is built only here**, never on a PR: Android breakage shows up on the release run, so build it locally (`tauri android build --debug --apk`) after touching `plugins/android-midi` or the Android code.
+  - **Android signing:** the repository secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` hold the key; the workflow writes them to `gen/android/keystore.properties` (git-ignored), which `app/build.gradle.kts` reads for the release build type (without it the APK is unsigned). The key must never change: Android refuses to update an installed app signed with another one.
+- **macOS:** `src-tauri/tauri.macos.conf.json` is merged over `tauri.conf.json` on macOS (`app` + `dmg` targets, ad-hoc signing with `signingIdentity: "-"`; the app is not notarized).
+- **Windows:** `src-tauri/tauri.windows.conf.json` sets the `nsis` target (per-user install, unsigned, so SmartScreen warns).
+- **Code that touches the OS must work on all three:** no `/proc`; the vault lock uses `libc::gethostname` / `kill(pid, 0)` on Unix and `COMPUTERNAME` / `OpenProcess` (`windows-sys`) on Windows; `AppDirs::default_location` uses XDG on Unix and `%LOCALAPPDATA%` / `%APPDATA%` on Windows; links and folders open with `open` on macOS, `explorer` on Windows and `xdg-open` elsewhere (`open_with_desktop`). The frontend only tells them apart for hints (`core/platform.ts`).
 - **Versioning:**
   - Commits on `main` (squash-merge PR titles) follow **Conventional Commits**: `feat:` bumps the minor while on 0.x, `fix:` the patch, and `feat!:` or `BREAKING CHANGE` bumps the major.
   - Never edit the version by hand. release-please keeps it in sync in `.release-please-manifest.json`, `version.txt`, `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/tauri.conf.json` (see `release-please-config.json`), and writes `CHANGELOG.md`.

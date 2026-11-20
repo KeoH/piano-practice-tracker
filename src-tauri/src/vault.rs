@@ -135,18 +135,23 @@ struct VaultMarker {
     created_at: String,
 }
 
-/// `gethostname(2)`: Linux has `/proc`, macOS doesn't.
+/// The computer's name. Unix: `gethostname(2)` (Linux has `/proc`, macOS doesn't). Windows: `COMPUTERNAME`.
 fn hostname() -> String {
-    let mut buf = [0u8; 256];
-    // SAFETY: the buffer is valid for `buf.len()` bytes; the name is read up to the first NUL.
-    let ok = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0;
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    Some(String::from_utf8_lossy(&buf[..end]).trim().to_string())
-        .filter(|s| ok && !s.is_empty())
-        .unwrap_or_else(|| "this computer".to_string())
+    #[cfg(unix)]
+    let name = {
+        let mut buf = [0u8; 256];
+        // SAFETY: the buffer is valid for `buf.len()` bytes; the name is read up to the first NUL.
+        let ok = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) } == 0;
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        Some(String::from_utf8_lossy(&buf[..end]).trim().to_string()).filter(|_| ok)
+    };
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok().map(|s| s.trim().to_string());
+    name.filter(|s| !s.is_empty()).unwrap_or_else(|| "this computer".to_string())
 }
 
 /// `kill(pid, 0)` sends nothing, it only checks: `EPERM` means it exists but belongs to someone else.
+#[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else { return false };
     // pid 0 would address our own process group.
@@ -154,6 +159,28 @@ fn pid_alive(pid: u32) -> bool {
     pid > 0
         && (unsafe { libc::kill(pid, 0) } == 0
             || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM))
+}
+
+/// Windows: the process can be opened and has not exited (a process that exited but is still held
+/// open by someone reports an exit code other than `STILL_ACTIVE`).
+#[cfg(windows)]
+fn pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: the handle is checked before use and closed afterwards; `code` is a valid out pointer.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
+    }
 }
 
 fn read_lock(path: &Path) -> Option<LockInfo> {
@@ -490,6 +517,7 @@ mod tests {
         assert!(matches!(open_vault(&v, false).unwrap(), OpenOutcome::Opened(_)));
     }
 
+    #[cfg(unix)]
     #[test]
     fn normalize_resolves_symlinks_of_missing_paths() {
         let dir = tempfile::tempdir().unwrap();

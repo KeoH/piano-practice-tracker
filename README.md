@@ -9,7 +9,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/KeoH/piano-practice-tracker/release.yml?branch=main&label=CI&logo=github)](https://github.com/KeoH/piano-practice-tracker/actions/workflows/release.yml)
 [![Release](https://img.shields.io/github/v/release/KeoH/piano-practice-tracker?logo=github)](https://github.com/KeoH/piano-practice-tracker/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/KeoH/piano-practice-tracker)](LICENSE)
-![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Android%20(from%20source)-informational)
+![Platforms](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20Android-informational)
 <br />
 [![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 [![Angular](https://img.shields.io/badge/Angular-22-DD0031?logo=angular&logoColor=white)](https://angular.dev)
@@ -21,7 +21,7 @@
 
 </div>
 
-A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 22**. It works fully offline, and all your data lives in a folder you choose. It also builds for Android tablets and phones with a USB-MIDI keyboard (a debug APK you build yourself; see [Android](#android)).
+A desktop app for Linux, macOS and Windows, built with **Tauri v2** (Rust) and **Angular 22**. It works fully offline, and all your data lives in a folder you choose. It also builds for Android tablets and phones with a USB-MIDI keyboard (an APK in each release; see [Android](#android)).
 
 ## Features
 
@@ -96,7 +96,7 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 
 ## Installation
 
-Download the latest `.deb` or `.AppImage` (Linux) or `.dmg` (macOS) from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
+Download the latest `.deb` or `.AppImage` (Linux), `.dmg` (macOS), `.exe` (Windows) or `.apk` (Android) from [Releases](https://github.com/KeoH/piano-practice-tracker/releases). Each release includes a `SHA256SUMS.txt`:
 
 ```bash
 sha256sum -c SHA256SUMS.txt --ignore-missing
@@ -127,14 +127,20 @@ xattr -dr com.apple.quarantine "/Applications/Piano Practice Tracker.app"
 
 macOS has no system SoundFont, so the app starts with its synthetic piano and most instruments are unavailable in the composer. Download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) (**Settings → Sound** has a button for it) and either choose the `.sf2` there or copy it to `~/Library/Audio/Sounds/Banks`, where the app finds it on its own.
 
+### Windows
+
+Download the `.exe` installer and run it; it installs for your user, with no administrator rights. The app is not code-signed, so Windows SmartScreen warns on the first launch: click **More info → Run anyway** (check the file against `SHA256SUMS.txt` first).
+
+Windows has no system SoundFont either, so the app starts with its synthetic piano: download a General MIDI SoundFont such as [GeneralUser GS](https://github.com/mrbumpy409/GeneralUser-GS) and choose the `.sf2` in **Settings → Sound**.
+
 ### Android
 
-Android is built from source (there is no published APK yet; the CI builds a debug APK on every PR and attaches it to the run as the `android-debug-apk` artifact) and only a debug build has been tried, on a Samsung Galaxy Tab A (SM-T510, Android 11, 32-bit ARM) with a USB-MIDI keyboard.
+Each release includes a signed `.apk` (arm64 and 32-bit ARM) that you install by hand: copy it to the device and open it, or `adb install -r`. Android is only built on release, not on every PR, and it has only been tried with a debug build, on a Samsung Galaxy Tab A (SM-T510, Android 11, 32-bit ARM) with a USB-MIDI keyboard.
 
 - The app keeps a **single vault** in the app's external files directory (`Android/data/dev.fmanzano.pianotracker/files/Documents/vault`), which a computer can read over USB (MTP) with no permissions. There is no folder picker and no "reveal vault".
 - MIDI input comes from the Android `MidiManager` (a Kotlin plugin), so a class-compliant USB keyboard needs an OTG adapter.
 
-Requirements: JDK 17, the Android SDK (platform 37, build-tools 36) and NDK 27, with `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` set, plus the Rust targets:
+To build it yourself, the requirements are JDK 17, the Android SDK (platform 37, build-tools 36) and NDK 27, with `JAVA_HOME`, `ANDROID_HOME` and `NDK_HOME` set, plus the Rust targets:
 
 ```bash
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
