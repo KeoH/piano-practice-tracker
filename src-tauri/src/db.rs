@@ -1074,7 +1074,8 @@ impl Database {
 
     /// Absolute path for a stored path.
     fn load_path(&self, stored: String) -> String {
-        if stored.is_empty() || Path::new(&stored).is_absolute() {
+        // A leading `/` is a rooted path too: on Windows `Path::is_absolute` wants a drive letter as well.
+        if stored.is_empty() || stored.starts_with('/') || Path::new(&stored).is_absolute() {
             stored
         } else {
             // Component by component, so the separators are the platform's (no `C:\vault\midi/raw/x`).
@@ -2300,7 +2301,8 @@ mod tests {
         assert_eq!(stored(&db, "SELECT file_path FROM midi_fragments"), "midi/fragments/f1.mid");
 
         let m = db.insert_media(&s.id, "/vault/media/a.png").unwrap();
-        assert_eq!(m.local_path, native("/vault/media/a.png"));
+        // `insert_media` echoes the path it was given.
+        assert_eq!(m.local_path, "/vault/media/a.png");
         assert_eq!(stored(&db, "SELECT local_path FROM session_media"), "media/a.png");
 
         let d = db.get_session_detail(&s.id).unwrap();
