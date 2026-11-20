@@ -2296,17 +2296,17 @@ mod tests {
         assert_eq!(stored(&db, "SELECT raw_midi_path FROM sessions"), "midi/raw/raw.mid");
 
         let f = db.insert_fragment("f1", &s.id, "One", "", "/vault/midi/fragments/f1.mid", 100, 1).unwrap();
-        assert_eq!(f.file_path, "/vault/midi/fragments/f1.mid");
+        assert_eq!(f.file_path, native("/vault/midi/fragments/f1.mid"));
         assert_eq!(stored(&db, "SELECT file_path FROM midi_fragments"), "midi/fragments/f1.mid");
 
         let m = db.insert_media(&s.id, "/vault/media/a.png").unwrap();
-        assert_eq!(m.local_path, "/vault/media/a.png");
+        assert_eq!(m.local_path, native("/vault/media/a.png"));
         assert_eq!(stored(&db, "SELECT local_path FROM session_media"), "media/a.png");
 
         let d = db.get_session_detail(&s.id).unwrap();
-        assert_eq!(d.session.raw_midi_path.as_deref(), Some("/vault/midi/raw/raw.mid"));
-        assert_eq!(d.fragments[0].file_path, "/vault/midi/fragments/f1.mid");
-        assert_eq!(d.media[0].local_path, "/vault/media/a.png");
+        assert_eq!(d.session.raw_midi_path.as_deref(), Some(native("/vault/midi/raw/raw.mid").as_str()));
+        assert_eq!(d.fragments[0].file_path, native("/vault/midi/fragments/f1.mid"));
+        assert_eq!(d.media[0].local_path, native("/vault/media/a.png"));
 
         // A path outside the vault is kept as is.
         db.set_session_raw_midi(&s.id, "/other/raw.mid", 1).unwrap();
@@ -2564,7 +2564,7 @@ mod tests {
 
         // Deleting the session also hands back the snapshots.
         let paths = db.delete_session(&s.id).unwrap();
-        assert_eq!(paths.iter().filter(|p| p.contains("/midi/history/")).count(), RAW_HISTORY_LIMIT);
+        assert_eq!(paths.iter().filter(|p| p.replace('\\', "/").contains("/midi/history/")).count(), RAW_HISTORY_LIMIT);
         let n: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM raw_history", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
     }
@@ -2803,7 +2803,7 @@ mod tests {
             title: "Nocturne".into(),
             source: MelodySource::Fragment,
             source_fragment_id: Some("f1".into()),
-            file_path: format!("/vault/midi/melodies/melody_{id}.mid"),
+            file_path: native(&format!("/vault/midi/melodies/melody_{id}.mid")),
             bpm: 90,
             duration_ms: 8000,
             note_count: 4,
@@ -2834,7 +2834,7 @@ mod tests {
                 latency_comp_ms: 15,
                 duration_ms: 10_000,
             },
-            played_midi_path: Some(format!("/vault/midi/attempts/attempt_{id}.mid")),
+            played_midi_path: Some(native(&format!("/vault/midi/attempts/attempt_{id}.mid"))),
             details: AttemptDetails {
                 notes: vec![NoteOutcome { status: NoteStatus::Perfect, offset_ms: Some(-5) }, NoteOutcome { status: NoteStatus::Missed, offset_ms: None }],
                 errors: Vec::new(),
@@ -2855,7 +2855,7 @@ mod tests {
         assert!(list.iter().all(|s| s.attempt_count == 0 && s.best_score.is_none()));
 
         let a = db.insert_attempt(&attempt("a1", "m1", "2099-10-01T10:00:00.000Z", 700, true)).unwrap();
-        assert_eq!(a.played_midi_path.as_deref(), Some("/vault/midi/attempts/attempt_a1.mid"));
+        assert_eq!(a.played_midi_path.as_deref(), Some(native("/vault/midi/attempts/attempt_a1.mid").as_str()));
         assert_eq!(stored(&db, "SELECT played_midi_path FROM challenge_attempts"), "midi/attempts/attempt_a1.mid");
         assert_eq!(a, attempt("a1", "m1", "2099-10-01T10:00:00.000Z", 700, true));
         // An incomplete attempt never is the best one.
@@ -2868,7 +2868,7 @@ mod tests {
         assert_eq!(list[0].best_score, Some(700));
         assert_eq!(list[0].recent_accuracy, vec![0.75]);
         assert_eq!(list[0].mastered_tempo_pct, None);
-        assert_eq!(list[0].melody.file_path, "/vault/midi/melodies/melody_m1.mid");
+        assert_eq!(list[0].melody.file_path, native("/vault/midi/melodies/melody_m1.mid"));
         assert_eq!(list[0].last_attempt_at.as_deref(), Some("2099-10-02T10:00:00.000Z"));
 
         let attempts = db.list_attempts("m1").unwrap();
@@ -2878,11 +2878,14 @@ mod tests {
         assert_eq!(db.rename_melody("m1", "Nocturne op. 9").unwrap().title, "Nocturne op. 9");
         assert!(db.rename_melody("nope", "x").is_err());
 
-        assert_eq!(db.delete_attempt("a2").unwrap().as_deref(), Some("/vault/midi/attempts/attempt_a2.mid"));
+        assert_eq!(db.delete_attempt("a2").unwrap().as_deref(), Some(native("/vault/midi/attempts/attempt_a2.mid").as_str()));
         assert!(db.get_attempt("a2").is_err());
 
         let paths = db.delete_melody("m1").unwrap();
-        assert_eq!(paths, vec!["/vault/midi/melodies/melody_m1.mid", "/vault/midi/attempts/attempt_a1.mid"]);
+        assert_eq!(
+            paths,
+            vec![native("/vault/midi/melodies/melody_m1.mid"), native("/vault/midi/attempts/attempt_a1.mid")]
+        );
         assert!(db.get_attempt("a1").is_err()); // cascade
         assert!(db.get_melody("m1").is_err());
         assert_eq!(db.list_melodies().unwrap().len(), 1);
@@ -2919,7 +2922,7 @@ mod tests {
     // ----------------------------- v6: scores and the composer's tempo -----------------------------
 
     fn score_fragment(id: &str, duration_ms: u64) -> ScoreFragment {
-        ScoreFragment { fragment_id: id.into(), file_path: format!("/vault/midi/fragments/frag_{id}.mid"), duration_ms }
+        ScoreFragment { fragment_id: id.into(), file_path: native(&format!("/vault/midi/fragments/frag_{id}.mid")), duration_ms }
     }
 
     fn note(id: &str, tick: u32) -> ScoreNoteDto {
