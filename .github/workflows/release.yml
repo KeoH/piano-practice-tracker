@@ -60,9 +60,18 @@ jobs:
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             build-args: --target universal-apple-darwin
             installers: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          # NSIS installer (per user, no admin rights); tauri.windows.conf.json sets the target.
+          - name: Windows
+            os: windows-latest
+            rust-targets: ''
+            build-args: ''
+            installers: src-tauri/target/release/bundle/nsis/*.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
         with:
@@ -111,9 +120,96 @@ jobs:
           path: ${{ runner.temp }}/installers
           if-no-files-found: error
 
+  # The release APK (arm64 and 32-bit ARM), signed with the key in the repository secrets. Sideloaded
+  # (`adb install` or the file itself), never published to a store. The signing key must never change:
+  # Android refuses to update an installed app with an APK signed by another key.
+  bundle-android:
+    name: Installers (Android)
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      NDK_VERSION: 27.3.13750724
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: android
+
+      # The runner's SDK may not have the platform the project compiles against. The versions match
+      # app/build.gradle.kts (compileSdk 37) and the NDK that was tried locally.
+      - name: Android SDK and NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "platforms;android-37.0" "build-tools;36.0.0" "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      # app/build.gradle.kts reads gen/android/keystore.properties (git-ignored) for the release signing.
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!v}" ] || { echo "::error::The ANDROID_${v} secret is not set"; exit 1; }
+          done
+          dir="$GITHUB_WORKSPACE/src-tauri/gen/android"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.keystore"
+            echo "password=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > "$dir/keystore.properties"
+
+      - run: npm ci
+
+      # beforeBuildCommand builds the frontend; the CLI regenerates the git-ignored Gradle files.
+      - name: Build the APK
+        run: npx tauri android build --apk --target aarch64 armv7
+
+      - name: Collect the APK
+        run: |
+          out="$RUNNER_TEMP/installers"
+          mkdir -p "$out"
+          apk=src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          [ -f "$apk" ] || { echo "::error::$apk was not built (unsigned?)"; ls -R src-tauri/gen/android/app/build/outputs/apk; exit 1; }
+          cp "$apk" "$out/piano-practice-tracker_${TAG#v}_android.apk"
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-Android
+          path: ${{ runner.temp }}/installers
+          if-no-files-found: error
+
   publish:
     name: Upload installers
-    needs: [release-please, bundle]
+    needs: [release-please, bundle, bundle-android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

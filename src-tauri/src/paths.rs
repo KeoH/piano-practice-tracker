@@ -140,7 +140,21 @@ impl AppDirs {
         }
     }
 
+    /// Windows: `%LOCALAPPDATA%\piano-tracker` for data and `%APPDATA%\piano-tracker` for the configuration.
+    #[cfg(windows)]
+    pub fn default_location() -> Self {
+        let dir = |var: &str| {
+            std::env::var_os(var)
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .unwrap_or_else(std::env::temp_dir)
+                .join("piano-tracker")
+        };
+        Self::new(dir("LOCALAPPDATA"), dir("APPDATA"))
+    }
+
     /// XDG locations (`~/.local/share/piano-tracker` and `~/.config/piano-tracker`).
+    #[cfg(not(windows))]
     pub fn default_location() -> Self {
         let home = std::env::var_os("HOME").map(PathBuf::from);
         let xdg = |var: &str, fallback: &[&str]| {

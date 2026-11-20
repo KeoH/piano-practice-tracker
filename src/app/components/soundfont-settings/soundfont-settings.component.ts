@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signa
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
 import type { SoundfontCandidate, SoundfontInfo } from '../../core/models';
-import { isMacOS } from '../../core/platform';
+import { isMacOS, isWindows } from '../../core/platform';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../icon/icon.component';
@@ -59,8 +59,8 @@ import { RichTextComponent } from '../rich-text/rich-text.component';
         @if (onlyBuiltin()) {
           <div class="rounded-xl border border-line bg-ink-850 p-4 text-[13px] leading-relaxed text-muted">
             <strong class="mb-1 block font-semibold text-fg">{{ 'settings.sound.onlyBuiltinTitle' | t }}</strong>
-            @if (isMac) {
-              <app-rich-text [text]="'settings.sound.onlyBuiltinTextMac' | t" />
+            @if (isMac || isWindows) {
+              <app-rich-text [text]="(isMac ? 'settings.sound.onlyBuiltinTextMac' : 'settings.sound.onlyBuiltinTextWindows') | t" />
               <button type="button" class="btn mt-3" (click)="downloadGm()">
                 <app-icon name="external" [size]="15" /> {{ 'settings.sound.downloadGm' | t }}
               </button>
@@ -87,6 +87,8 @@ export class SoundfontSettingsComponent {
   protected readonly info = signal<SoundfontInfo | null>(null);
   /** macOS has no package with a GM SoundFont: the hint points to a download instead of apt. */
   protected readonly isMac = isMacOS();
+  /** Windows has none either: same download hint, without the macOS folder. */
+  protected readonly isWindows = isWindows();
   private readonly choosing = signal(false);
   protected readonly busy = computed(() => this.choosing() || !!this.info()?.loading);
   protected readonly onlyBuiltin = computed(() => {

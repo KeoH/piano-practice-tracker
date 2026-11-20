@@ -5,3 +5,8 @@
 export function isMacOS(userAgent: string = globalThis.navigator?.userAgent ?? ''): boolean {
   return userAgent.includes('Macintosh');
 }
+
+/** The webview runs on Windows (WebView2 says `Windows NT`). Same restriction as `isMacOS`. */
+export function isWindows(userAgent: string = globalThis.navigator?.userAgent ?? ''): boolean {
+  return userAgent.includes('Windows');
+}

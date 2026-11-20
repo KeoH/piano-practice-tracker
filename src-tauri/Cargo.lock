@@ -2616,11 +2616,12 @@ dependencies = [
 
 [[package]]
 name = "piano-tracker"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "cpal",
+ "embed-resource",
  "libc",
  "log",
  "midir",
@@ -2638,6 +2639,7 @@ dependencies = [
  "tauri-plugin-log",
  "tempfile",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
