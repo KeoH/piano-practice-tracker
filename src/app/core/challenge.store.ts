@@ -1,3 +1,4 @@
+import { mapScoreToMelody, statesById } from './challenge-score';
 import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { bestAttempt, clampTempo, effectiveBpm, hitsUpTo } from './challenge-stats';
 import { ConfirmService } from './confirm.service';
@@ -72,6 +73,16 @@ export class ChallengeStore {
 
   readonly melody = computed<MelodyDto | null>(() => this.detail()?.melody ?? null);
   readonly notes = computed(() => this.detail()?.notes ?? []);
+  /**
+   * For a melody that came from a score: which notes of the score each note of the melody is, so the
+   * challenge can show the notation. `null` for the others, or if the score no longer matches.
+   */
+  readonly scoreMap = computed(() => mapScoreToMelody(this.detail()?.score ?? null, this.notes()));
+  /** How each note of the score went in the attempt shown (by note id). */
+  readonly scoreStates = computed(() => {
+    const map = this.scoreMap();
+    return map ? statesById(map, this.noteStates()) : null;
+  });
   readonly attempts = computed(() => this.detail()?.attempts ?? []);
   readonly isRunning = computed(() => this.phase() === 'countin' || this.phase() === 'playing');
   /** Best completed attempt at the chosen tempo. */
@@ -225,7 +236,7 @@ export class ChallengeStore {
   }
 
   /** Turns a fragment into a challenge; returns the new melody. */
-  async createFromFragment(f: FragmentDto): Promise<MelodyDto | null> {
+  async createFromFragment(f: Pick<FragmentDto, 'id'>): Promise<MelodyDto | null> {
     try {
       const m = await this.api.createMelodyFromFragment(f.id);
       await this.refreshList();

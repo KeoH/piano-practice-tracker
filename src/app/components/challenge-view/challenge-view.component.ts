@@ -11,6 +11,7 @@ import { RecordingStore } from '../../core/recording.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { AttemptHistoryComponent } from '../attempt-history/attempt-history.component';
 import { AttemptResultComponent } from '../attempt-result/attempt-result.component';
+import { ChallengeStaffComponent } from '../challenge-staff/challenge-staff.component';
 import { IconComponent } from '../icon/icon.component';
 import { PianoRollComponent } from '../piano-roll/piano-roll.component';
 import { RichTextComponent } from '../rich-text/rich-text.component';
@@ -25,6 +26,7 @@ import { RichTextComponent } from '../rich-text/rich-text.component';
   imports: [
     IconComponent,
     PianoRollComponent,
+    ChallengeStaffComponent,
     AttemptResultComponent,
     AttemptHistoryComponent,
     RichTextComponent,

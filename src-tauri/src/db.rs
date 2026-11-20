@@ -23,12 +23,13 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use crate::models::{
     AttemptDetails, AttemptDto, AttemptSummaryDto, CompositionClipDto, CompositionDto, CompositionSummaryDto,
     CompositionTrackDto, FragmentDto, LibraryFragmentDto, MelodyDto, MelodySource, MelodySummaryDto, PieceDetailDto,
-    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, SessionDetailDto, SessionDto, SessionMediaDto,
-    SessionSummaryDto, TimelineCommentDto,
+    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, ScoreDto, ScoreNoteDto, ScoreSummaryDto, SessionDetailDto,
+    SessionDto, SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
 };
 use crate::paths::relative_to;
+use crate::score;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 7;
 /// Trims of a raw take that can be undone; older snapshots are deleted.
 pub const RAW_HISTORY_LIMIT: usize = 10;
 /// Tracks of a composition: one MIDI channel each, skipping channel 10 (GM percussion).
@@ -37,6 +38,12 @@ pub const COMPOSITION_MAX_TRACKS: usize = 15;
 pub const CLIP_MAX_REPEATS: u32 = 16;
 /// Transposition of a clip, in semitones either way.
 pub const CLIP_MAX_TRANSPOSE: i32 = 24;
+/// Speed of a clip in percent (the composition's tempo over the fragment's, so a wide range).
+pub const CLIP_MIN_RATE_PCT: u32 = 25;
+pub const CLIP_MAX_RATE_PCT: u32 = 400;
+/// `kind` of the sessions the user records, and of the hidden one that holds the fragments of scores.
+pub const SESSION_KIND_PRACTICE: &str = "practice";
+pub const SESSION_KIND_SCORES: &str = "scores";
 
 /// Also used by tests elsewhere to build a database from the previous version.
 pub(crate) const MIGRATION_V1: &str = r#"
@@ -239,6 +246,36 @@ CREATE TABLE IF NOT EXISTS challenge_attempts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_attempts_melody ON challenge_attempts(melody_id, created_at);
+"#;
+
+/// v6: the score editor and the composer's tempo. A score keeps its notation as JSON and generates a
+/// fragment (kept in a hidden session of `kind = 'scores'`) each time it is saved. A composition can
+/// have a tempo, and a clip plays its window at `rate_pct` of the speed it was written at.
+const MIGRATION_V6: &str = r#"
+ALTER TABLE sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'practice';
+ALTER TABLE compositions ADD COLUMN bpm INTEGER;
+ALTER TABLE composition_clips ADD COLUMN rate_pct INTEGER NOT NULL DEFAULT 100;
+
+CREATE TABLE IF NOT EXISTS scores (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    bpm INTEGER NOT NULL,
+    beats INTEGER NOT NULL,
+    beat_unit INTEGER NOT NULL,
+    bars INTEGER NOT NULL,
+    data_json TEXT NOT NULL,
+    fragment_id TEXT REFERENCES midi_fragments(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scores_fragment ON scores(fragment_id);
+"#;
+
+/// v7: a melody that comes from a score keeps a frozen copy of its notation (the whole `ScoreDto` as
+/// JSON), so the challenge screen can draw it on a staff and the history never breaks if the score
+/// changes. `NULL` for melodies recorded by hand, imported or bundled.
+const MIGRATION_V7: &str = r#"
+ALTER TABLE melodies ADD COLUMN score_json TEXT;
 "#;
 
 /// Vault sub-paths that identify each file type when converting old paths.
@@ -464,7 +501,7 @@ fn to_u8(v: i64) -> u8 {
 
 /// Clip columns with the fragment they point to (`c` = clip, `f` = fragment).
 const CLIP_COLS_C: &str = "c.id, c.fragment_id, c.start_ms, c.trim_start_ms, c.length_ms, c.repeats, c.transpose, \
-     f.title, f.file_path, f.duration_ms";
+     c.rate_pct, f.title, f.file_path, f.duration_ms, f.bpm, sc.id";
 
 fn map_clip(r: &Row) -> rusqlite::Result<CompositionClipDto> {
     Ok(CompositionClipDto {
@@ -475,9 +512,12 @@ fn map_clip(r: &Row) -> rusqlite::Result<CompositionClipDto> {
         length_ms: to_u64(r.get(4)?),
         repeats: to_u32(r.get(5)?),
         transpose: r.get(6)?,
-        fragment_title: r.get(7)?,
-        fragment_file_path: r.get(8)?,
-        fragment_duration_ms: to_u64(r.get(9)?),
+        rate_pct: to_u32(r.get(7)?),
+        fragment_title: r.get(8)?,
+        fragment_file_path: r.get(9)?,
+        fragment_duration_ms: to_u64(r.get(10)?),
+        fragment_bpm: to_u32(r.get(11)?),
+        fragment_score_id: r.get(12)?,
     })
 }
 
@@ -495,18 +535,25 @@ fn map_track(r: &Row) -> rusqlite::Result<CompositionTrackDto> {
     })
 }
 
-/// End of the clip on the timeline, repeats included.
+/// End of the clip on the timeline, repeats included. The window is `length_ms` of the fragment's
+/// own time and plays at `rate_pct`, so it takes `length_ms * 100 / rate_pct` (rounded up, so that
+/// the millisecond end never falls short of the microsecond one the mixdown uses).
 pub fn clip_end_ms(clip: &CompositionClipDto) -> u64 {
-    clip.start_ms.saturating_add(clip.length_ms.saturating_mul(u64::from(clip.repeats)))
+    span_end_ms(clip.start_ms, clip.length_ms, clip.repeats, clip.rate_pct)
+}
+
+fn span_end_ms(start_ms: u64, length_ms: u64, repeats: u32, rate_pct: u32) -> u64 {
+    let played = length_ms.saturating_mul(u64::from(repeats)).saturating_mul(100);
+    start_ms.saturating_add(played.div_ceil(u64::from(rate_pct.max(1))))
 }
 
 /// The composition with its tracks and clips (paths as stored).
 fn fetch_composition(conn: &Connection, composition_id: &str) -> Result<CompositionDto, String> {
-    let (title, created_at, updated_at) = conn
+    let (title, bpm, created_at, updated_at) = conn
         .query_row(
-            "SELECT title, created_at, updated_at FROM compositions WHERE id = ?1",
+            "SELECT title, bpm, created_at, updated_at FROM compositions WHERE id = ?1",
             params![composition_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.map(to_u32), r.get(2)?, r.get(3)?)),
         )
         .optional()
         .map_err(db_err)?
@@ -524,14 +571,14 @@ fn fetch_composition(conn: &Connection, composition_id: &str) -> Result<Composit
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {CLIP_COLS_C} FROM composition_clips c JOIN midi_fragments f ON f.id = c.fragment_id \
-             WHERE c.track_id = ?1 ORDER BY c.start_ms ASC"
+             LEFT JOIN scores sc ON sc.fragment_id = f.id WHERE c.track_id = ?1 ORDER BY c.start_ms ASC"
         ))
         .map_err(db_err)?;
     for track in &mut tracks {
         let rows = stmt.query_map(params![track.id], map_clip).map_err(db_err)?;
         track.clips = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
     }
-    Ok(CompositionDto { id: composition_id.to_string(), title, created_at, updated_at, tracks })
+    Ok(CompositionDto { id: composition_id.to_string(), title, bpm, created_at, updated_at, tracks })
 }
 
 /// Checks a composition before saving it: track limit, instrument and volume ranges, clips inside
@@ -539,6 +586,11 @@ fn fetch_composition(conn: &Connection, composition_id: &str) -> Result<Composit
 fn validate_composition(conn: &Connection, doc: &CompositionDto) -> Result<(), String> {
     if doc.tracks.len() > COMPOSITION_MAX_TRACKS {
         return Err(t!("backend.composition.tooManyTracks", max = COMPOSITION_MAX_TRACKS));
+    }
+    if let Some(bpm) = doc.bpm {
+        if !(score::MIN_BPM..=score::MAX_BPM).contains(&bpm) {
+            return Err(t!("backend.composition.bpm", min = score::MIN_BPM, max = score::MAX_BPM));
+        }
     }
     for track in &doc.tracks {
         if track.program > 127 {
@@ -570,12 +622,182 @@ fn validate_composition(conn: &Connection, doc: &CompositionDto) -> Result<(), S
             if clip.transpose.abs() > CLIP_MAX_TRANSPOSE {
                 return Err(t!("backend.composition.transpose", max = CLIP_MAX_TRANSPOSE));
             }
+            if !(CLIP_MIN_RATE_PCT..=CLIP_MAX_RATE_PCT).contains(&clip.rate_pct) {
+                return Err(t!("backend.composition.rate", min = CLIP_MIN_RATE_PCT, max = CLIP_MAX_RATE_PCT));
+            }
             spans.push((clip.start_ms, clip_end_ms(clip)));
         }
         spans.sort_unstable();
         if spans.windows(2).any(|w| w[1].0 < w[0].1) {
             return Err(t!("backend.composition.overlap", track = track.name));
         }
+    }
+    Ok(())
+}
+
+
+// ---------------------------------------------------------------------------
+// Scores
+// ---------------------------------------------------------------------------
+
+const SCORE_COLS: &str = "id, title, bpm, beats, beat_unit, bars, data_json, fragment_id, created_at, updated_at";
+
+/// What `scores.data_json` holds: the notation that has no column of its own (so adding to it never
+/// needs a migration, and a score written before a field existed reads it as its default).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ScoreBody {
+    treble: Vec<ScoreNoteDto>,
+    bass: Vec<ScoreNoteDto>,
+    #[serde(default)]
+    pickup_ticks: u32,
+    #[serde(default)]
+    repeat: bool,
+    /// The score ends with the bar that completes its pickup, which `bars` counts. Scores stored before
+    /// that was so lack it (`false`): they are read with that bar added.
+    #[serde(default)]
+    closing_bar: bool,
+}
+
+fn map_score(r: &Row) -> rusqlite::Result<ScoreDto> {
+    let json: String = r.get(6)?;
+    let body: ScoreBody = serde_json::from_str(&json)
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?;
+    Ok(ScoreDto {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        bpm: to_u32(r.get(2)?),
+        beats: to_u32(r.get(3)?),
+        beat_unit: to_u32(r.get(4)?),
+        bars: {
+            let bars = to_u32(r.get(5)?);
+            if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
+        },
+        pickup_ticks: body.pickup_ticks,
+        repeat: body.repeat,
+        treble: body.treble,
+        bass: body.bass,
+        fragment_id: r.get(7)?,
+        created_at: r.get(8)?,
+        updated_at: r.get(9)?,
+    })
+}
+
+fn fetch_score(conn: &Connection, score_id: &str) -> Result<ScoreDto, String> {
+    conn.query_row(&format!("SELECT {SCORE_COLS} FROM scores WHERE id = ?1"), params![score_id], map_score)
+        .optional()
+        .map_err(db_err)?
+        .ok_or_else(|| t!("backend.scores.missing", id = score_id))
+}
+
+/// The hidden session that holds the fragments of scores (created the first time one is saved).
+fn ensure_scores_session(conn: &Connection) -> Result<String, String> {
+    let existing: Option<String> = conn
+        .query_row("SELECT id FROM sessions WHERE kind = ?1 LIMIT 1", params![SESSION_KIND_SCORES], |r| r.get(0))
+        .optional()
+        .map_err(db_err)?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO sessions (id, title, session_date, bpm, raw_midi_path, raw_duration_ms, markdown_notes, \
+         updated_at, kind) VALUES (?1, ?2, ?3, ?4, NULL, 0, '', ?5, ?6)",
+        params![id, t!("backend.scores.sessionTitle"), today(), i64::from(score::DEFAULT_BPM), now_rfc3339(), SESSION_KIND_SCORES],
+    )
+    .map_err(db_err)?;
+    Ok(id)
+}
+
+/// The fragment generated from a score, as `save_score` stores it.
+pub struct ScoreFragment {
+    pub fragment_id: String,
+    /// Absolute path of the `.mid` the caller already wrote.
+    pub file_path: String,
+    pub duration_ms: u64,
+}
+
+/// After a score was saved, brings the clips that use its fragment up to date: the windows follow the
+/// music when the tempo changes (they are in the fragment's own time) and stay inside the fragment,
+/// the speed follows the composition's tempo, and a clip that grew pushes the next ones on its track.
+fn adapt_clips(tx: &Connection, fragment_id: &str, old_bpm: u32, new_bpm: u32, duration_ms: u64) -> Result<(), String> {
+    let clips: Vec<(String, String, u64, u64, u32, Option<u32>)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT k.id, k.track_id, k.trim_start_ms, k.length_ms, k.rate_pct, c.bpm FROM composition_clips k \
+                 JOIN composition_tracks t ON t.id = k.track_id JOIN compositions c ON c.id = t.composition_id \
+                 WHERE k.fragment_id = ?1",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map(params![fragment_id], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    to_u64(r.get(2)?),
+                    to_u64(r.get(3)?),
+                    to_u32(r.get(4)?),
+                    r.get::<_, Option<i64>>(5)?.map(to_u32),
+                ))
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+    };
+    let scale = |ms: u64| -> u64 {
+        if old_bpm == new_bpm {
+            ms
+        } else {
+            (ms as f64 * f64::from(old_bpm) / f64::from(new_bpm.max(1))).round() as u64
+        }
+    };
+    let mut tracks: Vec<String> = Vec::new();
+    for (id, track_id, trim, length, rate, composition_bpm) in clips {
+        let trim_ms = scale(trim).min(duration_ms);
+        let length_ms = scale(length).min(duration_ms - trim_ms);
+        let rate_pct = composition_bpm.map_or(rate, |bpm| {
+            let pct = (f64::from(bpm) * 100.0 / f64::from(new_bpm.max(1))).round() as u32;
+            pct.clamp(CLIP_MIN_RATE_PCT, CLIP_MAX_RATE_PCT)
+        });
+        if length_ms == 0 {
+            tx.execute("DELETE FROM composition_clips WHERE id = ?1", params![id]).map_err(db_err)?;
+        } else if (trim_ms, length_ms, rate_pct) != (trim, length, rate) {
+            tx.execute(
+                "UPDATE composition_clips SET trim_start_ms = ?1, length_ms = ?2, rate_pct = ?3 WHERE id = ?4",
+                params![to_i64(trim_ms), to_i64(length_ms), i64::from(rate_pct), id],
+            )
+            .map_err(db_err)?;
+        }
+        if !tracks.contains(&track_id) {
+            tracks.push(track_id);
+        }
+    }
+    for track_id in &tracks {
+        resolve_track_overlaps(tx, track_id)?;
+    }
+    Ok(())
+}
+
+/// Moves clips to the right until none overlaps the one before it.
+fn resolve_track_overlaps(tx: &Connection, track_id: &str) -> Result<(), String> {
+    let clips: Vec<(String, u64, u64, u32, u32)> = {
+        let mut stmt = tx
+            .prepare(
+                "SELECT id, start_ms, length_ms, repeats, rate_pct FROM composition_clips WHERE track_id = ?1 \
+                 ORDER BY start_ms ASC",
+            )
+            .map_err(db_err)?;
+        let rows = stmt
+            .query_map(params![track_id], |r| {
+                Ok((r.get(0)?, to_u64(r.get(1)?), to_u64(r.get(2)?), to_u32(r.get(3)?), to_u32(r.get(4)?)))
+            })
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?
+    };
+    let mut cursor = 0u64;
+    for (id, start, length, repeats, rate) in clips {
+        let start = start.max(cursor);
+        tx.execute("UPDATE composition_clips SET start_ms = ?1 WHERE id = ?2", params![to_i64(start), id])
+            .map_err(db_err)?;
+        cursor = span_end_ms(start, length, repeats, rate);
     }
     Ok(())
 }
@@ -812,7 +1034,27 @@ impl Database {
             tx.execute_batch("PRAGMA user_version = 5;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
+        if version < 6 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V6)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 6, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 6;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
+        if version < 7 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V7)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 7, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 7;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
         Ok(())
+    }
+
+    /// Runs raw SQL (tests of other modules that need to put the database in an older state).
+    #[cfg(test)]
+    pub(crate) fn execute_for_tests(&self, sql: &str) {
+        self.lock().unwrap().execute_batch(sql).unwrap();
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, String> {
@@ -892,7 +1134,7 @@ impl Database {
                 "SELECT s.id, s.title, s.session_date, s.bpm, s.raw_duration_ms, \
                  (SELECT COUNT(*) FROM midi_fragments f WHERE f.session_id = s.id), \
                  s.updated_at \
-                 FROM sessions s ORDER BY s.session_date DESC, s.updated_at DESC",
+                 FROM sessions s WHERE s.kind = 'practice' ORDER BY s.session_date DESC, s.updated_at DESC",
             )
             .map_err(db_err)?;
         let rows = stmt
@@ -1362,7 +1604,7 @@ impl Database {
                  (SELECT COUNT(*) FROM composition_tracks t WHERE t.composition_id = c.id), \
                  (SELECT COUNT(*) FROM composition_clips k JOIN composition_tracks t ON t.id = k.track_id \
                   WHERE t.composition_id = c.id), \
-                 (SELECT COALESCE(MAX(k.start_ms + k.length_ms * k.repeats), 0) FROM composition_clips k \
+                 (SELECT COALESCE(MAX(k.start_ms + (k.length_ms * k.repeats * 100 + k.rate_pct - 1) / k.rate_pct), 0) FROM composition_clips k \
                   JOIN composition_tracks t ON t.id = k.track_id WHERE t.composition_id = c.id) \
                  FROM compositions c ORDER BY c.updated_at DESC",
             )
@@ -1415,8 +1657,8 @@ impl Database {
         let tx = conn.transaction().map_err(db_err)?;
         let changed = tx
             .execute(
-                "UPDATE compositions SET title = ?1, updated_at = ?2 WHERE id = ?3",
-                params![doc.title.trim(), now_rfc3339(), doc.id],
+                "UPDATE compositions SET title = ?1, bpm = ?2, updated_at = ?3 WHERE id = ?4",
+                params![doc.title.trim(), doc.bpm.map(i64::from), now_rfc3339(), doc.id],
             )
             .map_err(db_err)?;
         if changed == 0 {
@@ -1447,7 +1689,7 @@ impl Database {
             for clip in &track.clips {
                 tx.execute(
                     "INSERT INTO composition_clips (id, track_id, fragment_id, start_ms, trim_start_ms, length_ms, \
-                     repeats, transpose) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                     repeats, transpose, rate_pct) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     params![
                         id_or_new(&clip.id),
                         track_id,
@@ -1456,7 +1698,8 @@ impl Database {
                         to_i64(clip.trim_start_ms),
                         to_i64(clip.length_ms),
                         i64::from(clip.repeats),
-                        i64::from(clip.transpose)
+                        i64::from(clip.transpose),
+                        i64::from(clip.rate_pct)
                     ],
                 )
                 .map_err(db_err)?;
@@ -1484,14 +1727,15 @@ impl Database {
         let mut stmt = conn
             .prepare(
                 "SELECT f.id, f.title, f.file_path, f.duration_ms, f.session_id, s.title, s.session_date, \
-                 f.piece_id, p.title, f.passage, f.created_at FROM midi_fragments f \
+                 f.piece_id, p.title, f.passage, f.created_at, f.bpm, sc.id, s.kind FROM midi_fragments f \
                  JOIN sessions s ON s.id = f.session_id LEFT JOIN pieces p ON p.id = f.piece_id \
+                 LEFT JOIN scores sc ON sc.fragment_id = f.id \
                  ORDER BY s.session_date DESC, f.created_at DESC",
             )
             .map_err(db_err)?;
         let rows = stmt
             .query_map([], |r| {
-                Ok(LibraryFragmentDto {
+                let fragment = LibraryFragmentDto {
                     id: r.get(0)?,
                     title: r.get(1)?,
                     file_path: r.get(2)?,
@@ -1503,14 +1747,20 @@ impl Database {
                     piece_title: r.get(8)?,
                     passage: r.get(9)?,
                     created_at: r.get(10)?,
-                })
+                    bpm: to_u32(r.get(11)?),
+                    score_id: r.get(12)?,
+                };
+                Ok((fragment, r.get::<_, String>(13)?))
             })
             .map_err(db_err)?;
         let items = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
         Ok(items
             .into_iter()
-            .map(|mut f| {
+            .map(|(mut f, kind)| {
                 f.file_path = self.load_path(f.file_path);
+                if kind == SESSION_KIND_SCORES {
+                    f.session_title = t!("backend.scores.sessionTitle");
+                }
                 f
             })
             .collect())
@@ -1539,6 +1789,169 @@ impl Database {
             conds.join(" OR ")
         );
         conn.query_row(&sql, rusqlite::params_from_iter(args), |r| r.get(0)).map(to_u32).map_err(db_err)
+    }
+
+    // ----------------------------- Scores -----------------------------
+
+    /// Most recently edited first.
+    pub fn list_scores(&self) -> Result<Vec<ScoreSummaryDto>, String> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT {SCORE_COLS} FROM scores ORDER BY updated_at DESC"))
+            .map_err(db_err)?;
+        let rows = stmt.query_map([], map_score).map_err(db_err)?;
+        let scores = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+        Ok(scores.iter().map(score::summary).collect())
+    }
+
+    /// New empty score. It has no fragment until it is saved with notes.
+    pub fn create_score(&self, title: &str) -> Result<ScoreDto, String> {
+        let conn = self.lock()?;
+        let doc = score::new_score(uuid::Uuid::new_v4().to_string(), title.trim().to_string(), now_rfc3339());
+        let data = serde_json::to_string(&ScoreBody::default()).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO scores (id, title, bpm, beats, beat_unit, bars, data_json, fragment_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8, ?8)",
+            params![
+                doc.id,
+                doc.title,
+                i64::from(doc.bpm),
+                i64::from(doc.beats),
+                i64::from(doc.beat_unit),
+                i64::from(doc.bars),
+                data,
+                doc.created_at
+            ],
+        )
+        .map_err(db_err)?;
+        Ok(doc)
+    }
+
+    pub fn get_score(&self, score_id: &str) -> Result<ScoreDto, String> {
+        let conn = self.lock()?;
+        fetch_score(&conn, score_id)
+    }
+
+    /// Replaces the score and, if `fragment` is given (its `.mid` is already written), creates or
+    /// updates the fragment that comes from it in the hidden scores session, and brings the clips
+    /// that use it up to date (see `adapt_clips`). `doc` must have passed `score::check`; the
+    /// fragment id of `doc` is ignored, the stored one wins.
+    pub fn save_score(&self, doc: &ScoreDto, fragment: Option<&ScoreFragment>) -> Result<ScoreDto, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let old = fetch_score(&tx, &doc.id)?;
+        let mut fragment_id = old.fragment_id.clone();
+        if let Some(f) = fragment {
+            let exists: bool = tx
+                .query_row("SELECT EXISTS(SELECT 1 FROM midi_fragments WHERE id = ?1)", params![f.fragment_id], |r| r.get(0))
+                .map_err(db_err)?;
+            let title = doc.title.trim();
+            if exists {
+                tx.execute(
+                    "UPDATE midi_fragments SET title = ?1, bpm = ?2, duration_ms = ?3, file_path = ?4 WHERE id = ?5",
+                    params![title, i64::from(doc.bpm), to_i64(f.duration_ms), self.store_path(&f.file_path), f.fragment_id],
+                )
+                .map_err(db_err)?;
+            } else {
+                let session_id = ensure_scores_session(&tx)?;
+                let order_index: i64 = tx
+                    .query_row(
+                        "SELECT COALESCE(MAX(order_index), -1) + 1 FROM midi_fragments WHERE session_id = ?1",
+                        params![session_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(db_err)?;
+                tx.execute(
+                    "INSERT INTO midi_fragments (id, session_id, title, explanation, file_path, bpm, duration_ms, \
+                     order_index, created_at) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7, ?8)",
+                    params![
+                        f.fragment_id,
+                        session_id,
+                        title,
+                        self.store_path(&f.file_path),
+                        i64::from(doc.bpm),
+                        to_i64(f.duration_ms),
+                        order_index,
+                        now_rfc3339()
+                    ],
+                )
+                .map_err(db_err)?;
+            }
+            fragment_id = Some(f.fragment_id.clone());
+            adapt_clips(&tx, &f.fragment_id, old.bpm, doc.bpm, f.duration_ms)?;
+        }
+        let data = serde_json::to_string(&ScoreBody { treble: doc.treble.clone(), bass: doc.bass.clone(), pickup_ticks: doc.pickup_ticks, repeat: doc.repeat, closing_bar: true })
+            .map_err(|e| e.to_string())?;
+        tx.execute(
+            "UPDATE scores SET title = ?1, bpm = ?2, beats = ?3, beat_unit = ?4, bars = ?5, data_json = ?6, \
+             fragment_id = ?7, updated_at = ?8 WHERE id = ?9",
+            params![
+                doc.title.trim(),
+                i64::from(doc.bpm),
+                i64::from(doc.beats),
+                i64::from(doc.beat_unit),
+                i64::from(doc.bars),
+                data,
+                fragment_id,
+                now_rfc3339(),
+                doc.id
+            ],
+        )
+        .map_err(db_err)?;
+        let saved = fetch_score(&tx, &doc.id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(saved)
+    }
+
+    /// The score a fragment was generated from, if it is one.
+    pub fn score_of_fragment(&self, fragment_id: &str) -> Result<Option<ScoreDto>, String> {
+        let conn = self.lock()?;
+        conn.query_row(&format!("SELECT {SCORE_COLS} FROM scores WHERE fragment_id = ?1"), params![fragment_id], map_score)
+            .optional()
+            .map_err(db_err)
+    }
+
+    /// Keeps a frozen copy of `score` with the melody, so it can be shown on a staff.
+    pub fn set_melody_score(&self, melody_id: &str, score: &ScoreDto) -> Result<(), String> {
+        let conn = self.lock()?;
+        let json = serde_json::to_string(score).map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute("UPDATE melodies SET score_json = ?1 WHERE id = ?2", params![json, melody_id])
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.challenge.melodyMissing", id = melody_id));
+        }
+        Ok(())
+    }
+
+    /// The frozen notation of a melody that came from a score.
+    pub fn get_melody_score(&self, melody_id: &str) -> Result<Option<ScoreDto>, String> {
+        let conn = self.lock()?;
+        let json: Option<String> = conn
+            .query_row("SELECT score_json FROM melodies WHERE id = ?1", params![melody_id], |r| r.get(0))
+            .optional()
+            .map_err(db_err)?
+            .flatten();
+        json.map(|j| serde_json::from_str(&j).map_err(|e| e.to_string())).transpose()
+    }
+
+    /// Deletes the score and its fragment (its clips go with it) and returns the absolute path of the
+    /// fragment's file for the caller to delete.
+    pub fn delete_score(&self, score_id: &str) -> Result<Option<String>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let doc = fetch_score(&tx, score_id)?;
+        let mut path = None;
+        if let Some(fragment_id) = doc.fragment_id {
+            path = tx
+                .query_row("SELECT file_path FROM midi_fragments WHERE id = ?1", params![fragment_id], |r| r.get::<_, String>(0))
+                .optional()
+                .map_err(db_err)?;
+            tx.execute("DELETE FROM midi_fragments WHERE id = ?1", params![fragment_id]).map_err(db_err)?;
+        }
+        tx.execute("DELETE FROM scores WHERE id = ?1", params![score_id]).map_err(db_err)?;
+        tx.commit().map_err(db_err)?;
+        Ok(path.map(|p| self.load_path(p)))
     }
 
     // ----------------------------- Comments -----------------------------
@@ -1825,6 +2238,10 @@ mod tests {
     }
 
     fn stored(db: &Database, sql: &str) -> String {
+        db.lock().unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
+    }
+
+    fn count(db: &Database, sql: &str) -> i64 {
         db.lock().unwrap().query_row(sql, [], |r| r.get(0)).unwrap()
     }
 
@@ -2212,9 +2629,12 @@ mod tests {
             length_ms,
             repeats: 1,
             transpose: 0,
+            rate_pct: 100,
             fragment_title: String::new(),
             fragment_file_path: String::new(),
             fragment_duration_ms: 0,
+            fragment_bpm: 0,
+            fragment_score_id: None,
         }
     }
 
@@ -2462,20 +2882,363 @@ mod tests {
             let s = db.create_session("Before v5", 72).unwrap();
             let conn = db.lock().unwrap();
             conn.execute_batch(
-                "DROP TABLE challenge_attempts; DROP TABLE melodies; PRAGMA user_version = 4;",
+                "DROP TABLE challenge_attempts; DROP TABLE melodies; DROP TABLE scores; \
+                 ALTER TABLE sessions DROP COLUMN kind; ALTER TABLE compositions DROP COLUMN bpm; \
+                 ALTER TABLE composition_clips DROP COLUMN rate_pct; PRAGMA user_version = 4;",
             )
             .unwrap();
             s.id
         };
         let db = Database::open(&path, dir.path()).unwrap();
         let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, SCHEMA_VERSION);
         assert_eq!(db.get_session(&session_id).unwrap().title, "Before v5");
         assert!(db.list_melodies().unwrap().is_empty());
         db.insert_melody(&melody("m1")).unwrap();
         // Reopening is idempotent.
         drop(db);
         assert_eq!(Database::open(&path, dir.path()).unwrap().list_melodies().unwrap().len(), 1);
+    }
+
+    // ----------------------------- v6: scores and the composer's tempo -----------------------------
+
+    fn score_fragment(id: &str, duration_ms: u64) -> ScoreFragment {
+        ScoreFragment { fragment_id: id.into(), file_path: format!("/vault/midi/fragments/frag_{id}.mid"), duration_ms }
+    }
+
+    fn note(id: &str, tick: u32) -> ScoreNoteDto {
+        ScoreNoteDto { id: id.into(), tick, duration_ticks: 480, key: 60, accidental: None, tie: false }
+    }
+
+    #[test]
+    fn migrates_a_v5_vault_to_v6_keeping_its_data() {
+        // A vault last opened by the challenge mode (v5): no scores, no tempo, no clip speed.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        let (session_id, composition_id) = {
+            let db = Database::open(&path, dir.path()).unwrap();
+            let s = db.create_session("Before v6", 72).unwrap();
+            db.insert_fragment("a", &s.id, "Theme", "", &format!("{}/midi/fragments/a.mid", dir.path().display()), 72, 8_000)
+                .unwrap();
+            db.add_timeline_comment("a", 500, "careful").unwrap();
+            let mut c = db.create_composition("Old", "Piano").unwrap();
+            c.tracks[0].clips = vec![clip("a", 1_000, 4_000)];
+            db.save_composition(&c).unwrap();
+            let conn = db.lock().unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN kind; ALTER TABLE compositions DROP COLUMN bpm; \
+                 ALTER TABLE composition_clips DROP COLUMN rate_pct; ALTER TABLE melodies DROP COLUMN score_json; \
+                 DROP TABLE scores; PRAGMA user_version = 5;",
+            )
+            .unwrap();
+            (s.id, c.id)
+        };
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!(db.get_session(&session_id).unwrap().title, "Before v6");
+        assert_eq!(db.list_sessions().unwrap().len(), 1, "the old session is a practice session");
+        assert_eq!(db.get_fragment("a").unwrap().comments.len(), 1);
+        let c = db.get_composition(&composition_id).unwrap();
+        assert_eq!(c.bpm, None);
+        assert_eq!((c.tracks[0].clips[0].start_ms, c.tracks[0].clips[0].rate_pct), (1_000, 100));
+        assert!(db.list_scores().unwrap().is_empty());
+        // Reopening is idempotent.
+        drop(db);
+        assert_eq!(Database::open(&path, dir.path()).unwrap().list_compositions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn creates_lists_and_loads_scores() {
+        let db = db();
+        let a = db.create_score("  Etude ").unwrap();
+        let b = db.create_score("Waltz").unwrap();
+        assert_eq!((a.title.as_str(), a.bars, a.bpm, a.fragment_id.clone()), ("Etude", 4, 90, None));
+        let list = db.list_scores().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.iter().any(|s| s.id == a.id) && list.iter().any(|s| s.id == b.id));
+        assert_eq!(db.get_score(&a.id).unwrap(), a);
+        assert!(db.get_score("nope").is_err());
+        // Nothing but the score exists: no fragment, no hidden session yet.
+        assert!(db.list_library_fragments().unwrap().is_empty());
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM sessions"), 0);
+    }
+
+    #[test]
+    fn a_score_stored_before_ties_and_pickups_existed_reads_with_their_defaults() {
+        let db = db();
+        let doc = db.create_score("Old").unwrap();
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE scores SET data_json = ?1 WHERE id = ?2",
+                params![r#"{"treble":[{"id":"a","tick":0,"duration_ticks":480,"key":60,"accidental":null}],"bass":[]}"#, doc.id],
+            )
+            .unwrap();
+        let read = db.get_score(&doc.id).unwrap();
+        assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat), (0, false, false));
+        assert!(score::issues(&read).is_empty());
+    }
+
+    #[test]
+    fn a_score_with_a_pickup_stored_before_the_closing_bar_gets_it_when_read() {
+        let db = db();
+        let doc = db.create_score("Old pickup").unwrap();
+        // The old format: a pickup, 4 bars counted without the closing bar, no flag.
+        db.lock()
+            .unwrap()
+            .execute(
+                "UPDATE scores SET bars = 4, data_json = ?1 WHERE id = ?2",
+                params![r#"{"treble":[],"bass":[],"pickup_ticks":480}"#, doc.id],
+            )
+            .unwrap();
+        let read = db.get_score(&doc.id).unwrap();
+        assert_eq!((read.bars, read.pickup_ticks), (5, 480));
+        assert!(score::issues(&read).is_empty());
+        // Saved once, it is in the new format and no bar is added again.
+        let saved = db.save_score(&read, None).unwrap();
+        assert_eq!(saved.bars, 5);
+        assert_eq!(db.get_score(&doc.id).unwrap().bars, 5);
+        // A score without a pickup is never touched.
+        let plain = db.create_score("Plain").unwrap();
+        assert_eq!(db.get_score(&plain.id).unwrap().bars, 4);
+    }
+
+    #[test]
+    fn the_pickup_and_the_ties_are_stored_with_the_notation() {
+        let db = db();
+        let mut doc = db.create_score("Anacrusis").unwrap();
+        doc.pickup_ticks = 480;
+        doc.treble = vec![note("a", 0), ScoreNoteDto { tie: true, ..note("b", 480) }, note("c", 960)];
+        doc.treble[2].key = 60;
+        let saved = db.save_score(&doc, None).unwrap();
+        assert_eq!(saved.pickup_ticks, 480);
+        assert!(saved.treble[1].tie);
+        assert_eq!(db.get_score(&doc.id).unwrap().pickup_ticks, 480);
+        doc.repeat = true;
+        assert!(db.save_score(&doc, None).unwrap().repeat);
+        assert!(db.get_score(&doc.id).unwrap().repeat);
+    }
+
+    #[test]
+    fn saving_a_score_creates_its_fragment_in_the_hidden_scores_session() {
+        let db = db();
+        let mut doc = db.create_score("Etude").unwrap();
+        doc.treble = vec![note("n1", 0), note("n2", 480)];
+        doc.bpm = 120;
+        let saved = db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
+        assert_eq!(saved.fragment_id.as_deref(), Some("f1"));
+        assert_eq!(saved.treble.len(), 2);
+
+        let library = db.list_library_fragments().unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!(library[0].id, "f1");
+        assert_eq!(library[0].score_id.as_deref(), Some(doc.id.as_str()));
+        assert_eq!((library[0].bpm, library[0].duration_ms), (120, 4_000));
+        assert_eq!(library[0].session_title, t!("backend.scores.sessionTitle"));
+        assert_eq!(library[0].file_path, "/vault/midi/fragments/frag_f1.mid");
+        // The hidden session never shows up in the list of sessions.
+        assert!(db.list_sessions().unwrap().is_empty());
+        assert_eq!(stored(&db, "SELECT kind FROM sessions"), "scores");
+    }
+
+    #[test]
+    fn saving_again_updates_the_same_fragment_and_session() {
+        let db = db();
+        let mut doc = db.create_score("Etude").unwrap();
+        doc.treble = vec![note("n1", 0)];
+        db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
+        doc.title = "Etude in C".into();
+        doc.bars = 8;
+        let saved = db.save_score(&doc, Some(&score_fragment("f1", 8_000))).unwrap();
+        assert_eq!(saved.bars, 8);
+        let library = db.list_library_fragments().unwrap();
+        assert_eq!(library.len(), 1);
+        assert_eq!((library[0].title.as_str(), library[0].duration_ms), ("Etude in C", 8_000));
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM sessions"), 1);
+        // A second score shares the hidden session.
+        let other = db.create_score("Waltz").unwrap();
+        db.save_score(&other, Some(&score_fragment("f2", 2_000))).unwrap();
+        assert_eq!(count(&db, "SELECT COUNT(*) FROM sessions"), 1);
+        assert_eq!(db.list_library_fragments().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn saving_without_a_fragment_only_stores_the_notation() {
+        let db = db();
+        let mut doc = db.create_score("Draft").unwrap();
+        doc.title = "Draft 2".into();
+        let saved = db.save_score(&doc, None).unwrap();
+        assert_eq!((saved.title.as_str(), saved.fragment_id), ("Draft 2", None));
+        assert!(db.list_library_fragments().unwrap().is_empty());
+    }
+
+    /// A score of 10 s at 90 BPM with a composition holding two clips of it.
+    fn score_in_composition() -> (Database, ScoreDto, CompositionDto) {
+        let db = db();
+        let mut doc = db.create_score("Etude").unwrap();
+        doc.treble = vec![note("n1", 0)];
+        let doc = db.save_score(&doc, Some(&score_fragment("f1", 10_000))).unwrap();
+        let mut c = db.create_composition("Arrangement", "Piano").unwrap();
+        c.tracks[0].clips = vec![clip("f1", 0, 4_000), CompositionClipDto { trim_start_ms: 2_000, ..clip("f1", 4_000, 3_000) }];
+        let c = db.save_composition(&c).unwrap();
+        (db, doc, c)
+    }
+
+    #[test]
+    fn a_new_tempo_moves_the_windows_with_the_music_and_pushes_the_next_clips() {
+        let (db, mut doc, c) = score_in_composition();
+        doc.bpm = 60; // slower: the same music lasts 1.5 times longer
+        db.save_score(&doc, Some(&score_fragment("f1", 15_000))).unwrap();
+        let clips = &db.get_composition(&c.id).unwrap().tracks[0].clips;
+        assert_eq!((clips[0].trim_start_ms, clips[0].length_ms, clips[0].start_ms), (0, 6_000, 0));
+        assert_eq!((clips[1].trim_start_ms, clips[1].length_ms), (3_000, 4_500));
+        assert_eq!(clips[1].start_ms, 6_000, "pushed to the end of the first");
+        assert_eq!(clips[0].rate_pct, 100, "the composition has no tempo, so no speed change");
+    }
+
+    #[test]
+    fn a_new_tempo_keeps_a_clip_in_time_with_the_composition_tempo() {
+        let (db, mut doc, c) = score_in_composition();
+        let mut c = c;
+        c.bpm = Some(90);
+        db.save_composition(&c).unwrap();
+        doc.bpm = 60;
+        db.save_score(&doc, Some(&score_fragment("f1", 15_000))).unwrap();
+        let after = db.get_composition(&c.id).unwrap();
+        let clips = &after.tracks[0].clips;
+        // 90 / 60 = 150 %: the longer window plays faster, so it still takes 4 s on the timeline.
+        assert_eq!((clips[0].length_ms, clips[0].rate_pct), (6_000, 150));
+        assert_eq!((clip_end_ms(&clips[0]), clips[1].start_ms), (4_000, 4_000));
+    }
+
+    #[test]
+    fn a_shorter_score_clamps_the_windows_and_removes_the_clips_it_no_longer_has() {
+        let (db, doc, c) = score_in_composition();
+        // Windows are [0, 4000) and [2000, 5000) of the fragment.
+        db.save_score(&doc, Some(&score_fragment("f1", 4_500))).unwrap();
+        let clips = &db.get_composition(&c.id).unwrap().tracks[0].clips;
+        assert_eq!((clips[0].length_ms, clips[1].trim_start_ms, clips[1].length_ms), (4_000, 2_000, 2_500));
+        db.save_score(&doc, Some(&score_fragment("f1", 3_000))).unwrap();
+        let clips = &db.get_composition(&c.id).unwrap().tracks[0].clips;
+        assert_eq!((clips[0].length_ms, clips[1].length_ms), (3_000, 1_000));
+        db.save_score(&doc, Some(&score_fragment("f1", 1_500))).unwrap();
+        let clips = &db.get_composition(&c.id).unwrap().tracks[0].clips;
+        assert_eq!(clips.len(), 1, "the second window starts after the end of the score");
+        assert_eq!(clips[0].length_ms, 1_500);
+    }
+
+    #[test]
+    fn deleting_a_score_deletes_its_fragment_and_clips() {
+        let (db, doc, c) = score_in_composition();
+        assert_eq!(db.count_compositions_using(&["f1".to_string()], None).unwrap(), 1);
+        let path = db.delete_score(&doc.id).unwrap();
+        assert_eq!(path.as_deref(), Some("/vault/midi/fragments/frag_f1.mid"));
+        assert!(db.get_score(&doc.id).is_err());
+        assert!(db.get_fragment("f1").is_err());
+        assert!(db.get_composition(&c.id).unwrap().tracks[0].clips.is_empty());
+        assert!(db.delete_score(&doc.id).is_err());
+        // A score that never got a fragment deletes cleanly too.
+        let draft = db.create_score("Draft").unwrap();
+        assert_eq!(db.delete_score(&draft.id).unwrap(), None);
+    }
+
+    #[test]
+    fn deleting_the_fragment_detaches_the_score_instead_of_deleting_it() {
+        let (db, doc, _) = score_in_composition();
+        db.delete_fragment("f1").unwrap();
+        assert_eq!(db.get_score(&doc.id).unwrap().fragment_id, None);
+        // Saving it again makes a new fragment.
+        let saved = db.save_score(&doc, Some(&score_fragment("f9", 10_000))).unwrap();
+        assert_eq!(saved.fragment_id.as_deref(), Some("f9"));
+    }
+
+    #[test]
+    fn a_composition_keeps_its_tempo_and_the_speed_of_its_clips() {
+        let (db, _, mut c) = composition_fixture();
+        assert_eq!(c.bpm, None);
+        c.bpm = Some(120);
+        c.tracks[0].clips = vec![CompositionClipDto { rate_pct: 150, ..clip("b", 1_000, 3_000) }];
+        let saved = db.save_composition(&c).unwrap();
+        assert_eq!(saved.bpm, Some(120));
+        let k = &saved.tracks[0].clips[0];
+        assert_eq!((k.rate_pct, k.fragment_bpm, k.fragment_score_id.clone()), (150, 100, None));
+        // 3 s of music at 150 % takes 2 s on the timeline.
+        assert_eq!(clip_end_ms(k), 3_000);
+        assert_eq!(db.list_compositions().unwrap()[0].duration_ms, 3_000);
+    }
+
+    #[test]
+    fn repeats_and_speed_both_count_for_the_end_and_for_overlaps() {
+        let (db, _, mut c) = composition_fixture();
+        let fast = CompositionClipDto { rate_pct: 200, repeats: 2, ..clip("b", 0, 4_000) }; // 2 × 2 s
+        assert_eq!(clip_end_ms(&fast), 4_000);
+        c.tracks[0].clips = vec![fast.clone(), clip("b", 3_999, 1_000)];
+        assert!(db.save_composition(&c).is_err());
+        c.tracks[0].clips = vec![fast, clip("b", 4_000, 1_000)];
+        assert!(db.save_composition(&c).is_ok());
+    }
+
+    #[test]
+    fn rejects_a_speed_or_a_tempo_out_of_range() {
+        let (db, _, mut c) = composition_fixture();
+        for rate in [0, 24, 401] {
+            c.tracks[0].clips = vec![CompositionClipDto { rate_pct: rate, ..clip("b", 0, 1_000) }];
+            assert!(db.save_composition(&c).is_err(), "rate {rate}");
+        }
+        c.tracks[0].clips.clear();
+        for bpm in [0, 29, 241] {
+            c.bpm = Some(bpm);
+            assert!(db.save_composition(&c).is_err(), "bpm {bpm}");
+        }
+        c.bpm = Some(30);
+        assert!(db.save_composition(&c).is_ok());
+    }
+
+    #[test]
+    fn migrates_a_v6_vault_to_v7_keeping_its_melodies() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        {
+            let db = Database::open(&path, dir.path()).unwrap();
+            db.insert_melody(&melody("m1")).unwrap();
+            db.lock()
+                .unwrap()
+                .execute_batch("ALTER TABLE melodies DROP COLUMN score_json; PRAGMA user_version = 6;")
+                .unwrap();
+        }
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 7);
+        assert_eq!(db.get_melody("m1").unwrap().title, melody("m1").title);
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
+        // Reopening is idempotent.
+        drop(db);
+        assert_eq!(Database::open(&path, dir.path()).unwrap().list_melodies().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_melody_keeps_a_frozen_copy_of_its_score() {
+        let db = db();
+        db.insert_melody(&melody("m1")).unwrap();
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
+        let mut doc = db.create_score("Etude").unwrap();
+        doc.treble = vec![note("a", 0)];
+        doc.repeat = true;
+        let saved = db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
+        assert_eq!(db.score_of_fragment("f1").unwrap().unwrap().id, saved.id);
+        assert!(db.score_of_fragment("nope").unwrap().is_none());
+        db.set_melody_score("m1", &saved).unwrap();
+        // Editing the score afterwards does not touch the copy.
+        let mut edited = saved.clone();
+        edited.title = "Changed".into();
+        db.save_score(&edited, None).unwrap();
+        let copy = db.get_melody_score("m1").unwrap().unwrap();
+        assert_eq!((copy.title.as_str(), copy.repeat, copy.treble.len()), ("Etude", true, 1));
+        assert!(db.set_melody_score("nope", &saved).is_err());
+        // It goes with the melody.
+        db.delete_melody("m1").unwrap();
+        assert_eq!(db.get_melody_score("m1").unwrap(), None);
     }
 
     #[test]

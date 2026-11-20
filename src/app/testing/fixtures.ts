@@ -111,6 +111,8 @@ export function libraryFragment(over: Partial<LibraryFragmentDto> = {}): Library
     piece_title: null,
     passage: '',
     created_at: '',
+    bpm: 100,
+    score_id: null,
     ...over,
   };
 }
@@ -120,5 +122,5 @@ export function track(over: Partial<CompositionTrackDto> = {}): CompositionTrack
 }
 
 export function composition(over: Partial<CompositionDto> = {}): CompositionDto {
-  return { id: 'c1', title: 'Arrangement', created_at: '', updated_at: '', tracks: [track()], ...over };
+  return { id: 'c1', title: 'Arrangement', bpm: null, created_at: '', updated_at: '', tracks: [track()], ...over };
 }

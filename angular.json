@@ -53,6 +53,7 @@
             "styles": [
               "@fontsource-variable/hanken-grotesk/index.css",
               "@fontsource-variable/jetbrains-mono/index.css",
+              "@fontsource/noto-music/music-400.css",
               "src/styles.css"
             ]
           },

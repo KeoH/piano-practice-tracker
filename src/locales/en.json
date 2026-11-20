@@ -203,7 +203,9 @@
       "none": "Connect a USB keyboard",
       "virtual": "Test notes, no keyboard",
       "connected": "Keyboard connected"
-    }
+    },
+    "collapse": "Collapse the menu",
+    "expand": "Expand the menu"
   },
   "header": {
     "saving": "Saving…",
@@ -638,7 +640,8 @@
       "pieceTitle": "Untitled piece",
       "compositionTitle": "Untitled composition",
       "trackName": "Track {n}",
-      "melodyTitle": "Untitled melody"
+      "melodyTitle": "Untitled melody",
+      "scoreTitle": "New score"
     },
     "image": {
       "invalidBase64": "Invalid base64 image: {e}",
@@ -740,7 +743,9 @@
       "repeats": "A clip repeats between 1 and {max} times",
       "transpose": "Transposition goes from -{max} to +{max} semitones",
       "program": "Unknown instrument {program}",
-      "volume": "Invalid track volume {volume}"
+      "volume": "Invalid track volume {volume}",
+      "bpm": "The composition tempo must be between {min} and {max} BPM",
+      "rate": "A clip plays at {min}-{max} % of its speed"
     },
     "challenge": {
       "noNotes": "The MIDI file has no notes to play",
@@ -754,6 +759,24 @@
       "frereJacques": "Frère Jacques",
       "odeToJoy": "Ode to Joy (Beethoven)",
       "minuet": "Minuet in G (Petzold)"
+    },
+    "scores": {
+      "sessionTitle": "Scores",
+      "missing": "Score '{id}' does not exist",
+      "issue": {
+        "bpm": "The tempo must be between 30 and 240 BPM",
+        "timeSignature": "That time signature is not supported",
+        "bars": "A score has between 1 and 64 bars",
+        "duplicateId": "Two notes share the same id",
+        "key": "A note is outside the piano keyboard",
+        "accidental": "A note has the wrong accidental for its key",
+        "duration": "A note has a length that cannot be written",
+        "tick": "A note falls outside the score",
+        "crossesBar": "A note crosses a bar line",
+        "overlap": "Two notes overlap on the same staff",
+        "tie": "A tie has no note to join",
+        "pickup": "The pickup bar must be shorter than a whole bar"
+      }
     }
   },
   "export": {
@@ -775,7 +798,8 @@
     "pieces": "Repertoire",
     "challenges": "Challenges",
     "stats": "Statistics",
-    "compose": "Compose"
+    "compose": "Compose",
+    "scores": "Scores"
   },
   "stats": {
     "title": "Practice statistics",
@@ -1136,7 +1160,14 @@
       "split": "Split at the playhead",
       "splitHint": "Split the clip in two where the playhead is (S)",
       "duplicate": "Duplicate",
-      "remove": "Remove"
+      "remove": "Remove",
+      "speed": "Speed",
+      "speedLess": "Slower",
+      "speedMore": "Faster",
+      "matchTempo": "Match tempo",
+      "matchTempoHint": "Play this clip at the speed that keeps it in time with the composition's tempo",
+      "followsTempo": "This score follows the composition's tempo.",
+      "speedValue": "{pct} %"
     },
     "shortcuts": {
       "split": "splits the selected clip at the playhead",
@@ -1171,6 +1202,98 @@
     "exportWav": "Export WAV",
     "exportWavHint": "Save the composition as you hear it (mute, solo and volume included) as a WAV file",
     "exportMidi": "Export MIDI",
-    "exportMidiHint": "Save the composition as a MIDI file with one track per voice, to open it in other programs"
+    "exportMidiHint": "Save the composition as a MIDI file with one track per voice, to open it in other programs",
+    "tempo": {
+      "label": "Tempo",
+      "unit": "BPM",
+      "hint": "Tempo of the composition. Clips of scores follow it; recorded clips can be matched to it.",
+      "needed": "Set the composition's tempo first (BPM field in the transport bar).",
+      "matchAll": "Match all",
+      "matchAllHint": "Put every clip in time with the composition's tempo"
+    }
+  },
+  "score": {
+    "new": "New score",
+    "searchLabel": "Search scores",
+    "listLabel": "Scores",
+    "noScores": "No scores yet. Create one to write notes on a staff.",
+    "noMatches": "No scores match your search",
+    "bars_one": "{n} bar",
+    "bars_other": "{n} bars",
+    "notes_one": "{n} note",
+    "notes_other": "{n} notes",
+    "listMeta": "{bpm} BPM · {bars} · {notes}",
+    "deleted": "Score deleted",
+    "eyebrow": "Score",
+    "staffLabel": "Score: {title}",
+    "noteLabel": "{note}, {value}, {staff}, bar {bar}",
+    "values": {
+      "whole": "Whole note",
+      "half": "Half note",
+      "quarter": "Quarter note",
+      "eighth": "Eighth note",
+      "sixteenth": "Sixteenth note"
+    },
+    "staff": {
+      "treble": "right hand",
+      "bass": "left hand"
+    },
+    "welcome": "Write a fragment on a staff: drag note values onto the treble clef (right hand) and the bass clef (left hand). It is saved as a fragment you can use in the composer.",
+    "createFirst": "Create a score",
+    "titleLabel": "Score title",
+    "summary": "{bars} · {notes} · {duration}",
+    "undo": "Undo",
+    "redo": "Redo",
+    "delete": "Delete score",
+    "deleteMessage": "Delete the score \"{title}\" and the fragment generated from it? This cannot be undone.",
+    "play": "Play",
+    "pause": "Pause",
+    "stop": "Stop",
+    "toStart": "Back to the start",
+    "tempo": "Tempo",
+    "bpmUnit": "BPM",
+    "timeSignature": "Time signature",
+    "barsLabel": "Bars",
+    "addBar": "Add a bar",
+    "removeBar": "Remove a bar",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "palette": "Note values",
+    "paletteHint": "Drag a value onto the staff, or choose it and click on the staff. A note put where another starts joins it as a chord.",
+    "dotted": "Dotted note (.)",
+    "sharp": "Sharp (#)",
+    "flat": "Flat (b)",
+    "selected": "Selected: {note} · {value}",
+    "removeNote": "Remove note",
+    "nothingSelected": "Click a note to select it. Drag it to move it, or use the arrow keys.",
+    "saveHint": "Saved automatically. It shows up in the composer's library as a fragment, and follows the composition's tempo there.",
+    "noRoom": "There is no room for that note there",
+    "cantResize": "Remove the notes in the last bars first",
+    "cantChangeMeter": "Some notes would cross a bar line in that time signature",
+    "inLibrary": "Score",
+    "editScore": "Edit score",
+    "openScore": "Open score",
+    "shortcuts": "Shortcuts: Space plays · 1-5 pick a value · . dots · # and b sharpen and flatten · T ties · arrows move the note · Delete removes it · Ctrl+Z undoes",
+    "errors": {
+      "loadList": "Could not load the scores",
+      "load": "Could not open the score",
+      "create": "Could not create the score",
+      "save": "Could not save the score",
+      "delete": "Could not delete the score"
+    },
+    "tie": "Tie to the next note (T)",
+    "tieHint": "Ties the selected note to the next one of the same pitch, adding it if it is not there. Press again to untie.",
+    "pickup": "Pickup",
+    "pickupNone": "None",
+    "pickupBeats_one": "{n} beat",
+    "pickupBeats_other": "{n} beats",
+    "pickupBar": "pickup",
+    "noRoomTie": "There is no room to tie that note",
+    "cantChangePickup": "A note would cross a bar line with that pickup",
+    "repeat": "Repeat from the start",
+    "repeatHint": "Closes the score with a repeat sign: it is played twice, from the start (also in the fragment it generates).",
+    "tools": "Tools",
+    "settings": "Settings",
+    "zoom": "Zoom"
   }
 }

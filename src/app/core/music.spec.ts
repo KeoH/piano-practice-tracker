@@ -1,4 +1,4 @@
-import { beatMs, isBlackKey, noteName, noteValue, parseNoteNames } from './music';
+import { beatMs, isBlackKey, noteName, noteValue, parseNoteNames, spelledNoteName } from './music';
 
 const EN = parseNoteNames('C,C♯,D,D♯,E,F,F♯,G,G♯,A,A♯,B');
 
@@ -42,5 +42,15 @@ describe('music', () => {
       expect(noteValue(0, 90)).toBeNull();
       expect(at90(0.05)).toBeNull();
     });
+  });
+});
+
+describe('spelledNoteName', () => {
+  it('writes flats as flats and everything else like noteName', () => {
+    expect(spelledNoteName(70, 'flat', EN)).toBe('B♭4');
+    expect(spelledNoteName(61, 'flat', EN)).toBe('D♭4');
+    expect(spelledNoteName(70, 'sharp', EN)).toBe('A♯4');
+    expect(spelledNoteName(70, null, EN)).toBe('A♯4');
+    expect(spelledNoteName(60, null, EN)).toBe('C4');
   });
 });

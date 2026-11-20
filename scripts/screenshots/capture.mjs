@@ -142,6 +142,28 @@ try {
   await click('app-sidebar nav button', 'Statistics');
   await waitFor('app-stats-view svg');
   await shoot('stats.png');
+
+  // The score editor: a waltz on the grand staff, with a note selected so the tools show its value.
+  await click('app-sidebar nav button', 'Scores');
+  await waitFor('app-score-staff svg');
+  await sleep(600); // the staff measures its width and lays the bars out in lines
+  await evaluate(`(() => {
+    const note = document.querySelectorAll('app-score-staff g[role="button"]')[9];
+    note.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1 }));
+    window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 1 }));
+  })()`);
+  await shoot('score.png');
+
+  // A challenge made from that score is shown as notation; the demo plays an attempt with a few slips.
+  await click('app-sidebar nav button', 'Challenges');
+  await click('app-sidebar li button', 'Waltz in C');
+  await waitFor('app-challenge-staff svg');
+  await sleep(600);
+  await evaluate(`[...document.querySelectorAll('app-challenge-view button')].find((b) => b.getAttribute('aria-label') === 'Start the attempt').click()`);
+  await waitFor('app-attempt-result');
+  await evaluate(`document.querySelectorAll('app-toasts button').forEach((b) => b.click())`); // the "new record" toast
+  await evaluate(`document.querySelector('app-challenge-staff').scrollIntoView({ block: 'start' })`);
+  await shoot('challenge.png');
 } finally {
   ws?.close();
   browser.kill();

@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { parseCompositionKey } from './composition';
-import type { PlaybackProgress } from './models';
+import type { PlaybackProgress, ScoreDto } from './models';
+import { parseScoreKey } from './score';
 import { TauriApiService } from './tauri-api.service';
 import { ToastService } from './toast.service';
 import { I18nService } from './i18n/i18n.service';
@@ -21,7 +22,7 @@ export const PLAYBACK_RATES = [0.5, 0.6, 0.7, 0.8, 0.9, 1] as const;
  * For inactive files a local "cursor" (seek position) is kept, from which the next playback
  * will start.
  * The speed is global; the loop belongs to one file and is dropped when another file plays.
- * A composition plays under the key `composition:<id>` and is otherwise handled like a file.
+ * A composition plays under the key `composition:<id>` and a score under `score:<id>`; both are otherwise handled like a file.
  */
 @Injectable({ providedIn: 'root' })
 export class PlaybackStore {
@@ -41,6 +42,12 @@ export class PlaybackStore {
   /** End of preview: stops when `endMs` is reached in `file`. */
   private stopAt: { file: string; endMs: number } | null = null;
   private unlisten: (() => void) | null = null;
+  /** Where a score's notes come from when its key is played (the score editor registers itself). */
+  private scoreSource: ((id: string) => ScoreDto | null) | null = null;
+
+  registerScoreSource(source: (id: string) => ScoreDto | null): void {
+    this.scoreSource = source;
+  }
 
   async init(): Promise<void> {
     if (this.unlisten) return;
@@ -89,8 +96,13 @@ export class PlaybackStore {
     this.stopAt = endMs !== undefined && !activeLoop ? { file, endMs } : null;
     try {
       const composition = parseCompositionKey(file);
+      const scoreId = parseScoreKey(file);
       if (composition) await this.api.playComposition(composition, from);
-      else await this.api.playMidiFile(file, from);
+      else if (scoreId) {
+        const score = this.scoreSource?.(scoreId);
+        if (!score) throw new Error(`Score ${scoreId} is not open`);
+        await this.api.playScore(score, from);
+      } else await this.api.playMidiFile(file, from);
       // Loading another file drops the backend loop; for the same file it is kept, but resending is harmless.
       if (activeLoop) await this.api.setPlaybackLoop(activeLoop);
       this.activeFile.set(file);

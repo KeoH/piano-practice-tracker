@@ -325,7 +325,7 @@ fn write_smf_file(path: &Path, smf: &Smf<'_>) -> Result<(), String> {
 }
 
 /// Writes SMF format 0 (480 TPQ) with `EndOfTrack` at `max(last event, end_us)`.
-fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: Option<u64>) -> Result<(), String> {
+pub(crate) fn write_smf_with_end(path: &Path, events: &[TimedMidiEvent], bpm: u32, end_us: Option<u64>) -> Result<(), String> {
     let tempo = tempo_for_bpm(bpm);
     let mut track: Vec<TrackEvent<'static>> = Vec::with_capacity(events.len() + 2);
     track.push(tempo_event(tempo));

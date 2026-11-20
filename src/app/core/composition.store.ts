@@ -1,8 +1,12 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import {
+  MAX_BPM,
+  MAX_RATE_PCT,
   MAX_REPEATS,
   MAX_TRACKS,
   MAX_TRANSPOSE,
+  MIN_BPM,
+  MIN_RATE_PCT,
   type SnapMode,
   clipEnd,
   clipFromFragment,
@@ -11,11 +15,17 @@ import {
   findClip,
   fitStart,
   freeSpan,
+  inferTempo,
+  matchTempo,
   maxRepeats,
   newId,
   newTrack,
+  playedMs,
+  rateForTempo,
+  resolveOverlaps,
   splitClip,
   trackMix,
+  withTempo,
   withTrackClips,
 } from './composition';
 import { clamp } from './format';
@@ -446,8 +456,16 @@ export class CompositionStore {
     const index = creating ? d.tracks.length : Math.max(0, track);
     let clip: CompositionClipDto | null = null;
     const added = this.update((doc) => {
-      const next = creating ? { ...doc, tracks: [...doc.tracks, newTrack(doc.tracks, name)] } : doc;
-      clip = clipFromFragment(fragment, fitStart(next.tracks[index].clips, start, fragment.duration_ms));
+      let next = creating ? { ...doc, tracks: [...doc.tracks, newTrack(doc.tracks, name)] } : doc;
+      // A score follows the composition's tempo; the first one decides it if nothing has yet.
+      let rate = 100;
+      if (fragment.score_id) {
+        const bpm = next.bpm ?? inferTempo(next) ?? fragment.bpm;
+        if (next.bpm !== bpm) next = withTempo(next, bpm);
+        rate = rateForTempo(bpm, fragment.bpm);
+      }
+      const length = playedMs({ length_ms: fragment.duration_ms, rate_pct: rate }, 1);
+      clip = clipFromFragment(fragment, fitStart(next.tracks[index].clips, start, length), rate);
       return withTrackClips(next, index, [...next.tracks[index].clips, clip]);
     });
     if (added && clip) this.selectClip((clip as CompositionClipDto).id);
@@ -487,7 +505,8 @@ export class CompositionStore {
       c.trim_start_ms === next.trim_start_ms &&
       c.length_ms === next.length_ms &&
       c.repeats === next.repeats &&
-      c.transpose === next.transpose
+      c.transpose === next.transpose &&
+      c.rate_pct === next.rate_pct
     ) {
       return;
     }
@@ -511,6 +530,39 @@ export class CompositionStore {
       return;
     }
     this.replaceClip(ref.clip.id, { ...ref.clip, repeats: n });
+  }
+
+  // ---- Tempo ----
+
+  /** Sets the composition's tempo; the clips of scores follow it. */
+  setBpm(bpm: number): void {
+    const b = clamp(Math.round(bpm), MIN_BPM, MAX_BPM);
+    if (!Number.isFinite(b)) return;
+    this.update((d) => (d.bpm === b ? null : withTempo(d, b)));
+  }
+
+  /** Speed of the selected clip in percent; the clips after it make room. */
+  setSelectedRate(rate: number): void {
+    const ref = this.selectedClip();
+    if (!ref) return;
+    const pct = clamp(Math.round(rate), MIN_RATE_PCT, MAX_RATE_PCT);
+    if (pct === ref.clip.rate_pct) return;
+    this.update((d) =>
+      withTrackClips(d, ref.track, resolveOverlaps(d.tracks[ref.track].clips.map((k) => (k.id === ref.clip.id ? { ...k, rate_pct: pct } : k)))),
+    );
+  }
+
+  /** Puts the selected clip (or all of them) in time with the composition's tempo. */
+  matchTempo(all: boolean): void {
+    const d = this.doc();
+    if (!d) return;
+    if (!d.bpm) {
+      this.toast.warning(this.i18n.t('composer.tempo.needed'));
+      return;
+    }
+    const sel = this.selectedClipId();
+    const next = matchTempo(d, all || !sel ? null : new Set([sel]));
+    if (next) this.update(() => next);
   }
 
   transposeBy(delta: number): void {

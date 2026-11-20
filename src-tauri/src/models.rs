@@ -245,10 +245,73 @@ pub struct CompositionClipDto {
     pub repeats: u32,
     /// Semitones.
     pub transpose: i32,
+    /// Speed of the window in percent (100 = as recorded). `length_ms` and `trim_start_ms` stay in
+    /// the fragment's own time; on the timeline each repetition lasts `length_ms * 100 / rate_pct`.
+    pub rate_pct: u32,
     /// Read only: filled in from the fragment when loading, ignored when saving.
     pub fragment_title: String,
     pub fragment_file_path: String,
     pub fragment_duration_ms: u64,
+    /// Read only: the fragment's tempo (a score's own tempo, a recording's metronome setting).
+    pub fragment_bpm: u32,
+    /// Read only: the score the fragment was generated from, if it is one.
+    pub fragment_score_id: Option<String>,
+}
+
+/// A note on a staff of a score. Rests are not stored: they are the gaps between notes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreNoteDto {
+    pub id: String,
+    /// Start from the beginning of the score, in ticks (480 per quarter note).
+    pub tick: u32,
+    pub duration_ticks: u32,
+    /// Sounding MIDI key (21-108).
+    pub key: u8,
+    /// Spelling of a black key: `"sharp"` or `"flat"`; `None` for a white key.
+    pub accidental: Option<String>,
+    /// Tied to the note of the same key that starts where this one ends (they sound as one note).
+    #[serde(default)]
+    pub tie: bool,
+}
+
+/// A piece written on a grand staff: treble clef (right hand) and bass clef (left hand).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreDto {
+    pub id: String,
+    pub title: String,
+    pub bpm: u32,
+    /// Time signature: `beats` notes of `1 / beat_unit` per bar.
+    pub beats: u32,
+    pub beat_unit: u32,
+    /// Bars, the pickup bar included.
+    pub bars: u32,
+    /// Length of a shorter first bar (a pickup or anacrusis) in ticks; 0 = the first bar is whole.
+    #[serde(default)]
+    pub pickup_ticks: u32,
+    /// A repeat sign closes the score: it is played twice, going back to the start.
+    #[serde(default)]
+    pub repeat: bool,
+    pub treble: Vec<ScoreNoteDto>,
+    pub bass: Vec<ScoreNoteDto>,
+    /// The library fragment generated from the score (`None` until it is first saved).
+    pub fragment_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A score in the list of the score editor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreSummaryDto {
+    pub id: String,
+    pub title: String,
+    pub bpm: u32,
+    pub beats: u32,
+    pub beat_unit: u32,
+    pub bars: u32,
+    pub note_count: u32,
+    pub duration_ms: u64,
+    pub fragment_id: Option<String>,
+    pub updated_at: String,
 }
 
 /// A track: one MIDI channel with a General MIDI instrument. The vector order is the track order.
@@ -274,6 +337,8 @@ pub struct CompositionTrackDto {
 pub struct CompositionDto {
     pub id: String,
     pub title: String,
+    /// Tempo of the composition; `None` until it is set. Clips of a score follow it.
+    pub bpm: Option<u32>,
     pub created_at: String,
     pub updated_at: String,
     pub tracks: Vec<CompositionTrackDto>,
@@ -301,6 +366,10 @@ pub struct LibraryFragmentDto {
     pub piece_title: Option<String>,
     pub passage: String,
     pub created_at: String,
+    pub bpm: u32,
+    /// The score the fragment was generated from, if it is one (then `session_title` is the
+    /// translated name of the system session that holds scores).
+    pub score_id: Option<String>,
 }
 
 /// Payload of the Tauri `playback-progress` event (emitted every 50 ms during playback).
@@ -554,6 +623,10 @@ pub struct AttemptDto {
 pub struct MelodyDetailDto {
     pub melody: MelodyDto,
     pub notes: Vec<NoteDto>,
+    /// The notation the melody came from, if it came from a score: the frozen copy kept with it (or,
+    /// for a melody made before copies were kept, the score its fragment still belongs to). The
+    /// frontend draws it on a staff, after checking that it matches `notes`.
+    pub score: Option<ScoreDto>,
     /// Newest first, with their details (for the ghost, the history and the statistics).
     pub attempts: Vec<AttemptDto>,
 }

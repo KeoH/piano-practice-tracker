@@ -86,6 +86,13 @@ export class ComposerViewComponent {
     this.pointer.set(this.store.libraryDrag() ? { x: ev.clientX, y: ev.clientY } : null);
   }
 
+  protected setBpm(input: HTMLInputElement): void {
+    const d = this.store.doc();
+    if (!d) return;
+    if (input.value.trim()) this.store.setBpm(+input.value);
+    input.value = String(this.store.doc()?.bpm ?? '');
+  }
+
   protected saveTitle(input: HTMLInputElement): void {
     const d = this.store.doc();
     if (!d) return;

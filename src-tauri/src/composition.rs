@@ -3,7 +3,8 @@
 //!
 //! - Each clip is the `[trim_start, trim_start + length)` window of its fragment, cut with
 //!   `midi_slicer::build_fragment` (open notes and the pedal are closed at the window's end),
-//!   repeated `repeats` times back to back and transposed.
+//!   played at `rate_pct` of its speed (pitch unchanged), repeated `repeats` times back to back
+//!   and transposed.
 //! - The track owns the instrument: the fragment's own program changes, volume (CC7) and pan
 //!   (CC10) are dropped, and its pedal (CC64) too when the track ignores it.
 //! - Live playback leaves volume and mute to the engine's channel mix, so the mixer can change
@@ -159,11 +160,16 @@ pub fn build_tracks_with(
             let window_start = clip.trim_start_ms.saturating_mul(1000);
             let length_us = clip.length_ms.saturating_mul(1000);
             let window = build_fragment(&cache[path], window_start, window_start + length_us);
+            // The window plays at `rate_pct`: every time inside it, its closing events included, is
+            // scaled with the same formula, so a repetition ends exactly where the next one starts.
+            let rate = u64::from(clip.rate_pct.max(1));
+            let scale = |us: u64| us.saturating_mul(100) / rate;
+            let repetition_us = scale(length_us);
             for rep in 0..u64::from(clip.repeats) {
-                let offset = clip.start_ms.saturating_mul(1000) + rep * length_us;
+                let offset = clip.start_ms.saturating_mul(1000) + rep * repetition_us;
                 for ev in &window {
                     if let Some(bytes) = adapt(&ev.bytes, ch, clip.transpose, track.sustain) {
-                        out.push(TimedMidiEvent::new(offset + ev.time_us, bytes));
+                        out.push(TimedMidiEvent::new(offset + scale(ev.time_us), bytes));
                     }
                 }
             }
@@ -233,9 +239,12 @@ mod tests {
             length_ms,
             repeats: 1,
             transpose: 0,
+            rate_pct: 100,
             fragment_title: "A".into(),
             fragment_file_path: FRAG.into(),
             fragment_duration_ms: 2_000,
+            fragment_bpm: 100,
+            fragment_score_id: None,
         }
     }
 
@@ -254,7 +263,7 @@ mod tests {
     }
 
     fn doc(tracks: Vec<CompositionTrackDto>) -> CompositionDto {
-        CompositionDto { id: "x".into(), title: "X".into(), created_at: String::new(), updated_at: String::new(), tracks }
+        CompositionDto { id: "x".into(), title: "X".into(), bpm: None, created_at: String::new(), updated_at: String::new(), tracks }
     }
 
     fn build(doc: &CompositionDto, mode: MixMode) -> (Vec<TimedMidiEvent>, u64) {
@@ -307,6 +316,45 @@ mod tests {
         assert!(!evs.iter().any(|e| e.bytes[0] & 0xF0 == 0xB0 && e.bytes[1] == 7), "volume belongs to the mixer");
         assert_eq!(notes(&evs), vec![(1_000, 0x91, 60), (1_500, 0x91, 64), (2_000, 0x81, 60), (2_500, 0x81, 64)]);
         assert!(evs.windows(2).all(|w| w[0].time_us <= w[1].time_us));
+    }
+
+    #[test]
+    fn a_clip_plays_at_its_speed_without_changing_pitch() {
+        // 1 s of music at 200 % takes 0.5 s; at 50 % it takes 2 s.
+        let mut fast = clip(0, 0, 1_000);
+        fast.rate_pct = 200;
+        let (evs, duration) = build(&doc(vec![track(vec![fast])]), MixMode::Live);
+        assert_eq!(duration, 500_000);
+        assert_eq!(notes(&evs), vec![(0, 0x90, 60), (250, 0x90, 64), (500, 0x80, 60), (500, 0x80, 64)]);
+
+        let mut slow = clip(0, 0, 1_000);
+        slow.rate_pct = 50;
+        let (evs, duration) = build(&doc(vec![track(vec![slow])]), MixMode::Live);
+        assert_eq!(duration, 2_000_000);
+        assert_eq!(notes(&evs), vec![(0, 0x90, 60), (1_000, 0x90, 64), (2_000, 0x80, 60), (2_000, 0x80, 64)]);
+    }
+
+    #[test]
+    fn repetitions_of_a_sped_up_clip_still_meet_at_the_seam() {
+        // 1 s at 150 % lasts 666 666 µs: the second repetition starts exactly where the first ends,
+        // with the note-offs first and the new note-on last.
+        let mut c = clip(0, 0, 1_000);
+        c.rate_pct = 150;
+        c.repeats = 2;
+        let (evs, duration) = build(&doc(vec![track(vec![c])]), MixMode::Live);
+        let rep_us = 1_000_000u64 * 100 / 150;
+        assert_eq!(duration, 1_334_000, "the millisecond end rounds up");
+        let at_seam: Vec<u8> = evs.iter().filter(|e| e.time_us == rep_us).map(|e| e.bytes[0] & 0xF0).collect();
+        assert_eq!(at_seam.first(), Some(&0x80));
+        assert_eq!(at_seam.last(), Some(&0x90));
+        assert_eq!(evs.iter().filter(|e| e.bytes[0] == 0x90).map(|e| e.time_us).collect::<Vec<_>>().len(), 4);
+    }
+
+    #[test]
+    fn a_clip_at_normal_speed_sounds_exactly_as_before() {
+        let (evs, duration) = build(&doc(vec![track(vec![clip(1_000, 0, 2_000)])]), MixMode::Live);
+        assert_eq!(duration, 3_000_000);
+        assert_eq!(notes(&evs), vec![(1_000, 0x90, 60), (1_500, 0x90, 64), (2_000, 0x80, 60), (2_500, 0x80, 64)]);
     }
 
     #[test]

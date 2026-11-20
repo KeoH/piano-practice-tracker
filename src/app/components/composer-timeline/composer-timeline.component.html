@@ -147,7 +147,7 @@
                     <span class="pointer-events-none absolute inset-x-2 top-1 flex items-baseline gap-2 overflow-hidden whitespace-nowrap">
                       <span class="truncate text-[11.5px] font-semibold text-fg-strong">{{ v.clip.fragment_title }}</span>
                       <span class="tabular shrink-0 text-[10.5px]" [style.color]="'rgb(' + row.rgb + ')'">
-                        {{ formatMs(v.clip.length_ms * v.clip.repeats) }}@if (v.clip.repeats > 1) { · ×{{ v.clip.repeats }} }@if (v.clip.transpose) { · {{ v.clip.transpose > 0 ? '+' : '' }}{{ v.clip.transpose }} }
+                        {{ formatMs(clipEnd(v.clip) - v.clip.start_ms) }}@if (v.clip.repeats > 1) { · ×{{ v.clip.repeats }} }@if (v.clip.transpose) { · {{ v.clip.transpose > 0 ? '+' : '' }}{{ v.clip.transpose }} }@if (v.clip.rate_pct !== 100) { · {{ v.clip.rate_pct }} % }
                       </span>
                     </span>
                     <app-clip-roll

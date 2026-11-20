@@ -124,6 +124,10 @@ app-root {
   .dot {
     @apply inline-block h-[7px] w-[7px] shrink-0 rounded-full;
   }
+  /* Clefs, rests and accidentals of the score editor (the bundled Noto Music font) */
+  .music {
+    font-family: 'Noto Music', serif;
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
     @apply font-mono;

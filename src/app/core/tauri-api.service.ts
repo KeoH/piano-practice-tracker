@@ -31,6 +31,8 @@ import {
   type PieceDto,
   type PieceSummaryDto,
   type PlaybackProgress,
+  type ScoreDto,
+  type ScoreSummaryDto,
   type PracticeStatsDto,
   type SessionDetailDto,
   type SessionDto,
@@ -264,6 +266,45 @@ export class TauriApiService {
   /** Applies the mixer live (track order) if the composition is the one loaded in the player. */
   setCompositionMix(compositionId: string, mix: TrackMixDto[]): Promise<void> {
     return this.call('set_composition_mix', { compositionId, mix });
+  }
+
+  // ---- Scores (the staff editor) ----
+  getScores(): Promise<ScoreSummaryDto[]> {
+    return this.call('get_scores');
+  }
+
+  /** New empty score (an empty title gets the default one). It has no fragment until it is saved with notes. */
+  createScore(title: string): Promise<ScoreDto> {
+    return this.call('create_score', { title });
+  }
+
+  getScore(scoreId: string): Promise<ScoreDto> {
+    return this.call('get_score', { scoreId });
+  }
+
+  /** Saves the whole score and regenerates its fragment; resolves with the score as stored. */
+  saveScore(score: ScoreDto): Promise<ScoreDto> {
+    return this.call('save_score', { score });
+  }
+
+  /** Deletes the score, its fragment and the clips that use it. */
+  deleteScore(scoreId: string): Promise<void> {
+    return this.call('delete_score', { scoreId });
+  }
+
+  /** Plays the score as it is in the editor from `startMs`; progress reports it as `score:<id>`. */
+  playScore(score: ScoreDto, startMs: number): Promise<void> {
+    return this.call('play_score', { score, startMs: Math.max(0, Math.round(startMs)) });
+  }
+
+  /** Swaps the notes of the score that is playing for the edited ones, keeping the position. */
+  updateScorePlayback(score: ScoreDto): Promise<void> {
+    return this.call('update_score_playback', { score });
+  }
+
+  /** Plays one key for a moment (it replaces what was playing). */
+  previewNote(key: number): Promise<void> {
+    return this.call('preview_note', { key });
   }
 
   // ---- Practice statistics ----

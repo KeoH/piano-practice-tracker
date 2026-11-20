@@ -89,9 +89,20 @@ interface LibraryGroup {
                   />
                   <span class="flex min-w-0 flex-col gap-0.5">
                     <span class="truncate text-[13px] font-medium text-fg">{{ f.title }}</span>
-                    <span class="truncate text-xs text-faint">{{ f.passage || f.session_title }} · {{ i18n.shortDate(f.session_date) }}</span>
+                    <span class="truncate text-xs text-faint">
+                      @if (f.score_id) {
+                        {{ f.passage || ('score.inLibrary' | t) }} · {{ f.bpm }} BPM
+                      } @else {
+                        {{ f.passage || f.session_title }} · {{ i18n.shortDate(f.session_date) }}
+                      }
+                    </span>
                   </span>
                   <span class="flex items-center gap-2">
+                    @if (f.score_id) {
+                      <span class="inline-flex h-[22px] items-center gap-1 rounded-full border border-accent/40 bg-accent/10 px-2 text-[11.5px] text-accent">
+                        <app-icon name="music" [size]="11" /> {{ 'score.inLibrary' | t }}
+                      </span>
+                    }
                     @if (used) {
                       <span class="inline-flex h-[22px] items-center rounded-full border border-line-strong px-2 text-[11.5px] text-muted">
                         {{ 'composer.library.used' | tp: used }}

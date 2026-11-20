@@ -40,14 +40,22 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 - File fragments under a **piece** and a **passage** (for example "Bars 13-16"), and see every take of a passage in chronological order to hear your progress.
 - **Compare two takes** on the same time scale.
 
+### Scores
+- **Write a fragment on a staff:** treble clef for the right hand and bass clef for the left, in 4/4, 3/4 or 2/4. The bars continue on new lines like a printed score. Drag note values (whole to sixteenth, dotted, sharps and flats) onto the bars, move them, and listen while you write.
+- **Chords, ties, pickups and repeats:** put a note on the beat of another to make a chord, tie notes (also over bar lines), start with a shorter pickup bar (the score closes with the bar that completes it) and end with a repeat sign to play it twice.
+- **A tools panel that stays in view** while a long score scrolls: transport, note values and the score's settings. The app's side menu can also be folded to icons to make room.
+- A score is saved as a **fragment** you can place in the composer or turn into a challenge.
+
 ### Composer
 - Arrange fragments on up to 15 **tracks**, each with its own General MIDI instrument, volume, mute and solo.
 - Trim, split, repeat and transpose **clips**, with undo and redo.
+- Give the composition a **tempo**: the scores you add follow it, and recorded clips can be played faster or slower (the pitch does not change) to keep time with it.
 - Export the result as **WAV** or as a **multitrack MIDI** file.
 
 ### Challenges
 - Play a melody (a fragment, an imported `.mid` or one of the five built-in starter tunes) at 40-150 % of its tempo and get scored live on every note, with a record to beat and a "ghost" of your best attempt.
 - Every attempt is saved with its accuracy, mistakes and timing; the Statistics view charts your progress per melody.
+- A challenge made from a **score** is shown as **notation** on the staff, with the notes coloured as you play them.
 
 ### Statistics
 - Time practised today and this week against a **weekly goal**, current and best **streaks**, a **year heatmap** and the last 30 days.
@@ -75,6 +83,14 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
   <tr>
     <td align="center"><b>Repertoire</b>: takes grouped by passage</td>
     <td align="center"><b>Statistics</b>: streaks, goal and heatmap</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/score.png" alt="The score editor: a waltz on a grand staff with a pickup bar, chords, a tie and a repeat sign, and the tools panel at the left" /></td>
+    <td width="50%"><img src="docs/screenshots/challenge.png" alt="A challenge made from a score, shown as notation with the notes coloured as they were played, and the result of the attempt" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Scores</b>: write fragments on a staff</td>
+    <td align="center"><b>Challenges</b> from a score, as notation</td>
   </tr>
 </table>
 
@@ -221,6 +237,7 @@ src-tauri/src/       Rust backend
   android_midi.rs    adapts the Android MIDI plugin to the recorder (Android only)
   midi_slicer.rs     activity analysis, extraction and trimming (midly)
   audio_engine.rs    synthesizer, sequencer and metronome (cpal + rustysynth)
+  score.rs           scores: validation and the MIDI they make
   vault.rs, db.rs    vaults, locking and SQLite storage
 src-tauri/plugins/android-midi/   Tauri plugin (Rust + Kotlin) over Android's MidiManager
 src-tauri/gen/android/            generated Android project (Gradle)

@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { ChallengeViewComponent } from './components/challenge-view/challenge-view.component';
 import { ComposerViewComponent } from './components/composer-view/composer-view.component';
 import { ConfirmDialogComponent } from './components/confirm-dialog/confirm-dialog.component';
+import { ScoreEditorComponent } from './components/score-editor/score-editor.component';
 import { SettingsDialogComponent } from './components/settings-dialog/settings-dialog.component';
 import { SessionViewComponent } from './components/session-view/session-view.component';
 import { PiecesViewComponent } from './components/pieces-view/pieces-view.component';
@@ -16,6 +17,8 @@ import { TranslatePipe } from './core/i18n/translate.pipe';
 import { LanguageStore } from './core/language.store';
 import { NavStore } from './core/nav.store';
 import { PlaybackStore } from './core/playback.store';
+import { gridTicks, notatedValue } from './core/score';
+import { ScoreStore } from './core/score.store';
 import { RecordingStore } from './core/recording.store';
 import { SessionStore } from './core/session.store';
 import { TauriApiService } from './core/tauri-api.service';
@@ -30,6 +33,7 @@ import { VaultStore } from './core/vault.store';
     StatsViewComponent,
     PiecesViewComponent,
     ComposerViewComponent,
+    ScoreEditorComponent,
     ChallengeViewComponent,
     SettingsDialogComponent,
     VaultWelcomeComponent,
@@ -47,6 +51,7 @@ export class App implements OnInit {
   private readonly recording = inject(RecordingStore);
   private readonly sessions = inject(SessionStore);
   private readonly compositions = inject(CompositionStore);
+  private readonly scores = inject(ScoreStore);
   private readonly challenge = inject(ChallengeStore);
   protected readonly nav = inject(NavStore);
   private readonly confirm = inject(ConfirmService);
@@ -67,7 +72,7 @@ export class App implements OnInit {
    * Global shortcuts (only when focus is not on an editable field):
    * - Space: play/pause of the active player.
    * - Ctrl+Z: undo the last trim of the raw recording, on the "Record & trim" tab.
-   * - In the composer, see `composerKey`.
+   * - In the composer, see `composerKey`; in the score editor, `scoreKey`.
    */
   protected onGlobalKey(ev: KeyboardEvent): void {
     if (ev.metaKey) return;
@@ -75,6 +80,10 @@ export class App implements OnInit {
     const t = ev.target as HTMLElement | null;
     if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
     if (this.nav.view() === 'compose' && this.composerKey(ev, t)) {
+      ev.preventDefault();
+      return;
+    }
+    if (this.nav.view() === 'scores' && this.scoreKey(ev, t)) {
       ev.preventDefault();
       return;
     }
@@ -93,6 +102,55 @@ export class App implements OnInit {
     if (!this.playback.activeFile() && !this.playback.progress()) return;
     ev.preventDefault();
     void this.playback.toggleActive();
+  }
+
+  /**
+   * Score editor shortcuts; returns whether the key was handled.
+   * Space plays/pauses, Ctrl+Z / Ctrl+Y undo and redo, 1-5 choose a note value (and give it to the
+   * selected note), . dots or undots it, # and b sharpen and flatten, Delete removes the selected note, T ties it, Up and
+   * Down move it a line or space (Shift: an octave), Left and Right a grid step, Esc deselects it.
+   */
+  private scoreKey(ev: KeyboardEvent, target: HTMLElement | null): boolean {
+    const s = this.scores;
+    if (!s.doc()) return false;
+    const key = ev.key.toLowerCase();
+    const arrow = ev.key.startsWith('Arrow');
+    if (ev.repeat && !arrow) return false;
+    if (ev.ctrlKey && !ev.altKey && (key === 'z' || key === 'y')) {
+      if (key === 'y' || ev.shiftKey) s.redo();
+      else s.undo();
+      return true;
+    }
+    if (ev.ctrlKey || ev.altKey) return false;
+    if (ev.code === 'Space') {
+      if (target?.tagName === 'BUTTON') return false;
+      void s.togglePlay();
+      return true;
+    }
+    const kinds = { '1': 'whole', '2': 'half', '3': 'quarter', '4': 'eighth', '5': 'sixteenth' } as const;
+    if (key in kinds) {
+      s.chooseKind(kinds[key as keyof typeof kinds]);
+      return true;
+    }
+    if (key === '.') {
+      s.toggleDotted();
+      return true;
+    }
+    if (key === 't') s.toggleTieSelected();
+    else if (ev.key === '#') s.toggleAccidental('sharp');
+    else if (key === 'b') s.toggleAccidental('flat');
+    else if (ev.key === 'Escape') s.selectNote(null);
+    else {
+      const sel = s.selectedNote();
+      if (!sel) return false;
+      if (ev.key === 'Delete' || ev.key === 'Backspace') s.removeSelected();
+      else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') s.shiftSelected((ev.key === 'ArrowUp' ? 1 : -1) * (ev.shiftKey ? 7 : 1));
+      else if (arrow) {
+        const grid = gridTicks(notatedValue(sel.note.duration_ticks)?.kind ?? 'quarter');
+        s.nudgeSelected((ev.key === 'ArrowLeft' ? -1 : 1) * grid);
+      } else return false;
+    }
+    return true;
   }
 
   /**

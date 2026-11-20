@@ -288,6 +288,142 @@
     return out;
   }
 
+
+  // ---- Scores: a small invented waltz, and a challenge made from it ----
+
+  const N = (id, tick, dur, key, accidental = null, tie = false) => ({ id, tick, duration_ticks: dur, key, accidental, tie });
+  /** 3/4, one beat of pickup (and a closing bar of the two it lacks), a repeat sign at the end. */
+  const waltz = {
+    id: 'sc-waltz',
+    title: 'Waltz in C',
+    bpm: 96,
+    beats: 3,
+    beat_unit: 4,
+    bars: 7,
+    pickup_ticks: 480,
+    repeat: true,
+    treble: [
+      N('p', 0, 480, 67),
+      N('a1', 480, 480, 72), N('a2', 960, 480, 76), N('a3', 1440, 480, 79),
+      N('b1', 1920, 1440, 81),
+      N('c1', 3360, 480, 79), N('c2', 3840, 480, 76), N('c3', 4320, 480, 72),
+      N('d1', 4800, 1440, 74, null, true),
+      N('e1', 6240, 480, 74), N('e2', 6720, 480, 78, 'sharp'), N('e3', 7200, 480, 76),
+      N('f1', 7680, 960, 72), N('f2', 7680, 960, 76), N('f3', 7680, 960, 79),
+    ],
+    bass: [
+      N('g1', 480, 480, 48), N('g2', 960, 480, 52), N('g3', 960, 480, 55), N('g4', 1440, 480, 52), N('g5', 1440, 480, 55),
+      N('h1', 1920, 480, 45), N('h2', 2400, 480, 48), N('h3', 2400, 480, 52), N('h4', 2880, 480, 48), N('h5', 2880, 480, 52),
+      N('i1', 3360, 480, 48), N('i2', 3840, 480, 52), N('i3', 3840, 480, 55), N('i4', 4320, 480, 52), N('i5', 4320, 480, 55),
+      N('j1', 4800, 480, 43), N('j2', 5280, 480, 47), N('j3', 5280, 480, 50), N('j4', 5760, 480, 47), N('j5', 5760, 480, 50),
+      N('k1', 6240, 480, 43), N('k2', 6720, 480, 47), N('k3', 6720, 480, 50), N('k4', 7200, 480, 47), N('k5', 7200, 480, 50),
+      N('l1', 7680, 960, 48), N('l2', 7680, 960, 55),
+    ],
+    fragment_id: 'f-waltz',
+    created_at: iso(today),
+    updated_at: iso(today),
+  };
+  const waltzTicks = (waltz.bars - 1) * 1440;
+
+  /** What the score plays (a tie chain is one note, the repeat plays it twice), as the melody's notes are. */
+  function waltzNotes() {
+    const ms = (tick) => (tick * 125) / waltz.bpm;
+    const out = [];
+    for (let pass = 0; pass < (waltz.repeat ? 2 : 1); pass++) {
+      for (const staff of ['treble', 'bass']) {
+        const notes = waltz[staff];
+        const next = (n) => notes.find((m) => m.key === n.key && m.tick === n.tick + n.duration_ticks);
+        for (const n of notes) {
+          if (notes.some((m) => m.tie && next(m) === n)) continue;
+          let end = n.tick + n.duration_ticks;
+          for (let cur = n; cur.tie && next(cur); ) {
+            cur = next(cur);
+            end = cur.tick + cur.duration_ticks;
+          }
+          out.push({ key: n.key, start: ms(n.tick + pass * waltzTicks), end: ms(end + pass * waltzTicks) });
+        }
+      }
+    }
+    out.sort((a, b) => a.start - b.start || a.key - b.key);
+    const lead = out[0].start;
+    return out.map((n) => ({ key: n.key, start_ms: Math.round(n.start - lead), end_ms: Math.round(n.end - lead), velocity: 78 }));
+  }
+  const challengeNotes = waltzNotes();
+  const challengeMelody = {
+    id: 'm-waltz',
+    title: 'Waltz in C',
+    source: 'fragment',
+    source_fragment_id: 'f-waltz',
+    file_path: `${VAULT}/midi/melodies/melody_m-waltz.mid`,
+    bpm: waltz.bpm,
+    duration_ms: challengeNotes[challengeNotes.length - 1].end_ms,
+    note_count: challengeNotes.length,
+    created_at: iso(today),
+    updated_at: iso(today),
+  };
+
+  /** An attempt with a few slips: some notes good rather than perfect, some missed, some played wrong. */
+  function waltzAttempt() {
+    const missed = new Set([14, 15, 40, 63]);
+    const notes = challengeNotes.map((_, i) => {
+      if (missed.has(i)) return { status: 'missed', offset_ms: null };
+      const off = Math.round((rand() - 0.45) * 60);
+      return { status: Math.abs(off) <= 22 ? 'perfect' : 'good', offset_ms: off };
+    });
+    const hits = notes.filter((n) => n.status !== 'missed').length;
+    const errors = [
+      { time_ms: challengeNotes[14].start_ms + 120, kind: 'wrong', played_key: challengeNotes[14].key + 2, expected_key: challengeNotes[14].key },
+      { time_ms: challengeNotes[40].start_ms + 90, kind: 'extra', played_key: 60, expected_key: null },
+      { time_ms: challengeNotes[63].start_ms - 80, kind: 'extra', played_key: 72, expected_key: null },
+    ];
+    return {
+      summary: {
+        id: 'a-waltz-2',
+        melody_id: 'm-waltz',
+        created_at: iso(today),
+        tempo_pct: 80,
+        bpm: Math.round(waltz.bpm * 0.8),
+        completed: true,
+        score: 842,
+        accuracy: hits / notes.length,
+        hits,
+        perfect: notes.filter((n) => n.status === 'perfect').length,
+        misses: notes.length - hits,
+        wrong: 1,
+        extra: 2,
+        mean_offset_ms: -6,
+        mean_abs_offset_ms: 19,
+        latency_comp_ms: 40,
+        duration_ms: Math.round((challengeMelody.duration_ms * 100) / 80),
+      },
+      played_midi_path: null,
+      details: { notes, errors, latency_comp_ms: 40, window_ms: 150 },
+    };
+  }
+  const earlier = (() => {
+    const a = waltzAttempt();
+    return { ...a, summary: { ...a.summary, id: 'a-waltz-1', created_at: iso(today - 3 * DAY), tempo_pct: 70, score: 731, accuracy: 0.86, hits: 78, perfect: 52, misses: 13 } };
+  })();
+  let attempts = [earlier];
+
+  // Events the app listens to (`listen`), so the demo can play an attempt: see `playAttempt`.
+  const callbacks = {};
+  const listeners = {};
+  const emit = (event, payload) => (listeners[event] ?? []).forEach((id) => callbacks[id]?.({ event, id, payload }));
+  /** After the challenge starts: the notes are played, a few badly, and the attempt ends. */
+  function playAttempt() {
+    setTimeout(() => {
+      const attempt = waltzAttempt();
+      attempt.details.notes.forEach((n, i) => {
+        if (n.status === 'missed') return;
+        emit('challenge-note', { time_ms: challengeNotes[i].start_ms, key: challengeNotes[i].key, kind: n.status, expected_index: i, offset_ms: n.offset_ms });
+      });
+      for (const e of attempt.details.errors) emit('challenge-note', { time_ms: e.time_ms, key: e.played_key, kind: e.kind, expected_index: null, offset_ms: null });
+      attempts = [attempt, earlier];
+      emit('challenge-finished', { attempt, error: null });
+    }, 400);
+  }
+
   const vaultInfo = {
     current: VAULT,
     name: 'Piano Vault',
@@ -297,7 +433,11 @@
   };
 
   const handlers = {
-    'plugin:event|listen': () => 1,
+    'plugin:event|listen': ({ event, handler }) => {
+      (listeners[event] ??= []).push(handler);
+      return 1;
+    },
+    'plugin:event|unlisten': () => null,
     get_language: () => ({ preference: null, effective: 'en', system: 'en' }),
     get_vault_info: () => vaultInfo,
     list_midi_ports: () => [
@@ -315,6 +455,22 @@
     get_composition: () => composition,
     save_composition: ({ composition: doc }) => doc,
     get_library_fragments: () => library,
+    get_scores: () => [
+      { id: waltz.id, title: waltz.title, bpm: waltz.bpm, beats: waltz.beats, beat_unit: waltz.beat_unit, bars: waltz.bars, note_count: waltz.treble.length + waltz.bass.length, duration_ms: 17_500, fragment_id: waltz.fragment_id, updated_at: waltz.updated_at },
+    ],
+    get_score: () => waltz,
+    save_score: ({ score }) => score,
+    play_score: () => null,
+    update_score_playback: () => null,
+    preview_note: () => null,
+    get_melodies: () => [
+      { melody: challengeMelody, attempt_count: attempts.length, best_score: Math.max(...attempts.map((a) => a.summary.score)), last_attempt_at: attempts[0].summary.created_at, recent_accuracy: attempts.map((a) => a.summary.accuracy).reverse(), mastered_tempo_pct: null },
+    ],
+    get_melody_detail: () => ({ melody: challengeMelody, notes: challengeNotes, score: waltz, attempts }),
+    start_challenge: ({ tempoPct }) => {
+      playAttempt();
+      return { melody_id: challengeMelody.id, tempo_pct: tempoPct ?? 80, bpm: Math.round((waltz.bpm * (tempoPct ?? 80)) / 100), count_in_ms: 2000, latency_comp_ms: 40, window_ms: 150 };
+    },
     count_composition_uses: () => 0,
     get_soundfont_programs: () => Array.from({ length: 128 }, (_, i) => i),
     get_soundfont_info: () => ({
@@ -338,7 +494,10 @@
   window.isTauri = true;
   window.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
-    transformCallback: () => ++callbackId,
+    transformCallback: (callback) => {
+      callbacks[++callbackId] = callback;
+      return callbackId;
+    },
     unregisterCallback: () => undefined,
     convertFileSrc: (path) => path,
     invoke: async (cmd, args = {}) => (cmd in handlers ? handlers[cmd](args) : null),

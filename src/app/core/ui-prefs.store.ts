@@ -4,6 +4,7 @@ import { Injectable, signal } from '@angular/core';
 export type TimelineMode = 'roll' | 'activity';
 
 const KEY_TIMELINE_MODE = 'piano-tracker.timelineMode';
+const KEY_SIDEBAR_COLLAPSED = 'piano-tracker.sidebarCollapsed';
 
 /**
  * View preferences of this machine (not vault data): kept in `localStorage`, which may be
@@ -12,6 +13,18 @@ const KEY_TIMELINE_MODE = 'piano-tracker.timelineMode';
 @Injectable({ providedIn: 'root' })
 export class UiPrefsStore {
   readonly timelineMode = signal<TimelineMode>(readMode());
+  /** The app's side menu shows only its icons, to leave room for the content. */
+  readonly sidebarCollapsed = signal(readFlag(KEY_SIDEBAR_COLLAPSED));
+
+  toggleSidebar(): void {
+    const next = !this.sidebarCollapsed();
+    this.sidebarCollapsed.set(next);
+    try {
+      localStorage.setItem(KEY_SIDEBAR_COLLAPSED, next ? '1' : '0');
+    } catch {
+      // Without storage the preference only lasts this session.
+    }
+  }
 
   setTimelineMode(mode: TimelineMode): void {
     this.timelineMode.set(mode);
@@ -24,6 +37,14 @@ export class UiPrefsStore {
 
   toggleTimelineMode(): void {
     this.setTimelineMode(this.timelineMode() === 'roll' ? 'activity' : 'roll');
+  }
+}
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
   }
 }
 
