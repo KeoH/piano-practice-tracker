@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.7.1...v0.8.0) (2026-11-20)
+
+
+### Features
+
+* fixed tools panel, collapsible menu, and screenshots of the score editor ([c64b986](https://github.com/KeoH/piano-practice-tracker/commit/c64b986189624ddfdbfa0ccf2f5399726b274847))
+* notation in challenges, palette editing, closing bar of a pickup ([ba51062](https://github.com/KeoH/piano-practice-tracker/commit/ba5106207281dc71675a1ee186be1ce95c98cbe4))
+* score editor with staff notation, composer tempo and clip speed ([d5510c6](https://github.com/KeoH/piano-practice-tracker/commit/d5510c68c45e00a46e1e13ea76996f09460e84fa))
+* score editor with staff notation, composer tempo and notation in challenges ([42a0a6f](https://github.com/KeoH/piano-practice-tracker/commit/42a0a6f99e9c5ec5df4c8967a603f649d2ac3eae))
+
 ## [0.7.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.7.0...v0.7.1) (2026-11-02)
 
 
