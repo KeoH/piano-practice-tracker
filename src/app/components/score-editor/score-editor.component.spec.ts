@@ -59,10 +59,12 @@ describe('ScoreEditorComponent', () => {
       await open(withNote());
       expect(pdfButton().disabled).toBe(false);
       pdfButton().click();
-      await vi.waitFor(() => expect(mock.names()).toContain('exportScorePdf'));
+      // The PDF is really drawn, and the first time that loads `score-pdf` and `pdf-lib` on demand: on a busy
+      // CI runner that takes longer than the 1 s `waitFor` allows by default.
+      await vi.waitFor(() => expect(mock.names()).toContain('exportScorePdf'), { timeout: 10_000 });
       expect(mock.argsOf('pickSavePath')?.[1]).toBe('Étude.pdf');
       expect(mock.argsOf('exportScorePdf')?.[0]).toBe('/out/Étude.pdf');
-    });
+    }, 15_000);
   });
 
   it('offers to create the first score when there are none', async () => {
