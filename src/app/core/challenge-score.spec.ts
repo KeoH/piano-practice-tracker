@@ -46,8 +46,20 @@ describe('scoreEvents', () => {
     ]);
   });
 
+  it('plays the notes before a repeat sign twice and the ones after it once, like the MIDI does', () => {
+    const s = score([n('a', 0, Q, 60), n('b', 4 * Q, Q, 62), n('c', 8 * Q, Q, 64)], [], { bars: 3, repeat_bar: 1 });
+    // Bars of 2000 ms: bars 1-2 (4000 ms), then everything again.
+    expect(scoreEvents(s).map((e) => [e.ids[0], e.startMs])).toEqual([
+      ['a', 0],
+      ['b', 2000],
+      ['a', 4000],
+      ['b', 6000],
+      ['c', 8000],
+    ]);
+  });
+
   it('plays the score twice when it repeats, the second pass after the first', () => {
-    const s = score([n('a', 0, Q, 60), n('b', Q, Q, 62)], [], { repeat: true });
+    const s = score([n('a', 0, Q, 60), n('b', Q, Q, 62)], [], { repeat_bar: 1 });
     // Two 4/4 bars at 120 BPM last 4000 ms.
     expect(scoreEvents(s).map((e) => [e.ids[0], e.startMs])).toEqual([
       ['a', 0],
@@ -74,8 +86,13 @@ describe('mapScoreToMelody', () => {
   });
 
   it('maps a repeat to the same notes of the score twice', () => {
-    const s = score([n('a', 0, Q, 60), n('b', Q, Q, 62)], [], { repeat: true });
+    const s = score([n('a', 0, Q, 60), n('b', Q, Q, 62)], [], { repeat_bar: 1 });
     expect(mapScoreToMelody(s, melodyOf(s))!.ids).toEqual([['a'], ['b'], ['a'], ['b']]);
+  });
+
+  it('maps a repeat in the middle: the notes before the sign twice, the ones after it once', () => {
+    const s = score([n('a', 0, Q, 60), n('b', 4 * Q, Q, 62), n('c', 8 * Q, Q, 64)], [], { bars: 3, repeat_bar: 0 });
+    expect(mapScoreToMelody(s, melodyOf(s))!.ids).toEqual([['a'], ['a'], ['b'], ['c']]);
   });
 
   it('tolerates the rounding of the MIDI, but not a different melody', () => {
@@ -109,7 +126,7 @@ describe('statesById', () => {
   });
 
   it('shows the worst of the two passes of a repeat, so a mistake is not hidden', () => {
-    const s = score([n('a', 0, Q, 60)], [], { repeat: true });
+    const s = score([n('a', 0, Q, 60)], [], { repeat_bar: 1 });
     expect(statesById(map(s), ['missed', 'perfect'])).toEqual({ a: 'missed' });
     expect(statesById(map(s), ['perfect', 'good'])).toEqual({ a: 'good' });
     expect(statesById(map(s), ['perfect', null])).toEqual({ a: 'perfect' });
@@ -133,8 +150,15 @@ describe('attemptTick', () => {
     expect(attemptTick(m, 500, 100)).toBe(3 * Q);
   });
 
+  it('shows the bars after a repeat sign where they are, and the second pass over the first', () => {
+    const s = score([n('a', 0, Q, 60), n('b', 4 * Q, Q, 62)], [], { repeat_bar: 0 }); // sign at 4 Q = 2000 ms
+    const m = mapScoreToMelody(s, melodyOf(s))!;
+    expect(attemptTick(m, 2000, 100)).toBe(0);
+    expect(attemptTick(m, 4000, 100)).toBe(4 * Q); // bar 2 is only in the second pass
+  });
+
   it('shows the second pass of a repeat over the first', () => {
-    const s = score([n('a', 0, Q, 60)], [], { repeat: true });
+    const s = score([n('a', 0, Q, 60)], [], { repeat_bar: 1 });
     const m = mapScoreToMelody(s, melodyOf(s))!;
     expect(attemptTick(m, 4000, 100)).toBe(0);
     expect(attemptTick(m, 4500, 100)).toBe(Q);

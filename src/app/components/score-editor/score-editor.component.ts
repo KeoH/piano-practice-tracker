@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject } from '@angular/core';
 import { ConfirmService } from '../../core/confirm.service';
+import { ExportService, scorePdfKey } from '../../core/export.service';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -12,6 +13,7 @@ import {
   PALETTE_KINDS,
   TIME_SIGNATURES,
   canDot,
+  barLabel,
   barTicks,
   minBars,
   noteCount,
@@ -34,6 +36,9 @@ const NOTE_GLYPHS: Record<NoteKind, string> = {
   thirtysecond: '\u{1D162}',
 };
 
+/** Pixels each palette glyph is lifted by so its notehead sits in the middle of its button (the font puts them low). */
+const GLYPH_LIFT: Record<NoteKind, number> = { whole: -9, half: -2, quarter: -2, eighth: -2, sixteenth: -2, thirtysecond: -2 };
+
 /**
  * The score editor: a score's header and transport, the palette of note values to drag onto the
  * staff, and the grand staff itself (`ScoreStaffComponent`, which turns the pointer into edits).
@@ -51,9 +56,11 @@ export class ScoreEditorComponent {
   protected readonly api = inject(TauriApiService);
   private readonly i18n = inject(I18nService);
   private readonly confirm = inject(ConfirmService);
+  protected readonly exporter = inject(ExportService);
 
   protected readonly formatMs = formatMs;
   protected readonly glyphs = NOTE_GLYPHS;
+  protected readonly glyphLift = GLYPH_LIFT;
   protected readonly palette = PALETTE_KINDS;
   protected readonly timeSignatures = TIME_SIGNATURES;
   protected readonly MIN_BPM = MIN_BPM;
@@ -69,6 +76,11 @@ export class ScoreEditorComponent {
     const d = this.store.doc();
     return d ? noteCount(d) : 0;
   });
+  /** The PDF is being made or written. */
+  protected readonly exportingPdf = computed(() => {
+    const d = this.store.doc();
+    return !!d && this.exporter.isBusy(scorePdfKey(d.id));
+  });
   protected readonly canZoomIn = computed(() => this.store.zoom() < SCORE_ZOOM_STEPS.at(-1)!);
   protected readonly canZoomOut = computed(() => this.store.zoom() > SCORE_ZOOM_STEPS[0]);
   /** Pickup lengths the time signature allows, in half beats (0 = none). */
@@ -79,6 +91,13 @@ export class ScoreEditorComponent {
     const out = [{ ticks: 0, label: this.i18n.t('score.pickupNone') }];
     for (let t = 240; t < bar; t += 240) out.push({ ticks: t, label: this.i18n.plural('score.pickupBeats', t / 480) });
     return out;
+  });
+  /** Where the repeat sign is, for the panel that shows the selected one. */
+  protected readonly repeatLabel = computed(() => {
+    const d = this.store.doc();
+    if (!d || d.repeat_bar === null) return '';
+    const n = barLabel(d, d.repeat_bar);
+    return n === null ? this.i18n.t('score.repeatAfterPickup') : this.i18n.t('score.repeatAfterBar', { n });
   });
   protected readonly canAddBar = computed(() => (this.store.doc()?.bars ?? MAX_BARS) < MAX_BARS);
   protected readonly selectedLabel = computed(() => {
@@ -146,6 +165,12 @@ export class ScoreEditorComponent {
     const steps: readonly number[] = SCORE_ZOOM_STEPS;
     const i = steps.indexOf(this.store.zoom());
     this.store.zoom.set(steps[Math.min(steps.length - 1, Math.max(0, (i < 0 ? 2 : i) + direction))]);
+  }
+
+  /** Starts dragging the repeat sign from the palette; the staff takes the drop (or a click just chooses it). */
+  protected startRepeatDrag(ev: PointerEvent): void {
+    if (ev.button !== 0) return;
+    this.store.repeatDrag.set(true);
   }
 
   /** Starts dragging a note value from the palette; the staff takes the drop (or a click just chooses it). */

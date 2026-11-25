@@ -292,7 +292,7 @@
   // ---- Scores: a small invented waltz, and a challenge made from it ----
 
   const N = (id, tick, dur, key, accidental = null, tie = false) => ({ id, tick, duration_ticks: dur, key, accidental, tie });
-  /** 3/4, one beat of pickup (and a closing bar of the two it lacks), a repeat sign at the end. */
+  /** 3/4, one beat of pickup (and a closing bar of the two it lacks), a repeat sign at the end and a slur. */
   const waltz = {
     id: 'sc-waltz',
     title: 'Waltz in C',
@@ -301,7 +301,8 @@
     beat_unit: 4,
     bars: 7,
     pickup_ticks: 480,
-    repeat: true,
+    repeat_bar: 6,
+    slurs: [{ id: 'sl1', from: 'a1', to: 'a3' }],
     treble: [
       N('p', 0, 480, 67),
       N('a1', 480, 480, 72), N('a2', 960, 480, 76), N('a3', 1440, 480, 79),
@@ -325,11 +326,11 @@
   };
   const waltzTicks = (waltz.bars - 1) * 1440;
 
-  /** What the score plays (a tie chain is one note, the repeat plays it twice), as the melody's notes are. */
+  /** What the score plays (a tie chain is one note, the repeat sign on the last bar plays it twice), as the melody's notes are. */
   function waltzNotes() {
     const ms = (tick) => (tick * 125) / waltz.bpm;
     const out = [];
-    for (let pass = 0; pass < (waltz.repeat ? 2 : 1); pass++) {
+    for (let pass = 0; pass < (waltz.repeat_bar !== null ? 2 : 1); pass++) {
       for (const staff of ['treble', 'bass']) {
         const notes = waltz[staff];
         const next = (n) => notes.find((m) => m.key === n.key && m.tick === n.tick + n.duration_ticks);

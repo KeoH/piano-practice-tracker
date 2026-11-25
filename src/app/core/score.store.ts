@@ -19,6 +19,7 @@ import {
   notatedValue,
   msToTicks,
   pageTick,
+  performedTick,
   pitchAt,
   place,
   removeNote,
@@ -28,11 +29,13 @@ import {
   setBpm,
   setNoteDuration,
   setPickup,
+  setRepeatBar,
   setTimeSignature,
   shiftStep,
   summarizeScore,
   toggleAccidental,
-  toggleRepeat,
+  toggleSlur,
+  toggleSlurFrom,
   toggleTie,
   validateScore,
 } from './score';
@@ -90,6 +93,14 @@ export class ScoreStore {
   readonly zoom = signal<number>(DEFAULT_ZOOM);
   /** Value being dragged from the palette (the staff listens for the drop). */
   readonly paletteDrag = signal<PaletteDrag | null>(null);
+  /**
+   * The repeat sign works like a note value: it is dragged from the palette (or chosen, then a click on the
+   * staff puts it) onto the bar line it goes on. `repeatDrag` is true while it is being dragged, from the
+   * palette or from where it is, and `repeatTool` while it is chosen. `repeatSelected` is the sign on the staff.
+   */
+  readonly repeatDrag = signal(false);
+  readonly repeatTool = signal(false);
+  readonly repeatSelected = signal(false);
   /** Spelling of the black keys that are placed next (and of the selected note when it changes). */
   readonly accidental = signal<Accidental | null>(null);
 
@@ -115,6 +126,11 @@ export class ScoreStore {
     return d ? pageTick(d, msToTicks(this.position(), d.bpm)) : 0;
   });
   readonly selectedNote = computed(() => findNote(this.doc(), this.selectedNoteId()));
+  /** Whether a slur starts at the selected note (the slur key then takes it away). */
+  readonly selectedStartsSlur = computed(() => {
+    const id = this.selectedNoteId();
+    return !!id && !!this.doc()?.slurs.some((sl) => sl.from === id);
+  });
   /** Length of the note that is placed next. */
   readonly toolTicks = computed(() => durationTicks(this.kind(), this.dotted() && canDot(this.kind())));
   readonly filteredScores = computed(() => {
@@ -141,6 +157,7 @@ export class ScoreStore {
     this.selectedId.set(null);
     this.doc.set(null);
     this.selectedNoteId.set(null);
+    this.clearRepeat();
     this.clearHistory();
   }
 
@@ -162,6 +179,7 @@ export class ScoreStore {
     this.selectedId.set(id);
     this.doc.set(null);
     this.selectedNoteId.set(null);
+    this.clearRepeat();
     this.clearHistory();
     if (id) await this.reload();
   }
@@ -281,6 +299,7 @@ export class ScoreStore {
 
   private restore(d: ScoreDto): void {
     if (!findNote(d, this.selectedNoteId())) this.selectedNoteId.set(null);
+    if (d.repeat_bar === null) this.repeatSelected.set(false);
     this.commit(d);
   }
 
@@ -400,6 +419,7 @@ export class ScoreStore {
 
   /** Selects a note (or none) the way a click does: the palette shows its value and edits it. */
   selectNote(id: string | null): void {
+    if (id !== null) this.repeatSelected.set(false);
     this.selectedNoteId.set(id);
     this.editing.set(id !== null);
     this.syncTool();
@@ -462,6 +482,10 @@ export class ScoreStore {
   }
 
   removeSelected(): void {
+    if (this.repeatSelected()) {
+      this.removeRepeat();
+      return;
+    }
     const id = this.selectedNoteId();
     if (id && this.update((d) => removeNote(d, id))) this.selectedNoteId.set(null);
   }
@@ -487,9 +511,58 @@ export class ScoreStore {
     if (!this.update((d) => toggleTie(d, id, newId()))) this.toast.warning(this.i18n.t('score.noRoomTie'));
   }
 
-  /** Closes the score with a repeat sign, so it is played twice from the start, or takes it away. */
-  toggleRepeat(): void {
-    this.update((d) => toggleRepeat(d));
+  /**
+   * Puts the repeat sign at the end of a bar (0 is the first one), so after it the score goes back to the
+   * start, or takes it away with `null`. A sign put on the staff is selected, like a note that was just placed.
+   */
+  setRepeatBar(bar: number | null): void {
+    this.update((d) => setRepeatBar(d, bar));
+    this.repeatTool.set(false);
+    this.repeatSelected.set(bar !== null && this.doc()?.repeat_bar === bar);
+    if (this.repeatSelected()) this.selectedNoteId.set(null);
+  }
+
+  /** Chooses the repeat sign as the thing the next click on the staff puts (or lets it go). */
+  toggleRepeatTool(): void {
+    this.repeatTool.update((v) => !v);
+    if (this.repeatTool()) {
+      this.selectedNoteId.set(null);
+      this.repeatSelected.set(false);
+    }
+  }
+
+  /** Selects the sign that is on the staff. */
+  selectRepeat(): void {
+    if (this.doc()?.repeat_bar == null) return;
+    this.selectedNoteId.set(null);
+    this.repeatTool.set(false);
+    this.repeatSelected.set(true);
+  }
+
+  /** Takes the repeat sign away. */
+  removeRepeat(): void {
+    this.setRepeatBar(null);
+  }
+
+  /** Lets go of the repeat sign: the tool, the drag and the selection (Esc). */
+  clearRepeat(): void {
+    this.repeatTool.set(false);
+    this.repeatDrag.set(false);
+    this.repeatSelected.set(false);
+  }
+
+  /** The slur key: slurs the selected note to the next one, or takes away the slur that starts at it. */
+  toggleSlurSelected(): void {
+    const id = this.selectedNoteId();
+    if (!id) return;
+    if (!this.update((d) => toggleSlurFrom(d, id, newId()))) this.toast.warning(this.i18n.t('score.cantSlur'));
+  }
+
+  /** Shift+click: slurs the selected note to `id` (a note of the same hand), or takes that slur away. */
+  slurSelectedTo(id: string): void {
+    const from = this.selectedNoteId();
+    if (!from || from === id) return;
+    if (!this.update((d) => toggleSlur(d, from, id, newId()))) this.toast.warning(this.i18n.t('score.cantSlurHand'));
   }
 
   /** Makes the first bar shorter (an anacrusis) or whole again (0 ticks). */
@@ -537,7 +610,7 @@ export class ScoreStore {
     const key = this.key();
     const d = this.doc();
     if (!key || !d) return;
-    const ms = Math.round((Math.max(0, Math.min(tick, scoreTicks(d))) * 60_000) / (480 * d.bpm));
+    const ms = Math.round((performedTick(d, Math.max(0, Math.min(tick, scoreTicks(d)))) * 60_000) / (480 * d.bpm));
     await this.playback.seek(key, ms);
   }
 

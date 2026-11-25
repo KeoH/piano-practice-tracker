@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { TranslatePipe } from '../../core/i18n/translate.pipe';
-import type { Accidental, NoteStatus, ScoreDto } from '../../core/models';
+import type { NoteStatus, ScoreDto } from '../../core/models';
 import { isBlackKey, parseNoteNames, spelledNoteName } from '../../core/music';
 import {
   LINE_SPACING,
@@ -9,14 +9,12 @@ import {
   STEP_PX,
   SYSTEM_H,
   type Hit,
-  type RestShape,
-  type StaffBox,
   type SystemBox,
+  barLineAt,
   hitAt,
   inRuler,
   layoutOf,
   noteX,
-  restShape,
   rulerTick,
   systemAt,
   xOfTick,
@@ -27,89 +25,41 @@ import {
   STAFF_NAMES,
   barLabel,
   barOf,
-  barSpanAt,
-  barSpans,
-  barTicks,
   canPlace,
   chordDuration,
   durationTicks,
   findNote,
   gridTicks,
   ledgerSteps,
-  missingTicks,
   noteEnd,
   notatedValue,
   pitchAt,
-  scoreTicks,
   snapTickInBar,
   staffNotes,
   staffStep,
-  tieLinks,
-  withRests,
 } from '../../core/score';
 import { ScoreStore } from '../../core/score.store';
+import {
+  type CurveDraw,
+  type NoteDraw,
+  type RestDraw,
+  type SystemView,
+  drawNotes,
+  drawRests,
+  drawSlurs,
+  drawTies,
+  clefOrigin,
+  flagPath,
+  systemViews,
+} from '../../core/score-draw';
 
 /** Unicode music symbols that the bundled Noto Music font draws. */
 const GLYPH = { treble: '\u{1D11E}', bass: '\u{1D122}', quarter: '\u{1D13D}', eighth: '\u{1D13E}', sixteenth: '\u{1D13F}', sharp: '♯', flat: '♭', natural: '♮' } as const;
 
-const NOTE_STEM = 33;
 const DRAG_THRESHOLD_PX = 4;
 
-interface NoteDraw {
-  id: string;
-  staff: StaffName;
-  /** Centre of the notehead (moved aside when it is a second in a chord). */
-  x: number;
-  y: number;
-  start: number;
-  end: number;
-  kind: 'whole' | 'half' | 'quarter' | 'eighth' | 'sixteenth';
-  dotted: boolean;
-  /** Notehead is hollow (whole and half notes). */
-  hollow: boolean;
-  flags: number;
-  /** Stem direction (shared by the chord) and its two ends: at the farthest notehead and at the tip. */
-  up: boolean;
-  stemX: number;
-  stemBase: number;
-  stemEnd: number;
-  hasStem: boolean;
-  ledgers: number[];
-  /** What is drawn before the note: a black key's sharp or flat, or a natural that cancels one earlier in the bar. */
-  accidental: Accidental | 'natural' | null;
-  accX: number;
-  dotX: number;
-  dotY: number;
-  label: string;
-}
-
-interface TieDraw {
-  key: string;
-  d: string;
-}
-
-interface BarMark {
-  index: number;
-  x: number;
-  label: number | null;
-}
-
-/** What a system draws apart from the notes: its bar lines and numbers and its beat guides. */
-interface SystemView {
-  sys: SystemBox;
-  marks: BarMark[];
-  beatX: number[];
-  isLast: boolean;
-}
-
-interface RestDraw {
-  key: string;
-  staff: StaffName;
-  box: StaffBox;
-  shape: RestShape;
-  x: number;
-  tick: number;
-}
+/** A notehead with the label a screen reader reads. */
+type LabeledNote = NoteDraw & { label: string };
 
 /** A preview of where a note would land. */
 interface Ghost {
@@ -200,22 +150,45 @@ interface NoteDrag {
           @if (v.isLast) {
             <line [attr.x1]="sys.right - 6" [attr.x2]="sys.right - 6" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" class="stroke-muted" stroke-width="1.2" />
             <line [attr.x1]="sys.right" [attr.x2]="sys.right" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" class="stroke-muted" stroke-width="3.2" />
-            @if (sc.repeat) {
-              <!-- Repeat sign: two dots in the middle spaces of each staff, back to the start -->
-              @for (staff of staves; track staff) {
-                @let box = sys.staves[staff];
-                <circle [attr.cx]="sys.right - 13" [attr.cy]="box.top + 15" r="2.2" class="fill-fg" />
-                <circle [attr.cx]="sys.right - 13" [attr.cy]="box.top + 25" r="2.2" class="fill-fg" />
-              }
-            }
           } @else {
             <line [attr.x1]="sys.right" [attr.x2]="sys.right" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" class="stroke-muted" stroke-width="1.2" />
+          }
+          @if (v.repeat; as rp) {
+            <!-- Repeat sign at the end of a bar: back to the start. Two dots in the middle spaces of each staff, then a thin and a thick line -->
+            @let rsel = !readonly() && store.repeatSelected();
+            @if (!rp.final) {
+              <line [attr.x1]="rp.x - 6" [attr.x2]="rp.x - 6" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" [class]="rsel ? 'stroke-accent' : 'stroke-muted'" stroke-width="1.2" />
+              <line [attr.x1]="rp.x" [attr.x2]="rp.x" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" [class]="rsel ? 'stroke-accent' : 'stroke-muted'" stroke-width="3.2" />
+            }
+            @for (staff of staves; track staff) {
+              @let box = sys.staves[staff];
+              <circle [attr.cx]="rp.x - 13" [attr.cy]="box.top + 15" r="2.2" [class]="rsel ? 'fill-accent' : 'fill-fg'" />
+              <circle [attr.cx]="rp.x - 13" [attr.cy]="box.top + 25" r="2.2" [class]="rsel ? 'fill-accent' : 'fill-fg'" />
+            }
+            @if (!readonly()) {
+              <!-- A bigger target to select the sign or drag it to another bar line -->
+              <rect
+                role="button"
+                tabindex="0"
+                class="cursor-grab touch-none outline-none"
+                fill="transparent"
+                [attr.x]="rp.x - 19"
+                [attr.y]="sys.staves.treble.top"
+                width="25"
+                [attr.height]="sys.staves.bass.bottom - sys.staves.treble.top"
+                [attr.aria-label]="'score.repeatSign' | t"
+                [attr.aria-pressed]="rsel"
+                (pointerdown)="repeatDown($event)"
+                (click)="$event.stopPropagation()"
+                (focus)="store.selectRepeat()"
+              />
+            }
           }
           <line x1="1" x2="1" [attr.y1]="sys.staves.treble.top" [attr.y2]="sys.staves.bass.bottom" class="stroke-muted" stroke-width="1.6" />
 
           <!-- Clefs, and the time signature on the first line -->
-          <text class="music pointer-events-none fill-fg" x="9" [attr.y]="sys.staves.treble.bottom - 2 * STEP_PX" font-size="40">{{ glyph.treble }}</text>
-          <text class="music pointer-events-none fill-fg" x="9" [attr.y]="sys.staves.bass.bottom - 8" font-size="40">{{ glyph.bass }}</text>
+          <text class="music pointer-events-none fill-fg" [attr.x]="clefAt(sys, 'treble').x" [attr.y]="clefAt(sys, 'treble').y" font-size="40">{{ glyph.treble }}</text>
+          <text class="music pointer-events-none fill-fg" [attr.x]="clefAt(sys, 'bass').x" [attr.y]="clefAt(sys, 'bass').y" font-size="40">{{ glyph.bass }}</text>
           @if (sys.index === 0) {
             @for (staff of staves; track staff) {
               @let box = sys.staves[staff];
@@ -263,6 +236,7 @@ interface NoteDrag {
             [attr.aria-label]="n.label"
             [attr.aria-pressed]="readonly() ? null : sel"
             (pointerdown)="noteDown($event, n)"
+            (mousedown)="keepSelection($event)"
             (click)="$event.stopPropagation()"
             (focus)="readonly() || store.selectNote(n.id)"
           >
@@ -306,6 +280,11 @@ interface NoteDrag {
           </g>
         }
 
+        <!-- Beams (neutral: they hang from several notes) -->
+        @for (b of beams(); track b.key) {
+          <line [attr.x1]="b.x1" [attr.y1]="b.y1" [attr.x2]="b.x2" [attr.y2]="b.y2" [attr.stroke-width]="b.width" class="pointer-events-none stroke-fg" />
+        }
+
         <!-- Notes played that hit nothing (challenges) -->
         @for (m of markDraws(); track m.key) {
           <path [attr.d]="m.d" fill="none" stroke-width="1.9" stroke-linecap="round" class="pointer-events-none stroke-rec" />
@@ -314,6 +293,22 @@ interface NoteDrag {
         <!-- Ties -->
         @for (t of ties(); track t.key) {
           <path [attr.d]="t.d" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="pointer-events-none text-fg" />
+        }
+
+        <!-- Slurs -->
+        @for (sl of slurs(); track sl.key) {
+          <path [attr.d]="sl.d" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" class="slur pointer-events-none text-fg" />
+        }
+
+        <!-- Where the repeat sign would go -->
+        @if (repeatGhost(); as g) {
+          <g class="pointer-events-none text-accent" opacity="0.7">
+            <line [attr.x1]="g.x - 6" [attr.x2]="g.x - 6" [attr.y1]="g.top" [attr.y2]="g.bottom" stroke="currentColor" stroke-width="1.2" />
+            <line [attr.x1]="g.x" [attr.x2]="g.x" [attr.y1]="g.top" [attr.y2]="g.bottom" stroke="currentColor" stroke-width="3.2" />
+            @for (cy of g.dotsY; track cy) {
+              <circle [attr.cx]="g.x - 13" [attr.cy]="cy" r="2.2" fill="currentColor" />
+            }
+          </g>
         }
 
         <!-- Where the note would land -->
@@ -384,204 +379,53 @@ export class ScoreStaffComponent {
     const width = this.viewW();
     return layoutOf(d ?? { beats: 4, beat_unit: 4, bars: 1, pickup_ticks: 0 }, this.zoom() ?? this.store.zoom(), width > 0 ? width : Number.POSITIVE_INFINITY);
   });
-  /** Beat lines inside the bars (the bar lines are drawn apart); beats are counted from where a whole bar would start. */
-  private readonly beatTicks = computed(() => {
-    const d = this.doc();
-    if (!d) return [] as number[];
-    const beat = 1920 / d.beat_unit;
-    const lead = missingTicks(d);
-    const bar = barTicks(d);
-    const out: number[] = [];
-    for (let t = beat - lead; t < scoreTicks(d); t += beat) if (t > 0 && (t + lead) % bar !== 0) out.push(t);
-    return out;
-  });
-
   /** What each system draws apart from the notes. */
   protected readonly views = computed<SystemView[]>(() => {
     const d = this.doc();
-    if (!d) return [];
-    const l = this.layout();
-    const spans = barSpans(d);
-    const beats = this.beatTicks();
-    return l.systems.map((sys) => ({
-      sys,
-      isLast: sys.index === l.systems.length - 1,
-      marks: spans
-        .slice(sys.firstBar, sys.lastBar + 1)
-        .map((sp) => ({ index: sp.index, x: sys.x0 + (sp.start - sys.startTick) * sys.ppt, label: barLabel(d, sp.index) })),
-      beatX: beats.filter((t) => t >= sys.startTick && t < sys.endTick).map((t) => sys.x0 + (t - sys.startTick) * sys.ppt),
-    }));
+    return d ? systemViews(d, this.layout()) : [];
   });
 
-  protected readonly notes = computed<NoteDraw[]>(() => {
+  /** Noteheads, stems and beams (see `core/score-draw`). */
+  private readonly drawn = computed(() => {
+    const d = this.doc();
+    return d ? drawNotes(d, this.layout()) : { notes: [], beams: [] };
+  });
+
+  protected readonly beams = computed(() => this.drawn().beams);
+
+  protected readonly notes = computed<LabeledNote[]>(() => {
     const d = this.doc();
     if (!d) return [];
-    const l = this.layout();
     const names = parseNoteNames(this.i18n.t('music.noteNames'));
-    const out: NoteDraw[] = [];
-    for (const staff of STAFF_NAMES) {
-      const notes = staffNotes(d, staff);
-      const continuations = new Set(tieLinks(notes).map((t) => t.to.id));
-
-      // What is drawn before each note. An accidental lasts until the end of the bar for the notes on its
-      // line or space, so a plain note after an altered one on the same step needs a natural sign; the
-      // note a tie carries over keeps the accidental it was tied with and shows none.
-      const signs = new Map<string, Accidental | 'natural' | null>();
-      const altered = new Map<number, Accidental>();
-      let barIndex = -1;
-      for (const n of notes) {
-        const step = staffStep(staff, n.key, n.accidental);
-        if (barOf(d, n.tick) !== barIndex) {
-          barIndex = barOf(d, n.tick);
-          altered.clear();
-        }
-        let drawn: Accidental | 'natural' | null = n.accidental;
-        if (continuations.has(n.id)) drawn = null;
-        else if (n.accidental) altered.set(step, n.accidental);
-        else if (altered.delete(step)) drawn = 'natural';
-        signs.set(n.id, drawn);
-      }
-
-      // Chords: the notes that start together share one stem, one direction and one dot.
-      const chords = new Map<string, typeof notes>();
-      for (const n of notes) {
-        const key = `${n.tick}:${n.duration_ticks}`;
-        chords.set(key, [...(chords.get(key) ?? []), n]);
-      }
-      for (const chord of chords.values()) {
-        const first = chord[0];
-        const sys = systemAt(l, first.tick);
-        const mid = sys.staves[staff].top + 2 * LINE_SPACING;
-        const value = notatedValue(first.duration_ticks);
-        const kind = value?.kind === 'thirtysecond' || !value ? 'sixteenth' : value.kind;
-        const steps = chord.map((n) => staffStep(staff, n.key, n.accidental));
-        const low = Math.min(...steps);
-        const high = Math.max(...steps);
-        // The stem goes the way of the note that is farthest from the middle line (down when level).
-        const up = 4 - low > high - 4;
-        const baseX = noteX(l, first.tick);
-        const hasStem = kind !== 'whole';
-        const stemX = up ? baseX + 5.7 : baseX - 5.7;
-        const yLow = yOfStep(sys, staff, high); // highest note, smallest y
-        const yHigh = yOfStep(sys, staff, low);
-        const stemBase = up ? yHigh : yLow;
-        const stemEnd = up ? Math.min(yLow - NOTE_STEM, mid) : Math.max(yHigh + NOTE_STEM, mid);
-
-        // Seconds: a head that touches the previous one goes to the other side of the stem.
-        const order = [...chord].sort((a, b) => staffStep(staff, a.key, a.accidental) - staffStep(staff, b.key, b.accidental));
-        if (!up) order.reverse();
-        const side = new Map<string, boolean>();
-        let prevStep: number | null = null;
-        let prevShifted = false;
-        for (const n of order) {
-          const step = staffStep(staff, n.key, n.accidental);
-          const shifted: boolean = prevStep !== null && Math.abs(step - prevStep) <= 1 && !prevShifted;
-          side.set(n.id, shifted);
-          prevStep = step;
-          prevShifted = shifted;
-        }
-        const shiftX = (up ? 1 : -1) * 11.6;
-        const rightmost = baseX + (up && [...side.values()].some(Boolean) ? 11.6 : 0);
-
-        // Accidentals stack leftwards when the notes are too close for one column.
-        const marked = [...chord]
-          .filter((n) => signs.get(n.id))
-          .sort((a, b) => staffStep(staff, b.key, b.accidental) - staffStep(staff, a.key, a.accidental));
-        const columns: number[][] = [];
-        const columnOf = new Map<string, number>();
-        for (const n of marked) {
-          const step = staffStep(staff, n.key, n.accidental);
-          let col = columns.findIndex((steps) => steps.every((t) => Math.abs(t - step) >= 6));
-          if (col < 0) col = columns.push([]) - 1;
-          columns[col].push(step);
-          columnOf.set(n.id, col);
-        }
-
-        for (const n of chord) {
-          const step = staffStep(staff, n.key, n.accidental);
-          const y = yOfStep(sys, staff, step);
-          const shifted = side.get(n.id) ?? false;
-          out.push({
-            id: n.id,
-            staff,
-            x: baseX + (shifted ? shiftX : 0),
-            y,
-            start: n.tick,
-            end: noteEnd(n),
-            kind,
-            dotted: !!value?.dotted,
-            hollow: kind === 'whole' || kind === 'half',
-            flags: kind === 'eighth' ? 1 : kind === 'sixteenth' ? 2 : 0,
-            up,
-            stemX,
-            stemBase,
-            stemEnd,
-            hasStem,
-            ledgers: ledgerSteps(step).map((st) => yOfStep(sys, staff, st)),
-            accidental: signs.get(n.id) ?? null,
-            accX: baseX - 20 - (columnOf.get(n.id) ?? 0) * 11 - (!up && [...side.values()].some(Boolean) ? 11.6 : 0),
-            dotX: rightmost + 12,
-            dotY: step % 2 === 0 ? y - STEP_PX : y,
-            label: this.i18n.t('score.noteLabel', {
-              note: spelledNoteName(n.key, n.accidental, names),
-              value: this.i18n.t(`score.values.${kind}`),
-              staff: this.i18n.t(`score.staff.${staff}`),
-              bar: barLabel(d, barOf(d, n.tick)) ?? this.i18n.t('score.pickupBar'),
-            }),
-          });
-        }
-      }
-    }
-    return out.sort((a, b) => a.start - b.start || a.y - b.y);
+    return this.drawn().notes.map((n) => {
+      const note = findNote(d, n.id)?.note;
+      return {
+        ...n,
+        label: this.i18n.t('score.noteLabel', {
+          note: note ? spelledNoteName(note.key, note.accidental, names) : '',
+          value: this.i18n.t(`score.values.${n.kind}`),
+          staff: this.i18n.t(`score.staff.${n.staff}`),
+          bar: barLabel(d, barOf(d, n.start)) ?? this.i18n.t('score.pickupBar'),
+        }),
+      };
+    });
   });
 
   /** Arcs joining a note to the one it is tied to, on the side opposite to the stem. */
-  protected readonly ties = computed<TieDraw[]>(() => {
+  protected readonly ties = computed<CurveDraw[]>(() => {
     const d = this.doc();
-    if (!d) return [];
-    const draws = new Map(this.notes().map((n) => [n.id, n]));
-    const out: TieDraw[] = [];
-    for (const staff of STAFF_NAMES) {
-      for (const { from, to } of tieLinks(staffNotes(d, staff))) {
-        const a = draws.get(from.id);
-        const b = draws.get(to.id);
-        if (!a || !b) continue;
-        const below = a.hasStem ? a.up : false;
-        const dir = below ? 1 : -1;
-        const x1 = a.x + 7;
-        const x2 = b.x - 7;
-        const y1 = a.y + dir * 5;
-        const y2 = b.y + dir * 5;
-        const l = this.layout();
-        const first = systemAt(l, from.tick);
-        const second = systemAt(l, to.tick);
-        if (first === second) {
-          out.push({ key: `${from.id}-${to.id}`, d: `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${(y1 + y2) / 2 + dir * 11} ${x2} ${y2}` });
-        } else {
-          // Over a line break the tie is two arcs: one to the end of the line, one from the start of the next.
-          out.push({ key: `${from.id}-${to.id}-a`, d: `M ${x1} ${y1} Q ${(x1 + first.right) / 2} ${y1 + dir * 11} ${first.right} ${y1}` });
-          out.push({ key: `${from.id}-${to.id}-b`, d: `M ${second.x0} ${y2} Q ${(second.x0 + x2) / 2} ${y2 + dir * 11} ${x2} ${y2}` });
-        }
-      }
-    }
-    return out;
+    return d ? drawTies(d, this.layout(), this.drawn().notes) : [];
+  });
+
+  /** Slurs over the notes they cover. */
+  protected readonly slurs = computed<CurveDraw[]>(() => {
+    const d = this.doc();
+    return d ? drawSlurs(d, this.layout(), this.drawn().notes) : [];
   });
 
   protected readonly rests = computed<RestDraw[]>(() => {
     const d = this.doc();
-    if (!d) return [];
-    const l = this.layout();
-    const out: RestDraw[] = [];
-    for (const staff of STAFF_NAMES) {
-      for (const item of withRests(d, staff)) {
-        if (item.kind !== 'rest') continue;
-        // Only a rest as long as a whole bar is drawn as the whole rest; a short bar is filled with its beats.
-        const shape = restShape(item.duration_ticks, barTicks(d));
-        const x = shape === 'bar' ? xOfTick(l, item.tick + item.duration_ticks / 2) : noteX(l, item.tick);
-        out.push({ key: `${staff}-${item.tick}`, staff, box: systemAt(l, item.tick).staves[staff], shape, x, tick: item.tick });
-      }
-    }
-    return out;
+    return d ? drawRests(d, this.layout()) : [];
   });
 
   /** Notes under the playhead (they light up while the score plays). */
@@ -613,6 +457,22 @@ export class ScoreStaffComponent {
 
   /** Pointer position over the staff (hover, or a value dragged from the palette). */
   private readonly hover = signal<Hit | null>(null);
+  /** The pointer in SVG pixels (`null` outside the staff): where the repeat sign would snap to. */
+  private readonly pointerAt = signal<{ x: number; y: number } | null>(null);
+
+  /** The bar line the repeat sign would go on while it is being dragged or chosen. */
+  protected readonly repeatGhost = computed(() => {
+    const d = this.doc();
+    const p = this.pointerAt();
+    if (!d || !p || this.readonly() || !(this.store.repeatDrag() || this.store.repeatTool())) return null;
+    const l = this.layout();
+    const hit = barLineAt(l, d, p.x, p.y);
+    if (!hit) return null;
+    const sys = l.systems[hit.system];
+    const top = sys.staves.treble.top;
+    const bottom = sys.staves.bass.bottom;
+    return { bar: hit.bar, x: hit.x, top, bottom, dotsY: [sys.staves.treble.top + 15, sys.staves.treble.top + 25, sys.staves.bass.top + 15, sys.staves.bass.top + 25] };
+  });
   private drag: NoteDrag | null = null;
   private suppressClick = false;
   /** The note being moved (once the pointer has gone past the threshold) and where it would land. */
@@ -621,7 +481,7 @@ export class ScoreStaffComponent {
 
   protected readonly ghost = computed<Ghost | null>(() => {
     const d = this.doc();
-    if (!d || this.readonly()) return null;
+    if (!d || this.readonly() || this.store.repeatDrag() || this.store.repeatTool()) return null;
     const l = this.layout();
     const palette = this.store.paletteDrag();
     // Moving a note shows the target; otherwise the tool follows the pointer.
@@ -714,12 +574,11 @@ export class ScoreStaffComponent {
     return n === 2 ? [0, 1] : n === 1 ? [0] : [];
   }
 
-  /** A flag on the stem of a note: curls to the right, towards the notehead's side. */
-  protected flagPath(n: NoteDraw, index: number): string {
-    const sx = n.stemX;
-    const dir = n.up ? 1 : -1;
-    const y0 = n.stemEnd + dir * index * 6;
-    return `M ${sx} ${y0} C ${sx + 1} ${y0 + dir * 8}, ${sx + 11} ${y0 + dir * 10}, ${sx + 8} ${y0 + dir * 22}`;
+  protected readonly flagPath = flagPath;
+
+  /** Where a clef of a system is drawn. */
+  protected clefAt(sys: SystemBox, staff: StaffName): { x: number; y: number } {
+    return clefOrigin(sys.staves[staff], staff);
   }
 
   // ---- Pointer ----
@@ -753,6 +612,7 @@ export class ScoreStaffComponent {
     if (!p || !d) return;
     const hit = hitAt(l, p.x, p.y);
     const inside = p.x >= 0 && p.x <= l.width && p.y >= 0 && p.y <= l.height;
+    this.pointerAt.set(inside ? p : null);
     const drag = this.drag;
     if (drag && drag.pointerId === ev.pointerId) {
       if (!drag.moved) {
@@ -782,6 +642,13 @@ export class ScoreStaffComponent {
       this.hover.set(null);
       return;
     }
+    if (this.store.repeatDrag()) {
+      const g = this.repeatGhost();
+      this.store.repeatDrag.set(false);
+      this.pointerAt.set(null);
+      if (g) this.store.setRepeatBar(g.bar);
+      return;
+    }
     const drag = this.drag;
     if (!drag || drag.pointerId !== ev.pointerId) return;
     const target = this.dragTarget();
@@ -801,12 +668,35 @@ export class ScoreStaffComponent {
     this.draggingId.set(null);
     this.dragTarget.set(null);
     this.hover.set(null);
+    this.pointerAt.set(null);
     this.store.paletteDrag.set(null);
+    this.store.repeatDrag.set(false);
   }
 
-  protected noteDown(ev: PointerEvent, n: NoteDraw): void {
+  /** Pressing the repeat sign selects it and starts dragging it to another bar line. */
+  protected repeatDown(ev: PointerEvent): void {
     if (this.readonly() || ev.button !== 0) return;
     ev.stopPropagation();
+    this.store.selectRepeat();
+    this.store.repeatDrag.set(true);
+    const p = this.point(ev);
+    if (p) this.pointerAt.set(p);
+  }
+
+  /** A shift press must not focus the note (the `(focus)` handler would select it); a handler returning `false` would cancel every press. */
+  protected keepSelection(ev: MouseEvent): void {
+    if (ev.shiftKey) ev.preventDefault();
+  }
+
+  protected noteDown(ev: PointerEvent, n: LabeledNote): void {
+    if (this.readonly() || ev.button !== 0) return;
+    ev.stopPropagation();
+    // Shift+click slurs the selected note to this one (if they are in the same hand). The mousedown above keeps
+    // the note from taking focus, which would select it (see `(focus)`) and move the start of the next slur.
+    if (ev.shiftKey && this.store.selectedNoteId() && this.store.selectedNoteId() !== n.id) {
+      this.store.slurSelectedTo(n.id);
+      return;
+    }
     this.store.selectNote(n.id);
     const ref = this.store.selectedNote();
     this.drag = {
@@ -840,6 +730,13 @@ export class ScoreStaffComponent {
     if (!p || !d) return;
     const l = this.layout();
     if (inRuler(l, p.x, p.y)) return;
+    // With the repeat sign chosen, a click puts it on the closest bar line.
+    if (this.store.repeatTool()) {
+      const line = barLineAt(l, d, p.x, p.y);
+      if (line) this.store.setRepeatBar(line.bar);
+      return;
+    }
+    this.store.repeatSelected.set(false);
     const hit = hitAt(l, p.x, p.y);
     if (!hit) {
       this.store.selectNote(null);

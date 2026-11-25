@@ -618,6 +618,26 @@ pub async fn export_composition_midi(state: State<'_, AppState>, composition_id:
     .map_err(|e| t!("backend.internal", e = e))?
 }
 
+/// Writes a score's PDF to `dest_path` (a `.pdf` extension is added if it has none). The frontend draws the PDF,
+/// since the layout of a score lives there, and sends the bytes in base64. Returns the path written.
+#[tauri::command]
+pub async fn export_score_pdf(dest_path: String, data_base64: String) -> Result<String, String> {
+    let dest = with_extension(dest_path, "pdf");
+    tauri::async_runtime::spawn_blocking(move || {
+        let payload = data_base64.split_once(',').map(|(_, b)| b).unwrap_or(&data_base64);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload.trim())
+            .map_err(|_| t!("backend.export.pdfInvalid"))?;
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(t!("backend.export.pdfInvalid"));
+        }
+        midi_slicer::atomic_write(&dest, &bytes)?;
+        Ok(dest.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
 /// General MIDI programs the active SoundFont has (empty while none is loaded).
 #[tauri::command]
 pub async fn get_soundfont_programs(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
@@ -1896,6 +1916,30 @@ mod tests {
 
         block_on(delete_piece(fx.state(), untitled.id)).unwrap();
         assert_eq!(block_on(get_pieces(fx.state())).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn score_pdf_is_written_with_its_extension_and_only_if_it_is_a_pdf() {
+        let fx = Fixture::new();
+        let pdf = base64::engine::general_purpose::STANDARD.encode(b"%PDF-1.7\n%fake body\n%%EOF");
+
+        let written = block_on(export_score_pdf(fx.path("sheet"), pdf.clone())).unwrap();
+        assert!(written.ends_with("sheet.pdf"));
+        assert_eq!(std::fs::read(&written).unwrap(), b"%PDF-1.7\n%fake body\n%%EOF");
+
+        // An existing extension is kept, a data URL prefix is tolerated, and a second write replaces the file.
+        let again = block_on(export_score_pdf(fx.path("other.PDF"), format!("data:application/pdf;base64,{pdf}"))).unwrap();
+        assert!(again.ends_with("other.PDF"));
+        assert!(block_on(export_score_pdf(written.clone(), pdf)).is_ok());
+
+        // Anything that is not a PDF is refused and nothing is written.
+        let png = base64::engine::general_purpose::STANDARD.encode([0x89, b'P', b'N', b'G']);
+        assert_eq!(block_on(export_score_pdf(fx.path("bad"), png)).unwrap_err(), t!("backend.export.pdfInvalid"));
+        assert!(!Path::new(&fx.path("bad.pdf")).exists());
+        assert!(block_on(export_score_pdf(fx.path("bad2"), "***".into())).is_err());
+        // No temporary file is left behind.
+        let leftovers = std::fs::read_dir(&fx.root).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().contains(".tmp")).count();
+        assert_eq!(leftovers, 0);
     }
 
     #[test]

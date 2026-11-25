@@ -1,5 +1,5 @@
 import type { NoteDto, NoteStatus, ScoreDto } from './models';
-import { STAFF_NAMES, msToTicks, pageTick, scoreTicks, staffNotes, ticksToMs, tieLinks, tieTarget } from './score';
+import { STAFF_NAMES, msToTicks, pageTick, repeatTick, staffNotes, ticksToMs, tieLinks, tieTarget } from './score';
 
 /*
  * A challenge made from a score shows its notation instead of the piano roll. The melody's notes come
@@ -7,7 +7,7 @@ import { STAFF_NAMES, msToTicks, pageTick, scoreTicks, staffNotes, ticksToMs, ti
  * notes of the score each of them is, and turns moments of the attempt into places on the staff.
  */
 
-/** A note that is played: a tie chain is one event, and a repeat plays the score twice. */
+/** A note that is played: a tie chain is one event, and a repeat plays the bars before its sign twice. */
 export interface ScoreEvent {
   /** The notes of the score it comes from: the whole tie chain. */
   ids: string[];
@@ -16,25 +16,27 @@ export interface ScoreEvent {
   startMs: number;
 }
 
-/** What the score plays, sorted the way the melody's notes are (by start, then key). */
+/**
+ * What the score plays, sorted the way the melody's notes are (by start, then key). With a repeat sign the
+ * notes that start before it are played twice and the rest once, as the MIDI the score makes.
+ */
 export function scoreEvents(s: ScoreDto): ScoreEvent[] {
   const out: ScoreEvent[] = [];
-  const total = scoreTicks(s);
-  for (let pass = 0; pass < (s.repeat ? 2 : 1); pass++) {
-    for (const staff of STAFF_NAMES) {
-      const notes = staffNotes(s, staff);
-      const continued = new Set(tieLinks(notes).map((t) => t.to.id));
-      for (const n of notes) {
-        if (continued.has(n.id)) continue;
-        const ids = [n.id];
-        for (let cur = n; cur.tie; ) {
-          const next = tieTarget(notes, cur);
-          if (!next) break;
-          ids.push(next.id);
-          cur = next;
-        }
-        out.push({ ids, key: n.key, startMs: ticksToMs(n.tick + pass * total, s.bpm) });
+  const at = repeatTick(s);
+  for (const staff of STAFF_NAMES) {
+    const notes = staffNotes(s, staff);
+    const continued = new Set(tieLinks(notes).map((t) => t.to.id));
+    for (const n of notes) {
+      if (continued.has(n.id)) continue;
+      const ids = [n.id];
+      for (let cur = n; cur.tie; ) {
+        const next = tieTarget(notes, cur);
+        if (!next) break;
+        ids.push(next.id);
+        cur = next;
       }
+      const starts = at === null ? [n.tick] : n.tick < at ? [n.tick, n.tick + at] : [n.tick + at];
+      for (const tick of starts) out.push({ ids, key: n.key, startMs: ticksToMs(tick, s.bpm) });
     }
   }
   return out.sort((a, b) => a.startMs - b.startMs || a.key - b.key);

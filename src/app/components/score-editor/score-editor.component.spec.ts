@@ -44,6 +44,27 @@ describe('ScoreEditorComponent', () => {
     expect(el.querySelector('app-score-staff svg')).not.toBeNull();
   });
 
+  describe('PDF export', () => {
+    const pdfButton = () => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Export PDF'))!;
+    const withNote = () => score({ treble: [{ id: 'a', tick: 0, duration_ticks: 480, key: 72, accidental: null, tie: false }] });
+
+    it('is disabled while the score is empty', async () => {
+      await open(score());
+      expect(pdfButton().disabled).toBe(true);
+    });
+
+    it('asks where to save a PDF named after the score and sends it to the backend', async () => {
+      mock.set('pickSavePath', (_t: string, name: string) => Promise.resolve(`/out/${name}`));
+      mock.set('exportScorePdf', (dest: string) => Promise.resolve(dest));
+      await open(withNote());
+      expect(pdfButton().disabled).toBe(false);
+      pdfButton().click();
+      await vi.waitFor(() => expect(mock.names()).toContain('exportScorePdf'));
+      expect(mock.argsOf('pickSavePath')?.[1]).toBe('Étude.pdf');
+      expect(mock.argsOf('exportScorePdf')?.[0]).toBe('/out/Étude.pdf');
+    });
+  });
+
   it('offers to create the first score when there are none', async () => {
     await open(null);
     expect(el.textContent).toContain('Create a score');
@@ -96,8 +117,8 @@ describe('ScoreEditorComponent', () => {
     expect(aside.classList.contains('sticky')).toBe(true);
     const inside = (label: string) => !!aside.querySelector(`button[aria-label="${label}"]`);
     for (const label of [
-      'Play', 'Stop', 'Quarter note', 'Dotted note (.)', 'Sharp (#)', 'Flat (b)', 'Tie to the next note (T)',
-      'Add a bar', 'Remove a bar', 'Repeat from the start', 'Zoom in', 'Zoom out',
+      'Play', 'Stop', 'Quarter note', 'Dotted note (.)', 'Sharp (#)', 'Flat (b)', 'Tie to the next note (T)', 'Slur to the next note (L)', 'Repeat sign',
+      'Add a bar', 'Remove a bar', 'Zoom in', 'Zoom out',
     ]) {
       expect(inside(label), label).toBe(true);
     }
@@ -110,16 +131,57 @@ describe('ScoreEditorComponent', () => {
     expect(aside.textContent).toContain('Drag a value onto the staff');
   });
 
-  it('toggles the repeat sign from the transport bar', async () => {
+  it('chooses the repeat sign in the palette like a note value, and says how to put it', async () => {
     await open();
-    expect(button('Repeat from the start').getAttribute('aria-pressed')).toBe('false');
-    button('Repeat from the start').click();
+    expect(button('Repeat sign').getAttribute('aria-pressed')).toBe('false');
+    button('Repeat sign').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    expect(store.repeatDrag()).toBe(true); // the staff takes the drop
+    store.repeatDrag.set(false);
+    button('Repeat sign').click();
     fixture.detectChanges();
-    expect(store.doc()!.repeat).toBe(true);
-    expect(button('Repeat from the start').getAttribute('aria-pressed')).toBe('true');
-    expect(el.textContent).toContain('00:21'); // 4 bars at 90 BPM last 10.7 s, twice: the length is what is played
-    button('Repeat from the start').click();
-    expect(store.doc()!.repeat).toBe(false);
+    expect(store.repeatTool()).toBe(true);
+    expect(button('Repeat sign').getAttribute('aria-pressed')).toBe('true');
+    expect(el.querySelector('aside')!.textContent).toContain('Click the bar the repeat sign closes');
+    button('Repeat sign').click();
+    expect(store.repeatTool()).toBe(false);
+  });
+
+  it('shows where a placed repeat sign is and takes it away from the panel', async () => {
+    await open();
+    store.setRepeatBar(1);
+    fixture.detectChanges();
+    const aside = el.querySelector('aside')!;
+    expect(aside.textContent).toContain('After bar 2');
+    // 4 bars at 90 BPM last 10.7 s; the sign after bar 2 adds 5.3 s: the length is what is played.
+    expect(el.textContent).toContain('00:16');
+    [...aside.querySelectorAll('button')].find((b) => b.textContent!.includes('Remove the repeat sign'))!.click();
+    fixture.detectChanges();
+    expect(store.doc()!.repeat_bar).toBeNull();
+    expect(aside.textContent).not.toContain('After bar 2');
+  });
+
+  it('names the pickup bar when the sign is after it', async () => {
+    await open();
+    store.setPickup(480);
+    store.setRepeatBar(0);
+    fixture.detectChanges();
+    expect(el.querySelector('aside')!.textContent).toContain('After the pickup');
+  });
+
+  it('slurs the selected note to the next one with the slur button, which is off without a note', async () => {
+    await open();
+    expect(button('Slur to the next note (L)').disabled).toBe(true);
+    store.placeNote('treble', 0, 0);
+    store.placeNote('treble', 480, 1);
+    store.selectNote(store.doc()!.treble[0].id);
+    fixture.detectChanges();
+    expect(button('Slur to the next note (L)').getAttribute('aria-pressed')).toBe('false');
+    button('Slur to the next note (L)').click();
+    fixture.detectChanges();
+    expect(store.doc()!.slurs).toHaveLength(1);
+    expect(button('Slur to the next note (L)').getAttribute('aria-pressed')).toBe('true');
+    button('Slur to the next note (L)').click();
+    expect(store.doc()!.slurs).toEqual([]);
   });
 
   it('adds and removes bars', async () => {

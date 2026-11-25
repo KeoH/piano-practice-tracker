@@ -731,7 +731,8 @@
     "export": {
       "noSoundfont": "No hay ningún SoundFont cargado; elige uno en Ajustes → Sonido",
       "tooLong": "La grabación es demasiado larga para un archivo WAV",
-      "emptyComposition": "La composición no tiene clips que exportar"
+      "emptyComposition": "La composición no tiene clips que exportar",
+      "pdfInvalid": "Los datos que se van a guardar no son un archivo PDF"
     },
     "invalidDate": "Fecha no válida: {date}",
     "composition": {
@@ -775,6 +776,8 @@
         "crossesBar": "Una nota cruza una barra de compás",
         "overlap": "Dos notas se solapan en el mismo pentagrama",
         "tie": "Una ligadura no tiene nota con la que unirse",
+        "repeat": "El signo de repetición debe estar al final de un compás de la partitura",
+        "slur": "Una ligadura de expresión debe unir dos notas del mismo pentagrama, la primera antes que la segunda",
         "pickup": "La anacrusa debe ser más corta que un compás entero"
       }
     }
@@ -787,10 +790,19 @@
     "done": "Audio guardado en {path}",
     "errors": {
       "failed": "No se pudo exportar el audio",
-      "midiFailed": "No se pudo exportar el archivo MIDI"
+      "midiFailed": "No se pudo exportar el archivo MIDI",
+      "pdfFailed": "No se pudo exportar la partitura como PDF"
     },
     "midiPickTitle": "Exportar MIDI",
-    "midiDone": "MIDI guardado en {path}"
+    "midiDone": "MIDI guardado en {path}",
+    "pdf": "Exportar PDF",
+    "pdfHint": "Guardar la partitura como un PDF con aspecto de partitura impresa",
+    "pdfPickTitle": "Exportar partitura como PDF",
+    "pdfDone": "Partitura guardada en {path}"
+  },
+  "pdf": {
+    "page": "Página {n} de {total}",
+    "untitled": "Partitura sin título"
   },
   "nav": {
     "label": "Vistas",
@@ -1273,7 +1285,7 @@
     "inLibrary": "Partitura",
     "editScore": "Editar partitura",
     "openScore": "Abrir partitura",
-    "shortcuts": "Atajos: Espacio reproduce · 1-5 eligen figura · . puntillo · # y b suben y bajan medio tono · T liga · las flechas mueven la nota · Supr la quita · Ctrl+Z deshace",
+    "shortcuts": "Atajos: Espacio reproduce · 1-5 eligen figura · . puntillo · # y b suben y bajan medio tono · T liga · L une con la siguiente nota con una ligadura de expresión (o Mayús+clic en otra nota de la misma mano) · las flechas mueven la nota · Supr la quita · Ctrl+Z deshace",
     "errors": {
       "loadList": "No se pudieron cargar las partituras",
       "load": "No se pudo abrir la partitura",
@@ -1290,8 +1302,18 @@
     "pickupBar": "anacrusa",
     "noRoomTie": "No hay sitio para ligar esa nota",
     "cantChangePickup": "Una nota cruzaría una barra de compás con esa anacrusa",
-    "repeat": "Repetir desde el principio",
-    "repeatHint": "Cierra la partitura con un signo de repetición: se toca dos veces, desde el principio (también en el fragmento que genera).",
+    "repeat": "Signo de repetición",
+    "repeatHint": "Arrástralo a una barra de compás, o elígelo y haz clic en el compás. Tras el signo la partitura vuelve al principio y se toca otra vez desde ahí (también en el fragmento que genera).",
+    "repeatChosen": "Haz clic en el compás que cierra el signo de repetición. Esc lo suelta.",
+    "repeatSign": "Signo de repetición",
+    "removeRepeat": "Quitar el signo de repetición",
+    "marks": "Marcas",
+    "repeatAfterBar": "Tras el compás {n}",
+    "repeatAfterPickup": "Tras la anacrusa",
+    "slur": "Ligadura de expresión a la siguiente nota (L)",
+    "slurHint": "Dibuja una ligadura de expresión desde la nota seleccionada hasta la siguiente, o quita la que empieza en ella. Mayús+clic en otra nota de la misma mano para ligar hasta ella. Es solo notación: no cambia cómo suena la partitura.",
+    "cantSlur": "No hay una nota siguiente a la que ligar",
+    "cantSlurHand": "Una ligadura de expresión une dos notas de la misma mano que no empiezan a la vez",
     "tools": "Herramientas",
     "settings": "Ajustes",
     "zoom": "Zoom"

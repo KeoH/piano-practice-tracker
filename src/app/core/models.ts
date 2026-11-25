@@ -261,6 +261,13 @@ export interface ScoreNoteDto {
   tie: boolean;
 }
 
+/** A slur over the notes of one staff, from the note `from` to the note `to` (which starts later). */
+export interface ScoreSlurDto {
+  id: string;
+  from: string;
+  to: string;
+}
+
 /** A piece written on a grand staff: treble clef (right hand) and bass clef (left hand). */
 export interface ScoreDto {
   id: string;
@@ -273,10 +280,15 @@ export interface ScoreDto {
   bars: number;
   /** Length of a shorter first bar (a pickup or anacrusis), in ticks; 0 = the first bar is whole. */
   pickup_ticks: number;
-  /** A repeat sign closes the score: it is played twice, going back to the start. */
-  repeat: boolean;
+  /**
+   * Index of the bar that ends with a repeat sign (0 is the first bar, the pickup bar if there is one): after
+   * it the score goes back to the start and plays through again. `null` = no repeat.
+   */
+  repeat_bar: number | null;
   treble: ScoreNoteDto[];
   bass: ScoreNoteDto[];
+  /** Slurs (phrasing curves). Notation only: they do not change what is played. */
+  slurs: ScoreSlurDto[];
   /** The library fragment generated from the score (`null` until it is first saved). */
   fragment_id: string | null;
   created_at: string;

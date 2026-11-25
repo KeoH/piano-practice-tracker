@@ -200,6 +200,7 @@ pub fn run() {
             commands::preview_instrument,
             commands::export_composition_audio,
             commands::export_composition_midi,
+            commands::export_score_pdf,
             commands::get_practice_stats,
             commands::set_weekly_goal,
             commands::get_sessions,

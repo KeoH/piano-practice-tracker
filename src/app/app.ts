@@ -107,8 +107,9 @@ export class App implements OnInit {
   /**
    * Score editor shortcuts; returns whether the key was handled.
    * Space plays/pauses, Ctrl+Z / Ctrl+Y undo and redo, 1-5 choose a note value (and give it to the
-   * selected note), . dots or undots it, # and b sharpen and flatten, Delete removes the selected note, T ties it, Up and
-   * Down move it a line or space (Shift: an octave), Left and Right a grid step, Esc deselects it.
+   * selected note), . dots or undots it, # and b sharpen and flatten, Delete removes the selected note, T ties it, L
+   * slurs it to the next note (or takes that slur away), Up and Down move it a line or space (Shift: an octave), Left and
+   * Right a grid step, Esc deselects it (and lets go of the repeat sign). Delete also removes a selected repeat sign. Shift+click on another note of the same hand slurs the selected note to it.
    */
   private scoreKey(ev: KeyboardEvent, target: HTMLElement | null): boolean {
     const s = this.scores;
@@ -137,9 +138,13 @@ export class App implements OnInit {
       return true;
     }
     if (key === 't') s.toggleTieSelected();
+    else if (key === 'l') s.toggleSlurSelected();
     else if (ev.key === '#') s.toggleAccidental('sharp');
     else if (key === 'b') s.toggleAccidental('flat');
-    else if (ev.key === 'Escape') s.selectNote(null);
+    else if (ev.key === 'Escape') {
+      s.selectNote(null);
+      s.clearRepeat();
+    } else if (s.repeatSelected() && (ev.key === 'Delete' || ev.key === 'Backspace')) s.removeRepeat();
     else {
       const sel = s.selectedNote();
       if (!sel) return false;

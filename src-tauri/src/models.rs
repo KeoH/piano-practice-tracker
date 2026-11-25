@@ -274,6 +274,14 @@ pub struct ScoreNoteDto {
     pub tie: bool,
 }
 
+/// A slur over the notes of one staff, from the note `from` to the note `to` (which starts later).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreSlurDto {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+}
+
 /// A piece written on a grand staff: treble clef (right hand) and bass clef (left hand).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreDto {
@@ -288,11 +296,15 @@ pub struct ScoreDto {
     /// Length of a shorter first bar (a pickup or anacrusis) in ticks; 0 = the first bar is whole.
     #[serde(default)]
     pub pickup_ticks: u32,
-    /// A repeat sign closes the score: it is played twice, going back to the start.
+    /// Index of the bar that ends with a repeat sign (0 is the first bar, the pickup bar if there is one):
+    /// after it the score goes back to the start and plays through again. `None` = no repeat.
     #[serde(default)]
-    pub repeat: bool,
+    pub repeat_bar: Option<u32>,
     pub treble: Vec<ScoreNoteDto>,
     pub bass: Vec<ScoreNoteDto>,
+    /// Slurs (phrasing curves). Notation only: they do not change what is played.
+    #[serde(default)]
+    pub slurs: Vec<ScoreSlurDto>,
     /// The library fragment generated from the score (`None` until it is first saved).
     pub fragment_id: Option<String>,
     pub created_at: String,

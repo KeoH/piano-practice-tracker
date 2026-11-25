@@ -50,6 +50,24 @@ describe('ScoreStaffComponent', () => {
     expect(svg()).toBeNull();
   });
 
+  it('joins the eighths of a beat with one beam and leaves their flags out; a lone eighth keeps its flag', async () => {
+    await render({ treble: [n('a', 0, 240, 76), n('b', 240, 240, 77), n('c', 960, 240, 79)] });
+    const beams = [...el.querySelectorAll('line.stroke-fg')].filter((l) => l.getAttribute('stroke-width') === '4.2');
+    expect(beams).toHaveLength(1);
+    const flags = (id: string) => noteEls().find((g) => g.getAttribute('aria-label')?.includes(id === 'c' ? 'G5' : id === 'a' ? 'E5' : 'F5'))!.querySelectorAll('path').length;
+    expect(flags('a')).toBe(0);
+    expect(flags('b')).toBe(0);
+    expect(flags('c')).toBe(1);
+  });
+
+  it('draws the clefs where the glyphs need them: the treble one on the bottom line, the bass dots on the F line', async () => {
+    await render({ treble: [n('a', 0, 480, 64)] });
+    const l = layout();
+    const [treble, bass] = [...el.querySelectorAll<SVGTextElement>('text.music')].slice(0, 2);
+    expect(Number(treble.getAttribute('y'))).toBe(l.systems[0].staves.treble.bottom + 1);
+    expect(Number(bass.getAttribute('y'))).toBeCloseTo(l.systems[0].staves.bass.bottom - 30 + 25.8, 6);
+  });
+
   it('draws a staff with five lines per hand, the bars, and a button per note with a readable label', async () => {
     await render({
       treble: [n('a', 0, 480, 64), n('b', 480, 960, 72, null)],
@@ -211,19 +229,191 @@ describe('ScoreStaffComponent', () => {
     expect(el.querySelectorAll('path.text-fg')).toHaveLength(0);
   });
 
+  describe('slurs', () => {
+    const phrase = [n('a', 0, 480, 60), n('b', 480, 480, 64), n('c', 960, 480, 67), n('d', 1440, 480, 64)];
+    const slur = (id: string, from: string, to: string) => ({ id, from, to });
+    const arcs = () => [...el.querySelectorAll('path.slur')];
+
+    it('draws a curve per slur, none when there are no slurs, and leaves the ties alone', async () => {
+      await render({ treble: phrase });
+      expect(arcs()).toHaveLength(0);
+      await render({ treble: phrase, slurs: [slur('s1', 'a', 'd'), slur('s2', 'b', 'c')] });
+      expect(arcs()).toHaveLength(2);
+      expect(el.querySelectorAll('path.text-fg:not(.slur)')).toHaveLength(0);
+    });
+
+    it('runs from the first note to the last, over the noteheads when the stems point down', async () => {
+      await render({ treble: [n('a', 0, 480, 72), n('b', 480, 480, 76), n('c', 960, 480, 79)], slurs: [slur('s1', 'a', 'c')] });
+      const l = layout();
+      const nums = arcs()[0].getAttribute('d')!.match(/-?\d+(\.\d+)?/g)!.map(Number);
+      expect(nums[0]).toBeCloseTo(noteX(l, 0), 0); // starts at the first notehead
+      expect(nums[nums.length - 2]).toBeCloseTo(noteX(l, 960), 0); // ends at the last
+      const top = Math.min(...noteEls().map((g) => +g.querySelector('ellipse')!.getAttribute('cy')!));
+      expect(nums[3]).toBeLessThan(top); // the curve's control points are above every notehead
+    });
+
+    it('goes under the notes when every stem points up', async () => {
+      await render({ treble: [n('a', 0, 480, 60), n('b', 480, 480, 62)], slurs: [slur('s1', 'a', 'b')] });
+      const nums = arcs()[0].getAttribute('d')!.match(/-?\d+(\.\d+)?/g)!.map(Number);
+      const heads = noteEls().map((g) => +g.querySelector('ellipse')!.getAttribute('cy')!);
+      expect(nums[3]).toBeGreaterThan(Math.max(...heads));
+    });
+
+    it('is split in two by a line break', async () => {
+      Object.defineProperty(el, 'clientWidth', { configurable: true, value: 900 });
+      await render({ beats: 3, bars: 6, treble: [n('a', 3 * 480, 480, 60), n('b', 5 * 480, 480, 62)], slurs: [slur('s1', 'a', 'b')] });
+      window.dispatchEvent(new Event('resize'));
+      fixture.detectChanges();
+      expect(layout().systems).toHaveLength(2);
+      expect(arcs()).toHaveLength(1); // both notes are on the first line
+      await render({ beats: 3, bars: 6, treble: [n('a', 3 * 480, 480, 60), n('b', 12 * 480, 480, 62)], slurs: [slur('s1', 'a', 'b')] });
+      expect(arcs()).toHaveLength(2);
+    });
+
+    it('is drawn in a read-only view too, and shift-click slurs the selected note to another', async () => {
+      await render({ treble: phrase });
+      const down = (i: number, shiftKey: boolean) => {
+        const g = noteEls()[i];
+        const e = new MouseEvent('pointerdown', { button: 0, bubbles: true, shiftKey, clientX: 0, clientY: 0 });
+        g.dispatchEvent(e);
+        fixture.detectChanges();
+      };
+      down(0, false); // selects a
+      expect(store.selectedNoteId()).toBe('a');
+      down(2, true); // shift-click c
+      expect(store.doc()!.slurs.map((x) => [x.from, x.to])).toEqual([['a', 'c']]);
+      expect(store.selectedNoteId()).toBe('a'); // the selection stays
+      fixture.detectChanges();
+      expect(arcs()).toHaveLength(1);
+      // A shift press must not give the note focus, which would select it and move the start of the next slur;
+      // any other press keeps its default (focus, and with it the keyboard).
+      const prevented = (i: number, shiftKey: boolean) => {
+        const e = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true, shiftKey });
+        noteEls()[i].dispatchEvent(e);
+        return e.defaultPrevented;
+      };
+      expect([prevented(1, false), prevented(1, true), prevented(1, false)]).toEqual([false, true, false]);
+      down(2, true); // the same pair again takes it away
+      expect(store.doc()!.slurs).toEqual([]);
+    });
+  });
+
+  describe('the repeat sign as a piece of the palette', () => {
+    const midY = () => (layout().systems[0].staves.treble.top + layout().systems[0].staves.bass.bottom) / 2;
+    const barX = (bar: number) => layout().systems[0].x0 + (bar + 1) * 1920 * layout().systems[0].ppt;
+    const dots = () => [...el.querySelectorAll('svg > circle')].map((c) => +c.getAttribute('cx')!);
+
+    it('shows where it would go while it is dragged, on the closest bar line, and puts it there when dropped', async () => {
+      await render({ bars: 4 });
+      store.repeatDrag.set(true);
+      pointer(window, 'pointermove', barX(1) - 70, midY());
+      fixture.detectChanges();
+      const ghost = el.querySelector('svg > g.text-accent circle')!;
+      expect(+ghost.getAttribute('cx')!).toBe(barX(1) - 13);
+      expect(dots()).toEqual([]); // nothing is placed yet
+      pointer(window, 'pointerup', barX(1) - 70, midY());
+      fixture.detectChanges();
+      expect(store.doc()!.repeat_bar).toBe(1);
+      expect(store.repeatDrag()).toBe(false);
+      expect(store.repeatSelected()).toBe(true);
+      expect(new Set(dots())).toEqual(new Set([barX(1) - 13]));
+      expect(el.querySelector('svg > g.text-accent circle')).toBeNull(); // the ghost is gone
+    });
+
+    it('puts nothing when the drag ends off the staff', async () => {
+      await render({ bars: 4 });
+      store.repeatDrag.set(true);
+      pointer(window, 'pointermove', -50, -50);
+      pointer(window, 'pointerup', -50, -50);
+      expect(store.doc()!.repeat_bar).toBeNull();
+      expect(store.repeatDrag()).toBe(false);
+    });
+
+    it('is put by a click on the staff once it is chosen, and the tool is let go afterwards', async () => {
+      await render({ bars: 4 });
+      store.toggleRepeatTool();
+      pointer(window, 'pointermove', barX(2) - 20, midY());
+      fixture.detectChanges();
+      expect(el.querySelector('svg > g.text-accent circle')).not.toBeNull();
+      expect(el.querySelector('svg > g.text-accent ellipse')).toBeNull(); // not a note's ghost too
+      pointer(svg(), 'click', barX(2) - 20, midY());
+      expect(store.doc()!.repeat_bar).toBe(2);
+      expect(store.repeatTool()).toBe(false);
+      expect(store.doc()!.treble).toHaveLength(0); // it did not put a note too
+    });
+
+    it('is moved by dragging the sign to another bar line, and selected by pressing it', async () => {
+      await render({ bars: 4, repeat_bar: 0 });
+      const target = el.querySelector<SVGRectElement>('svg > rect[role="button"]')!;
+      pointer(target, 'pointerdown', barX(0) - 5, midY());
+      expect(store.repeatSelected()).toBe(true);
+      expect(store.repeatDrag()).toBe(true);
+      pointer(window, 'pointermove', barX(2) - 5, midY());
+      pointer(window, 'pointerup', barX(2) - 5, midY());
+      fixture.detectChanges();
+      expect(store.doc()!.repeat_bar).toBe(2);
+      expect(store.selectedNoteId()).toBeNull();
+    });
+
+    it('shows the selected sign in the accent colour, and a click on empty paper lets it go', async () => {
+      await render({ bars: 4, repeat_bar: 1 });
+      expect(el.querySelector('svg > circle.fill-fg')).not.toBeNull();
+      store.selectRepeat();
+      fixture.detectChanges();
+      expect(el.querySelector('svg > circle.fill-accent')).not.toBeNull();
+      expect(el.querySelector('svg > circle.fill-fg')).toBeNull();
+      pointer(svg(), 'click', layout().systems[0].x0 + 30, 5); // the ruler: not a click on the staff
+      expect(store.repeatSelected()).toBe(true);
+      pointer(svg(), 'click', layout().systems[0].x0 + 30, layout().systems[0].staves.treble.top + 20);
+      expect(store.repeatSelected()).toBe(false);
+    });
+
+    it('is not offered in a read-only view', async () => {
+      await render({ bars: 4, repeat_bar: 1 });
+      fixture.componentRef.setInput('score', { ...store.doc()! });
+      fixture.detectChanges();
+      expect(el.querySelector('svg > rect[role="button"]')).toBeNull();
+    });
+  });
+
   it('draws the repeat sign (two dots in each staff before the final bar line) only when the score repeats', async () => {
     await render({ bars: 2 });
     expect(el.querySelectorAll('svg > circle')).toHaveLength(0);
-    await render({ bars: 2, repeat: true });
+    await render({ bars: 2, repeat_bar: 1 });
     expect(el.querySelectorAll('svg > circle')).toHaveLength(4);
     const xs = [...el.querySelectorAll('svg > circle')].map((c) => +c.getAttribute('cx')!);
     expect(new Set(xs).size).toBe(1);
     expect(xs[0]).toBeLessThan(layout().systems[0].right - 6); // before the final double line
   });
 
-  it('draws the repeat sign in the last line only', async () => {
+  it('draws the repeat sign at the end of any bar, with its own thin and thick line, and the final bar line after the rest', async () => {
+    await render({ bars: 4, repeat_bar: 1 });
+    const sys = layout().systems[0];
+    const barEnd = sys.x0 + 2 * 1920 * sys.ppt;
+    const dots = [...el.querySelectorAll('svg > circle')].map((c) => +c.getAttribute('cx')!);
+    expect(dots).toHaveLength(4);
+    expect(new Set(dots)).toEqual(new Set([barEnd - 13]));
+    const thick = [...el.querySelectorAll('svg > line[stroke-width="3.2"]')].map((x) => +x.getAttribute('x1')!);
+    expect(thick).toEqual(expect.arrayContaining([barEnd, sys.right])); // the repeat's and the closing double bar's
+    expect(thick).toHaveLength(2);
+    await render({ bars: 4, repeat_bar: 0 });
+    expect(new Set([...el.querySelectorAll('svg > circle')].map((c) => +c.getAttribute('cx')!))).toEqual(new Set([sys.x0 + 1920 * sys.ppt - 13]));
+  });
+
+  it('draws the repeat sign in the system of its bar', async () => {
     Object.defineProperty(el, 'clientWidth', { configurable: true, value: 900 });
-    await render({ beats: 3, bars: 6, repeat: true });
+    await render({ beats: 3, bars: 6, repeat_bar: 1 });
+    window.dispatchEvent(new Event('resize'));
+    fixture.detectChanges();
+    expect(layout().systems).toHaveLength(2);
+    const ys = [...el.querySelectorAll('svg > circle')].map((c) => +c.getAttribute('cy')!);
+    expect(ys).toHaveLength(4);
+    expect(ys.every((y) => y < layout().systems[1].top)).toBe(true);
+  });
+
+  it('draws the repeat sign in the last line when it closes the score', async () => {
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 900 });
+    await render({ beats: 3, bars: 6, repeat_bar: 5 });
     window.dispatchEvent(new Event('resize'));
     fixture.detectChanges();
     expect(layout().systems).toHaveLength(2);

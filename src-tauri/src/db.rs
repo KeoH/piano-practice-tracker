@@ -23,7 +23,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use crate::models::{
     AttemptDetails, AttemptDto, AttemptSummaryDto, CompositionClipDto, CompositionDto, CompositionSummaryDto,
     CompositionTrackDto, FragmentDto, LibraryFragmentDto, MelodyDto, MelodySource, MelodySummaryDto, PieceDetailDto,
-    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, ScoreDto, ScoreNoteDto, ScoreSummaryDto, SessionDetailDto,
+    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, ScoreDto, ScoreNoteDto, ScoreSlurDto, ScoreSummaryDto, SessionDetailDto,
     SessionDto, SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
 };
 use crate::paths::relative_to;
@@ -650,8 +650,15 @@ struct ScoreBody {
     bass: Vec<ScoreNoteDto>,
     #[serde(default)]
     pickup_ticks: u32,
+    /// Before the repeat sign could go on any bar, a score either ended with one (`true`) or had none.
+    /// Still read (as the last bar) and still written (when the sign is on the last bar), so a vault
+    /// opened by an older version keeps its repeat.
     #[serde(default)]
     repeat: bool,
+    #[serde(default)]
+    repeat_bar: Option<u32>,
+    #[serde(default)]
+    slurs: Vec<ScoreSlurDto>,
     /// The score ends with the bar that completes its pickup, which `bars` counts. Scores stored before
     /// that was so lack it (`false`): they are read with that bar added.
     #[serde(default)]
@@ -662,20 +669,22 @@ fn map_score(r: &Row) -> rusqlite::Result<ScoreDto> {
     let json: String = r.get(6)?;
     let body: ScoreBody = serde_json::from_str(&json)
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?;
+    let bars = {
+        let bars = to_u32(r.get(5)?);
+        if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
+    };
     Ok(ScoreDto {
         id: r.get(0)?,
         title: r.get(1)?,
         bpm: to_u32(r.get(2)?),
         beats: to_u32(r.get(3)?),
         beat_unit: to_u32(r.get(4)?),
-        bars: {
-            let bars = to_u32(r.get(5)?);
-            if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
-        },
+        bars,
         pickup_ticks: body.pickup_ticks,
-        repeat: body.repeat,
+        repeat_bar: body.repeat_bar.or_else(|| body.repeat.then(|| bars.saturating_sub(1))),
         treble: body.treble,
         bass: body.bass,
+        slurs: body.slurs,
         fragment_id: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
@@ -1880,8 +1889,16 @@ impl Database {
             fragment_id = Some(f.fragment_id.clone());
             adapt_clips(&tx, &f.fragment_id, old.bpm, doc.bpm, f.duration_ms)?;
         }
-        let data = serde_json::to_string(&ScoreBody { treble: doc.treble.clone(), bass: doc.bass.clone(), pickup_ticks: doc.pickup_ticks, repeat: doc.repeat, closing_bar: true })
-            .map_err(|e| e.to_string())?;
+        let data = serde_json::to_string(&ScoreBody {
+            treble: doc.treble.clone(),
+            bass: doc.bass.clone(),
+            pickup_ticks: doc.pickup_ticks,
+            repeat: doc.repeat_bar.is_some_and(|b| b + 1 == doc.bars),
+            repeat_bar: doc.repeat_bar,
+            slurs: doc.slurs.clone(),
+            closing_bar: true,
+        })
+        .map_err(|e| e.to_string())?;
         tx.execute(
             "UPDATE scores SET title = ?1, bpm = ?2, beats = ?3, beat_unit = ?4, bars = ?5, data_json = ?6, \
              fragment_id = ?7, updated_at = ?8 WHERE id = ?9",
@@ -1932,7 +1949,7 @@ impl Database {
             .optional()
             .map_err(db_err)?
             .flatten();
-        json.map(|j| serde_json::from_str(&j).map_err(|e| e.to_string())).transpose()
+        json.map(|j| score::from_stored_json(&j)).transpose()
     }
 
     /// Deletes the score and its fragment (its clips go with it) and returns the absolute path of the
@@ -2976,7 +2993,7 @@ mod tests {
             )
             .unwrap();
         let read = db.get_score(&doc.id).unwrap();
-        assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat), (0, false, false));
+        assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat_bar, read.slurs.len()), (0, false, None, 0));
         assert!(score::issues(&read).is_empty());
     }
 
@@ -3015,9 +3032,51 @@ mod tests {
         assert_eq!(saved.pickup_ticks, 480);
         assert!(saved.treble[1].tie);
         assert_eq!(db.get_score(&doc.id).unwrap().pickup_ticks, 480);
-        doc.repeat = true;
-        assert!(db.save_score(&doc, None).unwrap().repeat);
-        assert!(db.get_score(&doc.id).unwrap().repeat);
+        doc.repeat_bar = Some(1);
+        assert_eq!(db.save_score(&doc, None).unwrap().repeat_bar, Some(1));
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(1));
+    }
+
+    #[test]
+    fn a_score_stored_with_the_old_repeat_flag_has_its_sign_on_the_last_bar() {
+        let db = db();
+        let doc = db.create_score("Old repeat").unwrap(); // 4 bars
+        let put = |json: &str| {
+            db.lock()
+                .unwrap()
+                .execute("UPDATE scores SET data_json = ?1 WHERE id = ?2", params![json, doc.id])
+                .unwrap();
+        };
+        put(r#"{"treble":[],"bass":[],"repeat":true,"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(3));
+        // A sign placed on a bar wins over the flag.
+        put(r#"{"treble":[],"bass":[],"repeat":true,"repeat_bar":1,"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(1));
+        put(r#"{"treble":[],"bass":[],"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, None);
+        // Saved on the last bar it is still written as the flag, so an older version keeps it.
+        let mut last = db.get_score(&doc.id).unwrap();
+        last.repeat_bar = Some(3);
+        db.save_score(&last, None).unwrap();
+        let json = stored(&db, &format!("SELECT data_json FROM scores WHERE id = '{}'", doc.id));
+        assert!(json.contains(r#""repeat":true"#), "{json}");
+        last.repeat_bar = Some(1);
+        db.save_score(&last, None).unwrap();
+        let json = stored(&db, &format!("SELECT data_json FROM scores WHERE id = '{}'", doc.id));
+        assert!(json.contains(r#""repeat":false"#) && json.contains(r#""repeat_bar":1"#), "{json}");
+    }
+
+    #[test]
+    fn slurs_are_stored_with_the_notation() {
+        let db = db();
+        let mut doc = db.create_score("Phrase").unwrap();
+        doc.treble = vec![note("a", 0), note("b", 480)];
+        doc.slurs = vec![ScoreSlurDto { id: "s1".into(), from: "a".into(), to: "b".into() }];
+        let saved = db.save_score(&doc, None).unwrap();
+        assert_eq!(saved.slurs, doc.slurs);
+        assert_eq!(db.get_score(&doc.id).unwrap().slurs, doc.slurs);
+        // A frozen copy keeps them too.
+        assert_eq!(db.create_score("Plain").unwrap().slurs, vec![]);
     }
 
     #[test]
@@ -3224,7 +3283,7 @@ mod tests {
         assert_eq!(db.get_melody_score("m1").unwrap(), None);
         let mut doc = db.create_score("Etude").unwrap();
         doc.treble = vec![note("a", 0)];
-        doc.repeat = true;
+        doc.repeat_bar = Some(3);
         let saved = db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
         assert_eq!(db.score_of_fragment("f1").unwrap().unwrap().id, saved.id);
         assert!(db.score_of_fragment("nope").unwrap().is_none());
@@ -3234,7 +3293,7 @@ mod tests {
         edited.title = "Changed".into();
         db.save_score(&edited, None).unwrap();
         let copy = db.get_melody_score("m1").unwrap().unwrap();
-        assert_eq!((copy.title.as_str(), copy.repeat, copy.treble.len()), ("Etude", true, 1));
+        assert_eq!((copy.title.as_str(), copy.repeat_bar, copy.treble.len()), ("Etude", Some(3), 1));
         assert!(db.set_melody_score("nope", &saved).is_err());
         // It goes with the melody.
         db.delete_melody("m1").unwrap();

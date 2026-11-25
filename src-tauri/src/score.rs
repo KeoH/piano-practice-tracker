@@ -5,15 +5,16 @@
 //! chord (notes that start together, last the same and have different keys). A note never crosses a bar
 //! line, but it can be tied to the note of the same key that starts where it ends, and the two sound as
 //! one. The first bar can be a shorter pickup (anacrusis): it is the end of a bar, so beats keep their place.
-//! A score can end with a repeat sign (`repeat`): it is played twice, from the start, in the MIDI too. Saving one regenerates a real fragment, so the
-//! composer, the exports and the challenge mode treat it like any recorded fragment.
+//! A bar can end with a repeat sign (`repeat_bar`): after it the score goes back to the start and is played
+//! through again, in the MIDI too. Slurs (`slurs`) are notation only. Saving a score regenerates a real fragment, so
+//! the composer, the exports and the challenge mode treat it like any recorded fragment.
 //!
 //! The checks mirror `validateScore` in `src/app/core/score.ts`.
 
 use std::path::Path;
 
 use crate::midi_slicer::{write_smf_with_end, TimedMidiEvent};
-use crate::models::{ScoreDto, ScoreNoteDto, ScoreSummaryDto};
+use crate::models::{ScoreDto, ScoreNoteDto, ScoreSlurDto, ScoreSummaryDto};
 
 pub const TICKS_PER_QUARTER: u32 = 480;
 pub const TICKS_PER_WHOLE: u32 = TICKS_PER_QUARTER * 4;
@@ -51,6 +52,8 @@ pub enum IssueCode {
     CrossesBar,
     Overlap,
     Tie,
+    Repeat,
+    Slur,
 }
 
 impl IssueCode {
@@ -69,6 +72,8 @@ impl IssueCode {
             IssueCode::CrossesBar => "backend.scores.issue.crossesBar",
             IssueCode::Overlap => "backend.scores.issue.overlap",
             IssueCode::Tie => "backend.scores.issue.tie",
+            IssueCode::Repeat => "backend.scores.issue.repeat",
+            IssueCode::Slur => "backend.scores.issue.slur",
         }
     }
 }
@@ -141,9 +146,21 @@ fn min_bars(score: &ScoreDto) -> u32 {
     }
 }
 
-/// Length of what is played: the score once, or twice when it ends with a repeat sign.
+/// Tick where the bar `index` ends (the last bar ends with the score).
+pub fn bar_end(score: &ScoreDto, index: u32) -> u32 {
+    let virtual_start = i64::from(index) * i64::from(bar_ticks(score)) - i64::from(missing_ticks(score));
+    let end = virtual_start + i64::from(bar_ticks(score));
+    u32::try_from(end.max(0)).unwrap_or(u32::MAX).min(score_ticks(score))
+}
+
+/// Tick where the repeat sign is: the end of its bar. `None` if there is none (or it is not on a bar of the score).
+pub fn repeat_tick(score: &ScoreDto) -> Option<u32> {
+    score.repeat_bar.filter(|b| *b < score.bars).map(|b| bar_end(score, b))
+}
+
+/// Length of what is played: the score once, plus the part up to the repeat sign when there is one.
 pub fn play_ticks(score: &ScoreDto) -> u32 {
-    score_ticks(score) * if score.repeat { 2 } else { 1 }
+    score_ticks(score) + repeat_tick(score).unwrap_or(0)
 }
 
 /// Index of the bar a tick is in.
@@ -198,9 +215,10 @@ pub fn new_score(id: String, title: String, now: String) -> ScoreDto {
         beat_unit: 4,
         bars: DEFAULT_BARS,
         pickup_ticks: 0,
-        repeat: false,
+        repeat_bar: None,
         treble: Vec::new(),
         bass: Vec::new(),
+        slurs: Vec::new(),
         fragment_id: None,
         created_at: now.clone(),
         updated_at: now,
@@ -229,6 +247,41 @@ fn accidental_ok(key: u8, accidental: Option<&str>) -> bool {
 fn is_pickup(score: &ScoreDto) -> bool {
     let t = score.pickup_ticks;
     t == 0 || (t < bar_ticks(score) && t % 120 == 0)
+}
+
+/// Slurs that do not join two notes of one staff, the first before the second (or that share an id).
+fn slur_issues(score: &ScoreDto, out: &mut Vec<Issue>) {
+    let mut ids = std::collections::HashSet::new();
+    for slur in &score.slurs {
+        let start_of = |id: &str| {
+            [&score.treble, &score.bass]
+                .iter()
+                .enumerate()
+                .find_map(|(staff, notes)| notes.iter().find(|n| n.id == id).map(|n| (staff, n.tick)))
+        };
+        let ok = match (start_of(&slur.from), start_of(&slur.to)) {
+            (Some((a, from)), Some((b, to))) => a == b && from < to,
+            _ => false,
+        };
+        let repeated = !ids.insert(slur.id.as_str());
+        if !ok || repeated {
+            out.push(issue(IssueCode::Slur));
+        }
+    }
+}
+
+/// Reads a score stored as JSON (a melody's frozen copy). Copies made when the repeat sign could only close
+/// the score say `"repeat": true`: the sign is then on the last bar.
+pub fn from_stored_json(json: &str) -> Result<ScoreDto, String> {
+    let mut value: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    if let Some(obj) = value.as_object_mut() {
+        let legacy = obj.remove("repeat").and_then(|v| v.as_bool()).unwrap_or(false);
+        if legacy && obj.get("repeat_bar").map_or(true, |v| v.is_null()) {
+            let bars = obj.get("bars").and_then(|v| v.as_u64()).unwrap_or(1);
+            obj.insert("repeat_bar".into(), serde_json::json!(bars.saturating_sub(1)));
+        }
+    }
+    serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
 /// Everything wrong with a score (empty when it can be saved).
@@ -290,6 +343,10 @@ pub fn issues(score: &ScoreDto) -> Vec<Issue> {
             prev_end = prev_end.max(end);
         }
     }
+    if score.repeat_bar.is_some_and(|b| b >= score.bars) {
+        out.push(issue(IssueCode::Repeat));
+    }
+    slur_issues(score, &mut out);
     out
 }
 
@@ -311,10 +368,12 @@ fn priority(bytes: &[u8]) -> u8 {
 }
 
 /// The MIDI events of both hands on one channel, sorted by time (note-offs first), and the length of
-/// what is played in µs. Notes sound for their whole value, a chain of tied notes sounds as one note, and
-/// a score that ends with a repeat sign is played twice.
+/// what is played in µs. Notes sound for their whole value and a chain of tied notes sounds as one note.
+/// With a repeat sign the performance is the notes that start before it (cut at the sign) followed by the
+/// whole score again, so a bar after the sign is played once and the ones before it twice.
 pub fn build_events(score: &ScoreDto) -> (Vec<TimedMidiEvent>, u64) {
-    let mut events: Vec<TimedMidiEvent> = Vec::with_capacity((score.treble.len() + score.bass.len()) * 2);
+    // Every sounding note as (start, end, key) in ticks.
+    let mut sounding: Vec<(u32, u32, u8)> = Vec::with_capacity(score.treble.len() + score.bass.len());
     for notes in [&score.treble, &score.bass] {
         let refs: Vec<&ScoreNoteDto> = notes.iter().collect();
         let mut continued = vec![false; refs.len()];
@@ -336,15 +395,25 @@ pub fn build_events(score: &ScoreDto) -> (Vec<TimedMidiEvent>, u64) {
                 end = refs[next].tick + refs[next].duration_ticks;
                 cur = next;
             }
-            events.push(TimedMidiEvent::new(ticks_to_us(n.tick, score.bpm), vec![0x90 | CHANNEL, n.key, VELOCITY]));
-            events.push(TimedMidiEvent::new(ticks_to_us(end, score.bpm), vec![0x80 | CHANNEL, n.key, 0]));
+            sounding.push((n.tick, end, n.key));
         }
     }
-    if score.repeat {
-        let offset = ticks_to_us(score_ticks(score), score.bpm);
-        let again: Vec<TimedMidiEvent> =
-            events.iter().map(|e| TimedMidiEvent::new(e.time_us + offset, e.bytes.clone())).collect();
-        events.extend(again);
+    let mut events: Vec<TimedMidiEvent> = Vec::with_capacity(sounding.len() * 4);
+    let mut push = |start: u32, end: u32, key: u8| {
+        events.push(TimedMidiEvent::new(ticks_to_us(start, score.bpm), vec![0x90 | CHANNEL, key, VELOCITY]));
+        events.push(TimedMidiEvent::new(ticks_to_us(end, score.bpm), vec![0x80 | CHANNEL, key, 0]));
+    };
+    let repeat_at = repeat_tick(score);
+    for &(start, end, key) in &sounding {
+        match repeat_at {
+            Some(r) => {
+                if start < r {
+                    push(start, end.min(r), key);
+                }
+                push(start + r, end + r, key);
+            }
+            None => push(start, end, key),
+        }
     }
     events.sort_by_key(|e| (e.time_us, priority(&e.bytes)));
     (events, ticks_to_us(play_ticks(score), score.bpm))
@@ -615,7 +684,7 @@ mod tests {
     #[test]
     fn a_repeat_plays_the_score_twice_from_the_start() {
         let mut s = score(vec![note("a", 0, Q, 60), note("b", Q, 2 * Q, 64)], vec![note("c", 0, 4 * Q, 36), note("d", 4 * Q, 4 * Q, 36)]);
-        s.repeat = true;
+        s.repeat_bar = Some(1); // the last bar
         assert_eq!(play_ticks(&s), 2 * score_ticks(&s));
         assert_eq!(duration_ms(&s), 8_000); // two bars of 4/4 at 120 BPM, twice
         let (events, length_us) = build_events(&s);
@@ -632,7 +701,7 @@ mod tests {
     fn a_repeat_does_not_change_the_score_itself() {
         let mut s = score(vec![note("a", 0, Q, 60)], vec![]);
         let once = build_events(&s);
-        s.repeat = true;
+        s.repeat_bar = Some(1);
         assert_eq!(score_ticks(&s), 8 * Q);
         assert!(issues(&s).is_empty());
         assert_eq!(build_events(&s).0.len(), once.0.len() * 2);
@@ -643,13 +712,121 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("score.mid");
         let mut s = score(vec![note("a", 0, Q, 60)], vec![]);
-        s.repeat = true;
+        s.repeat_bar = Some(1);
         assert_eq!(write_midi(&s, &path).unwrap(), 8_000);
         let (events, ms) = read_timed_events(&path).unwrap();
         assert_eq!(ms, 8_000);
         assert_eq!(events.iter().filter(|e| e.bytes[0] == 0x90).count(), 2);
     }
 
+
+    fn on_times(events: &[TimedMidiEvent]) -> Vec<(u64, u8)> {
+        events.iter().filter(|e| e.bytes[0] == 0x90).map(|e| (e.time_us, e.bytes[1])).collect()
+    }
+
+    #[test]
+    fn a_repeat_after_a_middle_bar_plays_the_bars_before_it_twice() {
+        // Three 4/4 bars at 120 BPM (2 s each), one note per bar; the sign closes bar 2 (index 1).
+        let mut s = score(vec![note("a", 0, Q, 60), note("b", 4 * Q, Q, 62), note("c", 8 * Q, Q, 64)], vec![]);
+        s.bars = 3;
+        s.repeat_bar = Some(1);
+        assert!(issues(&s).is_empty());
+        assert_eq!(repeat_tick(&s), Some(8 * Q));
+        assert_eq!(play_ticks(&s), 8 * Q + 12 * Q);
+        let (events, length_us) = build_events(&s);
+        assert_eq!(length_us, 10_000_000);
+        // Bars 1-2, then everything again: bar 3 sounds once, at the end.
+        assert_eq!(on_times(&events), vec![(0, 60), (2_000_000, 62), (4_000_000, 60), (6_000_000, 62), (8_000_000, 64)]);
+        assert_eq!(duration_ms(&s), 10_000);
+    }
+
+    #[test]
+    fn a_repeat_on_the_first_bar_repeats_only_that_bar() {
+        let mut s = score(vec![note("a", 0, Q, 60), note("b", 4 * Q, Q, 62)], vec![]);
+        s.repeat_bar = Some(0);
+        assert_eq!(on_times(&build_events(&s).0), vec![(0, 60), (2_000_000, 60), (4_000_000, 62)]);
+    }
+
+    #[test]
+    fn a_tie_over_the_repeat_sign_is_cut_there_and_whole_the_second_time() {
+        // C4 on the last beat of bar 1 tied to the first beat of bar 2; the sign closes bar 1.
+        let mut s = score(vec![tied(note("a", 3 * Q, Q, 60)), note("b", 4 * Q, Q, 60)], vec![]);
+        s.repeat_bar = Some(0);
+        assert!(issues(&s).is_empty());
+        let (events, _) = build_events(&s);
+        let off: Vec<(u64, u8)> = events.iter().filter(|e| e.bytes[0] == 0x80).map(|e| (e.time_us, e.bytes[1])).collect();
+        assert_eq!(on_times(&events), vec![(1_500_000, 60), (3_500_000, 60)]);
+        assert_eq!(off, vec![(2_000_000, 60), (4_500_000, 60)]);
+    }
+
+    #[test]
+    fn the_repeat_goes_at_the_end_of_a_bar_of_the_score() {
+        let mut s = score(vec![], vec![]);
+        s.repeat_bar = Some(2); // two bars
+        assert_eq!(codes(&s), vec![IssueCode::Repeat]);
+        assert_eq!(repeat_tick(&s), None);
+        s.repeat_bar = Some(1);
+        assert!(issues(&s).is_empty());
+    }
+
+    #[test]
+    fn with_a_pickup_the_first_bar_is_short_and_the_last_ends_with_the_score() {
+        let mut s = score(vec![], vec![]);
+        s.pickup_ticks = Q;
+        s.bars = 3; // pickup, one whole bar, closing bar
+        assert_eq!(score_ticks(&s), 8 * Q);
+        assert_eq!((bar_end(&s, 0), bar_end(&s, 1), bar_end(&s, 2)), (Q, 5 * Q, 8 * Q));
+        s.repeat_bar = Some(0);
+        assert_eq!(play_ticks(&s), 9 * Q);
+    }
+
+    fn slur(id: &str, from: &str, to: &str) -> ScoreSlurDto {
+        ScoreSlurDto { id: id.into(), from: from.into(), to: to.into() }
+    }
+
+    #[test]
+    fn a_slur_joins_two_notes_of_one_staff_the_first_before_the_second() {
+        let mut s = score(vec![note("a", 0, Q, 60), note("b", Q, Q, 62)], vec![note("c", 0, Q, 40)]);
+        s.slurs = vec![slur("s1", "a", "b")];
+        assert!(issues(&s).is_empty());
+        for bad in [slur("s1", "b", "a"), slur("s1", "a", "a"), slur("s1", "a", "c"), slur("s1", "a", "nope")] {
+            s.slurs = vec![bad.clone()];
+            assert_eq!(codes(&s), vec![IssueCode::Slur], "{bad:?}");
+        }
+        s.slurs = vec![slur("s1", "a", "b"), slur("s1", "a", "b")];
+        assert_eq!(codes(&s), vec![IssueCode::Slur]); // the same id twice
+        // An invalid slur still takes its id: a valid one with the same id is a second problem, as in the frontend.
+        s.slurs = vec![slur("s1", "b", "a"), slur("s1", "a", "b")];
+        assert_eq!(codes(&s), vec![IssueCode::Slur, IssueCode::Slur]);
+    }
+
+    #[test]
+    fn slurs_do_not_change_what_is_played() {
+        let mut s = score(vec![note("a", 0, Q, 60), note("b", Q, Q, 62)], vec![]);
+        let plain = build_events(&s);
+        s.slurs = vec![slur("s1", "a", "b")];
+        assert_eq!(build_events(&s), plain);
+    }
+
+    #[test]
+    fn a_stored_copy_from_before_the_repeat_could_move_puts_it_on_the_last_bar() {
+        let mut s = score(vec![note("a", 0, Q, 60)], vec![]);
+        s.repeat_bar = Some(1);
+        let mut value = serde_json::to_value(&s).unwrap();
+        let mut edit = |f: &dyn Fn(&mut serde_json::Map<String, serde_json::Value>)| {
+            f(value.as_object_mut().unwrap());
+            from_stored_json(&value.to_string()).unwrap()
+        };
+        let read = edit(&|o| {
+            o.remove("repeat_bar");
+            o.remove("slurs");
+            o.insert("repeat".into(), serde_json::json!(true));
+        });
+        assert_eq!((read.repeat_bar, read.slurs.len()), (Some(1), 0));
+        assert_eq!(edit(&|o| drop(o.insert("repeat".into(), serde_json::json!(false)))).repeat_bar, None);
+        // A copy that already has the new field keeps it.
+        assert_eq!(edit(&|o| drop(o.insert("repeat_bar".into(), serde_json::json!(0)))).repeat_bar, Some(0));
+    }
     #[test]
     fn summarizes_a_score() {
         let s = score(vec![note("a", 0, Q, 60)], vec![note("b", 0, Q, 36)]);

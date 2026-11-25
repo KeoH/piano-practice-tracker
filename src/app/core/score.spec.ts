@@ -11,6 +11,7 @@ import {
   ledgerSteps,
   moveNote,
   msToTicks,
+  nextSlurTarget,
   newScore,
   noteCount,
   notatedValue,
@@ -28,15 +29,20 @@ import {
   isClosingBar,
   minBars,
   pageTick,
+  performedTick,
   playTicks,
-  toggleRepeat,
+  repeatTick,
   barSpanAt,
   barLabel,
   missingTicks,
   chordDuration,
   isPickup,
   setPickup,
+  setRepeatBar,
+  slurLinks,
   tieLinks,
+  toggleSlur,
+  toggleSlurFrom,
   toggleTie,
   staffStep,
   ticksToMs,
@@ -638,29 +644,148 @@ describe('pickup bar', () => {
 });
 
 describe('repeat sign', () => {
-  it('plays the score twice: it doubles the length of what is played but not the score', () => {
-    const once = score([], [], { bars: 2, bpm: 120 });
-    const twice = toggleRepeat(once);
-    expect(twice.repeat).toBe(true);
-    expect(scoreTicks(twice)).toBe(scoreTicks(once));
-    expect(playTicks(once)).toBe(8 * Q);
-    expect(playTicks(twice)).toBe(16 * Q);
-    expect(scoreDurationMs(once)).toBe(4000);
-    expect(scoreDurationMs(twice)).toBe(8000);
-    expect(toggleRepeat(twice).repeat).toBe(false);
+  it('goes back to the start after its bar: the bars before it are played twice', () => {
+    const once = score([], [], { bars: 3, bpm: 120 });
+    const last = setRepeatBar(once, 2)!;
+    expect(last.repeat_bar).toBe(2);
+    expect(scoreTicks(last)).toBe(scoreTicks(once));
+    expect(playTicks(once)).toBe(12 * Q);
+    expect(playTicks(last)).toBe(24 * Q);
+    expect(scoreDurationMs(once)).toBe(6000);
+    expect(scoreDurationMs(last)).toBe(12000);
+    const middle = setRepeatBar(once, 1)!;
+    expect(repeatTick(middle)).toBe(8 * Q);
+    expect(playTicks(middle)).toBe(20 * Q); // bars 1-2, then all three
+    expect(setRepeatBar(middle, null)!.repeat_bar).toBeNull();
+    expect(setRepeatBar(once, 3)).toBeNull(); // there is no fourth bar
+    expect(setRepeatBar(once, -1)).toBeNull();
+    expect(setRepeatBar(middle, 1)).toBe(middle);
   });
 
-  it('shows the second pass over the first one on the page', () => {
-    const s = score([], [], { bars: 2, repeat: true });
+  it('puts the sign at the end of the pickup bar and of the closing bar too', () => {
+    const s = score([], [], { bars: 3, pickup_ticks: Q }); // pickup, one whole bar, closing bar
+    expect(repeatTick(setRepeatBar(s, 0)!)).toBe(Q);
+    expect(repeatTick(setRepeatBar(s, 1)!)).toBe(5 * Q);
+    expect(repeatTick(setRepeatBar(s, 2)!)).toBe(scoreTicks(s));
+  });
+
+  it('maps the player to the page: after the sign the score starts over', () => {
+    const s = score([], [], { bars: 3, repeat_bar: 1 }); // sign at 8 Q
     expect(pageTick(s, 100)).toBe(100);
-    expect(pageTick(s, 8 * Q)).toBe(0); // the repeat starts over
+    expect(pageTick(s, 8 * Q)).toBe(0); // the second pass starts over
     expect(pageTick(s, 9 * Q)).toBe(Q);
-    expect(pageTick({ ...s, repeat: false }, 9 * Q)).toBe(9 * Q);
+    expect(pageTick(s, 16 * Q)).toBe(8 * Q); // bar 3 is only played in the second pass
+    expect(pageTick({ ...s, repeat_bar: null }, 9 * Q)).toBe(9 * Q);
   });
 
-  it('is valid with or without notes, and leaves the notes alone', () => {
-    const s = toggleRepeat(score([note('a', 0, Q, 60)]));
+  it('maps a place on the page to the player: bars after the sign are only in the second pass', () => {
+    const s = score([], [], { bars: 3, repeat_bar: 1 });
+    expect(performedTick(s, 3 * Q)).toBe(3 * Q);
+    expect(performedTick(s, 8 * Q)).toBe(16 * Q);
+    expect(performedTick(s, 9 * Q)).toBe(17 * Q);
+    for (const t of [0, 5 * Q, 8 * Q, 11 * Q]) expect(pageTick(s, performedTick(s, t))).toBe(t);
+    expect(performedTick({ ...s, repeat_bar: null }, 9 * Q)).toBe(9 * Q);
+  });
+
+  it('is valid with or without notes, leaves the notes alone, and must be on a bar of the score', () => {
+    const s = setRepeatBar(score([note('a', 0, Q, 60)]), 0)!;
     expect(validateScore(s)).toEqual([]);
     expect(s.treble).toHaveLength(1);
+    expect(validateScore({ ...s, repeat_bar: 4 }).map((i) => i.code)).toEqual(['repeat']);
+  });
+
+  it('stays on a bar of the score when the bars change', () => {
+    const s = score([], [], { bars: 4, repeat_bar: 3 });
+    expect(resizeBars(s, 2)!.repeat_bar).toBe(1); // it moves to the new last bar
+    expect(resizeBars(s, 6)!.repeat_bar).toBe(3); // and stays where it is when bars are added
+    expect(resizeBars(score([], [], { bars: 4, repeat_bar: 1 }), 2)!.repeat_bar).toBe(1);
+  });
+
+  it('stays at the end of the score when a pickup adds or removes the closing bar', () => {
+    const s = score([], [], { bars: 4, repeat_bar: 3 });
+    const withPickup = setPickup(s, Q)!;
+    expect(withPickup.bars).toBe(5);
+    expect(withPickup.repeat_bar).toBe(4);
+    expect(setPickup(withPickup, 0)!.repeat_bar).toBe(3);
+    // A sign in the middle keeps its bar.
+    expect(setPickup(score([], [], { bars: 4, repeat_bar: 1 }), Q)!.repeat_bar).toBe(1);
+  });
+});
+
+describe('slurs', () => {
+  const phrase = () =>
+    score([note('a', 0, Q, 60), note('b', Q, Q, 62), note('c', 2 * Q, Q, 64), note('d', 3 * Q, Q, 65)], [note('x', 0, 4 * Q, 40)]);
+
+  it('slurs one note to another of the same hand, in either order, and takes the slur away the second time', () => {
+    const s = toggleSlur(phrase(), 'a', 'c', 's1')!;
+    expect(s.slurs).toEqual([{ id: 's1', from: 'a', to: 'c' }]);
+    expect(validateScore(s)).toEqual([]);
+    const again = toggleSlur(s, 'c', 'a', 's2')!; // the same pair, the other way round
+    expect(again.slurs).toEqual([]);
+    expect(toggleSlur(phrase(), 'c', 'a', 's3')!.slurs).toEqual([{ id: 's3', from: 'a', to: 'c' }]);
+  });
+
+  it('does not slur across hands, a note to itself, or a note that is not there', () => {
+    expect(toggleSlur(phrase(), 'a', 'x', 's1')).toBeNull();
+    expect(toggleSlur(phrase(), 'a', 'a', 's1')).toBeNull();
+    expect(toggleSlur(phrase(), 'a', 'nope', 's1')).toBeNull();
+  });
+
+  it('can have several slurs, nested or in a row', () => {
+    let s = toggleSlur(phrase(), 'a', 'd', 's1')!;
+    s = toggleSlur(s, 'a', 'b', 's2')!;
+    s = toggleSlur(s, 'c', 'd', 's3')!;
+    expect(s.slurs.map((x) => x.id)).toEqual(['s1', 's2', 's3']);
+    expect(slurLinks(s, 'treble').map((l) => l.slur.id)).toEqual(['s1', 's2', 's3']); // longest first from the same note
+    expect(validateScore(s)).toEqual([]);
+  });
+
+  it('the slur key slurs to the next note, or takes away the shortest slur that starts at the note', () => {
+    let s = toggleSlurFrom(phrase(), 'b', 's1')!;
+    expect(s.slurs).toEqual([{ id: 's1', from: 'b', to: 'c' }]);
+    s = toggleSlur(s, 'b', 'd', 's2')!;
+    s = toggleSlurFrom(s, 'b', 'ignored')!; // removes b→c, the shortest
+    expect(s.slurs).toEqual([{ id: 's2', from: 'b', to: 'd' }]);
+    expect(toggleSlurFrom(phrase(), 'd', 's9')).toBeNull(); // nothing follows
+  });
+
+  it('goes to the note of the next onset closest in pitch', () => {
+    const s = score([note('a', 0, Q, 60), note('b', Q, Q, 55), note('c', Q, Q, 64)]);
+    expect(nextSlurTarget(s, 'a')!.id).toBe('c');
+  });
+
+  it('is dropped with a note that goes, a note that changes hand or one that moves before the other', () => {
+    const s = toggleSlur(phrase(), 'a', 'c', 's1')!;
+    expect(removeNote(s, 'b')!.slurs).toHaveLength(1); // a note in between does not matter
+    expect(removeNote(s, 'a')!.slurs).toEqual([]);
+    expect(removeNote(s, 'c')!.slurs).toEqual([]);
+    expect(moveNote(s, 'c', { staff: 'bass', tick: 2 * Q, pitch: { key: 41, accidental: null } })).toBeNull(); // the bass has a note there
+    expect(moveNote(s, 'c', { staff: 'bass', tick: 4 * Q, pitch: { key: 41, accidental: null } })!.slurs).toEqual([]);
+  });
+
+  it('survives a note being moved in pitch or a little in time', () => {
+    const s = toggleSlur(phrase(), 'a', 'c', 's1')!;
+    expect(shiftStep(s, 'a', 1)!.slurs).toEqual(s.slurs);
+    expect(toggleAccidental(s, 'a', 'sharp')!.slurs).toEqual(s.slurs);
+    const earlier = moveNote(s, 'a', { tick: 0, pitch: { key: 67, accidental: null } })!;
+    expect(earlier.slurs).toEqual(s.slurs);
+    expect(setNoteDuration(s, 'd', 2 * Q)).toBeNull(); // no room; the slur is untouched either way
+  });
+
+  it('is invalid when it does not join two notes of one hand in order, or its id repeats', () => {
+    const base = phrase();
+    const bad = (slurs: ScoreDto['slurs']) => validateScore({ ...base, slurs }).map((i) => i.code);
+    expect(bad([{ id: 's', from: 'a', to: 'c' }])).toEqual([]);
+    expect(bad([{ id: 's', from: 'c', to: 'a' }])).toEqual(['slur']);
+    expect(bad([{ id: 's', from: 'a', to: 'x' }])).toEqual(['slur']);
+    expect(bad([{ id: 's', from: 'a', to: 'nope' }])).toEqual(['slur']);
+    expect(bad([{ id: 's', from: 'a', to: 'b' }, { id: 's', from: 'b', to: 'c' }])).toEqual(['slur']);
+  });
+
+  it('is only notation: it does not change the length or the notes', () => {
+    const plain = phrase();
+    const slurred = toggleSlur(plain, 'a', 'd', 's1')!;
+    expect(scoreDurationMs(slurred)).toBe(scoreDurationMs(plain));
+    expect(slurred.treble).toEqual(plain.treble);
   });
 });

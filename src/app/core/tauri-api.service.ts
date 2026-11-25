@@ -480,6 +480,11 @@ export class TauriApiService {
     return this.call('export_composition_midi', { compositionId, destPath });
   }
 
+  /** Writes the bytes of a score's PDF (in base64) to `destPath`; resolves with the path written. */
+  exportScorePdf(destPath: string, dataBase64: string): Promise<string> {
+    return this.call('export_score_pdf', { destPath, dataBase64 });
+  }
+
   /** Native "save as" dialog for a WAV file; returns null if cancelled. */
   pickWavSavePath(title: string, defaultName: string): Promise<string | null> {
     return this.pickSavePath(title, defaultName, { name: 'WAV', extensions: ['wav'] });

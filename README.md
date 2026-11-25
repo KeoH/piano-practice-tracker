@@ -45,6 +45,7 @@ A desktop app for Linux and macOS, built with **Tauri v2** (Rust) and **Angular 
 - **Chords, ties, pickups and repeats:** put a note on the beat of another to make a chord, tie notes (also over bar lines), start with a shorter pickup bar (the score closes with the bar that completes it) and end with a repeat sign to play it twice.
 - **A tools panel that stays in view** while a long score scrolls: transport, note values and the score's settings. The app's side menu can also be folded to icons to make room.
 - A score is saved as a **fragment** you can place in the composer or turn into a challenge.
+- **Download a score as a PDF** that looks like printed sheet music: A4 pages with the title and tempo, the grand staff in systems with a brace, beamed eighths and sixteenths, ties, slurs, repeat signs, bar numbers and page numbers.
 
 ### Composer
 - Arrange fragments on up to 15 **tracks**, each with its own General MIDI instrument, volume, mute and solo.
