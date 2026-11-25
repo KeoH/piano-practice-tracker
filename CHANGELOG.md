@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.9.0...v0.9.1) (2026-11-25)
+
+
+### Bug Fixes
+
+* fix tests ([80d3159](https://github.com/KeoH/piano-practice-tracker/commit/80d315999e5f4c6aaa69295d5c745a4715a697e7))
+* fix tests ([2636fe7](https://github.com/KeoH/piano-practice-tracker/commit/2636fe778f1388c87bd6091e507d8a82a12b8a0b))
+
 ## [0.9.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.8.1...v0.9.0) (2026-11-25)
 
 
