@@ -19,7 +19,7 @@ describe('ScoreEditorComponent', () => {
   const button = (label: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.getAttribute('aria-label') === label)!;
 
   async function open(doc: ScoreDto | null = score()) {
-    mock.set('getScores', () => Promise.resolve(doc ? [{ id: doc.id, title: doc.title, bpm: doc.bpm, beats: 4, beat_unit: 4, bars: doc.bars, note_count: 0, duration_ms: 0, fragment_id: null, updated_at: '' }] : []));
+    mock.set('getScores', () => Promise.resolve(doc ? [{ id: doc.id, title: doc.title, bpm: doc.bpm, beats: 4, beat_unit: 4, bars: doc.bars, note_count: 0, duration_ms: 0, fragment_id: null, piece_id: null, updated_at: '' }] : []));
     mock.set('getScore', () => Promise.resolve(doc!));
     fixture = TestBed.createComponent(ScoreEditorComponent);
     el = fixture.nativeElement;
@@ -281,8 +281,8 @@ describe('ScoreListComponent', () => {
     TestBed.inject(I18nService).setLang('en');
     const store = TestBed.inject(ScoreStore);
     store.scores.set([
-      { id: 's1', title: 'Étude', bpm: 90, beats: 4, beat_unit: 4, bars: 4, note_count: 12, duration_ms: 10000, fragment_id: null, updated_at: '' },
-      { id: 's2', title: 'Waltz', bpm: 120, beats: 3, beat_unit: 4, bars: 1, note_count: 1, duration_ms: 1500, fragment_id: null, updated_at: '' },
+      { id: 's1', title: 'Étude', bpm: 90, beats: 4, beat_unit: 4, bars: 4, note_count: 12, duration_ms: 10000, fragment_id: null, piece_id: null, updated_at: '' },
+      { id: 's2', title: 'Waltz', bpm: 120, beats: 3, beat_unit: 4, bars: 1, note_count: 1, duration_ms: 1500, fragment_id: null, piece_id: null, updated_at: '' },
     ]);
     const fixture = TestBed.createComponent(ScoreListComponent);
     fixture.detectChanges();

@@ -9,6 +9,8 @@ import { STAFF_NAMES, barLabel } from './score';
  * into systems that fill the width, bar numbers at the start of each system, page numbers. The drawing is the
  * same as the editor's (`core/score-draw`) in black on white; clefs, rests, accidentals and the brace are vector
  * paths (`music-glyphs`, from the Noto Music font) so no font has to be embedded. `pdf-lib` is loaded on demand.
+ * Several scores can share one PDF (`buildScoresPdf`): they follow one another down the page (`flow`) and the page
+ * numbers run through all. A piece of the repertoire adds an intro before them: its title, composer and notes.
  */
 
 const PAGE_W = 595.28;
@@ -27,6 +29,17 @@ export interface PdfLabels {
   page: (n: number, total: number) => string;
   /** Title of a score that has none. */
   untitled: string;
+  /** Title of a PDF that holds several scores. */
+  collection: string;
+  /** Heading of the notes of a piece, in the intro. */
+  notes: string;
+}
+
+/** What is printed before the scores of a piece of the repertoire. */
+export interface PdfIntro {
+  title: string;
+  composer: string;
+  notes: string;
 }
 
 /** Layout units a note needs before the next one on its staff: a head and its stem, or an accidental as well. */
@@ -86,35 +99,132 @@ export function pdfSafeText(text: string, supported: ReadonlySet<number>): strin
   return out;
 }
 
-/** Where each system goes: the page it is on and its distance from the top of the page, in points. */
+/** Where something goes: the page it is on and its distance from the top of the page, in points. */
 export interface Placement {
   page: number;
   top: number;
 }
 
-/** Breaks the systems into pages (the first one has less room: it holds the title). */
-export function paginate(systems: number, systemPt: number): { placements: Placement[]; pages: number } {
-  const room = PAGE_H - 2 * MARGIN - FOOTER_H;
-  const first = Math.max(1, Math.floor((room - HEADER_H) / systemPt));
-  const other = Math.max(1, Math.floor(room / systemPt));
-  const placements: Placement[] = [];
-  let page = 0;
-  let used = 0;
-  let capacity = first;
-  for (let i = 0; i < systems; i++) {
-    if (used === capacity) {
-      page++;
-      used = 0;
-      capacity = other;
+/** What a score needs from the page: how many systems it has and how tall each one is. */
+export interface FlowItem {
+  systems: number;
+  systemPt: number;
+}
+
+/** Blank space between the end of a score and the title of the next one, in points. */
+const SCORE_GAP = 22;
+const EPS = 1e-6;
+
+/**
+ * Lays scores out one after another: each title goes right below the previous score if its first system fits
+ * there, and a score goes on to the next page when its systems run out of room. A title is never left alone at the
+ * bottom of a page.
+ */
+export function flow(
+  items: readonly FlowItem[],
+  start: Placement = { page: 0, top: MARGIN },
+): { scores: { header: Placement; placements: Placement[] }[]; pages: number } {
+  const limit = PAGE_H - MARGIN - FOOTER_H;
+  let page = start.page;
+  let y = start.top;
+  const scores = items.map(({ systems, systemPt }) => {
+    // The title and the first system go together: if they do not fit in what is left, start a new page.
+    if (y > MARGIN) {
+      y += SCORE_GAP;
+      if (y + HEADER_H + systemPt > limit + EPS) {
+        page++;
+        y = MARGIN;
+      }
     }
-    placements.push({ page, top: MARGIN + (page === 0 ? HEADER_H : 0) + used * systemPt });
-    used++;
+    const header = { page, top: y };
+    y += HEADER_H;
+    const placements: Placement[] = [];
+    for (let i = 0; i < systems; i++) {
+      // The first system is already known to fit (or to be alone on a fresh page, however tall).
+      if (i > 0 && y + systemPt > limit + EPS) {
+        page++;
+        y = MARGIN;
+      }
+      placements.push({ page, top: y });
+      y += systemPt;
+    }
+    return { header, placements };
+  });
+  return { scores, pages: page + 1 };
+}
+
+/** A line of text of the intro, with the room it takes (its height in points, gap above included). */
+interface IntroLine {
+  text: string;
+  size: number;
+  bold: boolean;
+  center: boolean;
+  grey: boolean;
+  /** Blank space above, in points. */
+  before: number;
+}
+
+const INTRO_WIDTH = PAGE_W - 2 * MARGIN;
+const lineHeight = (l: IntroLine) => l.before + l.size * 1.35;
+
+/** Words of `text` on lines no wider than `maxWidth`; a word wider than that is cut where it has to be. */
+export function wrapText(text: string, width: (s: string) => number, maxWidth: number): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (const word of text.split(' ')) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (width(candidate) <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = '';
+    let rest = word;
+    while (width(rest) > maxWidth && rest.length > 1) {
+      let n = rest.length - 1;
+      while (n > 1 && width(rest.slice(0, n)) > maxWidth) n--;
+      lines.push(rest.slice(0, n));
+      rest = rest.slice(n);
+    }
+    current = rest;
   }
-  return { placements, pages: Math.max(1, page + 1) };
+  if (current || !lines.length) lines.push(current);
+  return lines;
+}
+
+/** Puts lines of the given heights one under the other from the top of the first page, over as many pages as they need. */
+export function flowLines(heights: readonly number[]): { placements: Placement[]; end: Placement } {
+  const limit = PAGE_H - MARGIN - FOOTER_H;
+  let page = 0;
+  let y = MARGIN;
+  const placements = heights.map((h) => {
+    if (y > MARGIN && y + h > limit + EPS) {
+      page++;
+      y = MARGIN;
+    }
+    const at = { page, top: y };
+    y += h;
+    return at;
+  });
+  return { placements, end: { page, top: y } };
+}
+
+/** Breaks the systems of a single score into pages (the first one has less room: it holds the title). */
+export function paginate(systems: number, systemPt: number): { placements: Placement[]; pages: number } {
+  const { scores, pages } = flow([{ systems, systemPt }]);
+  return { placements: scores[0].placements, pages };
 }
 
 /** Draws the score and returns the bytes of the PDF. */
-export async function buildScorePdf(score: ScoreDto, labels: PdfLabels): Promise<Uint8Array> {
+export function buildScorePdf(score: ScoreDto, labels: PdfLabels): Promise<Uint8Array> {
+  return buildScoresPdf([score], labels);
+}
+
+/**
+ * Draws one or more scores into a single PDF, one after another, each with its title and tempo; a score starts on
+ * a new page only when its title and first system do not fit below the previous one. The page numbers count the whole document.
+ */
+export async function buildScoresPdf(scores: readonly ScoreDto[], labels: PdfLabels, intro?: PdfIntro): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts, rgb, LineCapStyle } = await import('pdf-lib');
   const doc = await PDFDocument.create();
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
@@ -122,17 +232,95 @@ export async function buildScorePdf(score: ScoreDto, labels: PdfLabels): Promise
   const supported = new Set(bold.getCharacterSet());
   const ink = rgb(INK, INK, INK);
   const grey = rgb(0.45, 0.45, 0.45);
+  const safeTitle = (s: ScoreDto) => pdfSafeText(s.title, supported) || labels.untitled;
 
-  const title = pdfSafeText(score.title, supported) || labels.untitled;
-  doc.setTitle(title);
+  const introTitle = intro ? pdfSafeText(intro.title, supported) || labels.untitled : '';
+  doc.setTitle(intro ? introTitle : scores.length === 1 ? safeTitle(scores[0]) : labels.collection);
   doc.setCreator('Piano Practice Tracker');
   doc.setProducer('Piano Practice Tracker');
   doc.setCreationDate(new Date());
 
-  const layout = layoutOf(score, printPpq(score), printWidth(), PRINT_METRICS);
-  const systemPt = layout.systemH * UNIT;
-  const { placements, pages } = paginate(layout.systems.length, systemPt);
+  const layouts = scores.map((score) => layoutOf(score, printPpq(score), printWidth(), PRINT_METRICS));
+  const introLines = intro ? buildIntroLines(intro, introTitle, labels, supported, bold, plain) : [];
+  const introFlow = flowLines(introLines.map(lineHeight));
+  const { scores: flowed, pages: scorePages } = flow(
+    layouts.map((l) => ({ systems: l.systems.length, systemPt: l.systemH * UNIT })),
+    introLines.length ? { page: introFlow.end.page, top: introFlow.end.top } : undefined,
+  );
+  const pages = Math.max(scorePages, introLines.length ? introFlow.end.page + 1 : 0);
   const pdfPages = Array.from({ length: pages }, () => doc.addPage([PAGE_W, PAGE_H]));
+  introLines.forEach((l, i) => {
+    const at = introFlow.placements[i];
+    const font = l.bold ? bold : plain;
+    const x = l.center ? (PAGE_W - font.widthOfTextAtSize(l.text, l.size)) / 2 : MARGIN;
+    if (l.text) pdfPages[at.page].drawText(l.text, { x, y: PAGE_H - at.top - l.before - l.size, size: l.size, font, color: l.grey ? grey : ink });
+  });
+  scores.forEach((score, i) => {
+    drawScore(score, layouts[i], flowed[i], safeTitle(score), { bold, plain, ink, grey, LineCapStyle }, pdfPages);
+  });
+
+  const total = pdfPages.length;
+  pdfPages.forEach((page, i) => {
+    const text = labels.page(i + 1, total);
+    const y = MARGIN - 12;
+    page.drawText('Piano Practice Tracker', { x: MARGIN, y, size: 8, font: plain, color: grey });
+    page.drawText(text, { x: PAGE_W - MARGIN - plain.widthOfTextAtSize(text, 8), y, size: 8, font: plain, color: grey });
+  });
+
+  return doc.save();
+}
+
+/** The title, composer and notes of a piece as lines of text that fit the page. Notes keep their paragraphs. */
+function buildIntroLines(
+  intro: PdfIntro,
+  title: string,
+  labels: PdfLabels,
+  supported: ReadonlySet<number>,
+  bold: import('pdf-lib').PDFFont,
+  plain: import('pdf-lib').PDFFont,
+): IntroLine[] {
+  const lines: IntroLine[] = [];
+  const add = (text: string, size: number, o: Partial<Omit<IntroLine, 'text' | 'size'>>) =>
+    lines.push({ text, size, bold: false, center: false, grey: false, before: 0, ...o });
+  const wrapped = (text: string, font: import('pdf-lib').PDFFont, size: number) =>
+    wrapText(text, (s) => font.widthOfTextAtSize(s, size), INTRO_WIDTH);
+
+  wrapped(title, bold, 24).forEach((t) => add(t, 24, { bold: true, center: true }));
+  const composer = pdfSafeText(intro.composer, supported);
+  if (composer) wrapped(composer, plain, 13).forEach((t, i) => add(t, 13, { center: true, grey: true, before: i === 0 ? 4 : 0 }));
+  const paragraphs = intro.notes.split(/\r?\n/).map((p) => pdfSafeText(p, supported));
+  while (paragraphs.length && !paragraphs[paragraphs.length - 1]) paragraphs.pop();
+  while (paragraphs.length && !paragraphs[0]) paragraphs.shift();
+  if (paragraphs.length) {
+    add(labels.notes, 9, { bold: true, grey: true, before: 22 });
+    let gap = 4;
+    for (const p of paragraphs) {
+      if (!p) {
+        gap += 6;
+        continue;
+      }
+      wrapped(p, plain, 10.5).forEach((t, i) => {
+        add(t, 10.5, { before: i === 0 ? gap : 0 });
+        gap = 0;
+      });
+      gap = 2;
+    }
+  }
+  return lines;
+}
+
+interface PdfTools {
+  bold: import('pdf-lib').PDFFont;
+  plain: import('pdf-lib').PDFFont;
+  ink: ReturnType<typeof import('pdf-lib').rgb>;
+  grey: ReturnType<typeof import('pdf-lib').rgb>;
+  LineCapStyle: typeof import('pdf-lib').LineCapStyle;
+}
+
+/** Draws one score where `flow` put it: its systems, and its title and tempo above the first. */
+function drawScore(score: ScoreDto, layout: ScoreLayout, at: { header: Placement; placements: Placement[] }, title: string, tools: PdfTools, pdfPages: import('pdf-lib').PDFPage[]): void {
+  const { bold, plain, ink, grey, LineCapStyle } = tools;
+  const { placements } = at;
 
   const { notes, beams } = drawNotes(score, layout);
   const rests = drawRests(score, layout);
@@ -171,20 +359,12 @@ export async function buildScorePdf(score: ScoreDto, labels: PdfLabels): Promise
     for (const c of [...ties, ...slurs]) if (curveSystem(c, layout) === sys.index) path(c.d, { width: 1.7, cap: true });
   }
 
-  // Header and footer
-  const first = pdfPages[0];
+  // Header
+  const first = pdfPages[at.header.page];
   const titleSize = 22;
-  first.drawText(title, { x: (PAGE_W - bold.widthOfTextAtSize(title, titleSize)) / 2, y: PAGE_H - MARGIN - titleSize + 4, size: titleSize, font: bold, color: ink });
-  drawTempo(first, score.bpm, plain, { x: MARGIN + BRACE_W + 2, y: PAGE_H - MARGIN - titleSize - 24 }, ink);
-
-  pdfPages.forEach((page, i) => {
-    const text = labels.page(i + 1, pages);
-    const y = MARGIN - 12;
-    page.drawText('Piano Practice Tracker', { x: MARGIN, y, size: 8, font: plain, color: grey });
-    page.drawText(text, { x: PAGE_W - MARGIN - plain.widthOfTextAtSize(text, 8), y, size: 8, font: plain, color: grey });
-  });
-
-  return doc.save();
+  const headTop = PAGE_H - at.header.top;
+  first.drawText(title, { x: (PAGE_W - bold.widthOfTextAtSize(title, titleSize)) / 2, y: headTop - titleSize + 4, size: titleSize, font: bold, color: ink });
+  drawTempo(first, score.bpm, plain, { x: MARGIN + BRACE_W + 2, y: headTop - titleSize - 24 }, ink);
 }
 
 type PathFn = (d: string, o: { fill?: boolean; width?: number; cap?: boolean; scale?: number }) => void;

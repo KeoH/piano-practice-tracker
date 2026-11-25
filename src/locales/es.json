@@ -638,6 +638,7 @@
       "fragmentTitle": "Fragmento sin título",
       "sessionTitle": "Sesión de práctica",
       "pieceTitle": "Obra sin título",
+      "collectionName": "Colección sin título",
       "compositionTitle": "Composición sin título",
       "trackName": "Pista {n}",
       "melodyTitle": "Melodía sin título",
@@ -722,7 +723,9 @@
       "newerSchema": "La base de datos tiene una versión de esquema ({version}) más reciente que la aplicación ({supported})",
       "migrationFailed": "Error al migrar la base de datos (v{version}): {e}",
       "poisoned": "La conexión a la base de datos quedó bloqueada por un error previo",
-      "pieceMissing": "La obra '{id}' no existe"
+      "pieceMissing": "La obra '{id}' no existe",
+      "collectionMissing": "La colección '{id}' no existe",
+      "scoreOrderStale": "La lista de partituras de la obra está desactualizada. Ábrela de nuevo y reinténtalo"
     },
     "undo": {
       "empty": "No hay nada que deshacer en esta sesión",
@@ -791,18 +794,23 @@
     "errors": {
       "failed": "No se pudo exportar el audio",
       "midiFailed": "No se pudo exportar el archivo MIDI",
-      "pdfFailed": "No se pudo exportar la partitura como PDF"
+      "pdfFailed": "No se pudo exportar la partitura como PDF",
+      "pdfsFailed": "No se pudieron exportar las partituras como PDF"
     },
     "midiPickTitle": "Exportar MIDI",
     "midiDone": "MIDI guardado en {path}",
     "pdf": "Exportar PDF",
     "pdfHint": "Guardar la partitura como un PDF con aspecto de partitura impresa",
     "pdfPickTitle": "Exportar partitura como PDF",
-    "pdfDone": "Partitura guardada en {path}"
+    "pdfDone": "Partitura guardada en {path}",
+    "pdfsPickTitle": "Exportar partituras como PDF",
+    "pdfsDone": "Partituras guardadas en {path}"
   },
   "pdf": {
     "page": "Página {n} de {total}",
-    "untitled": "Partitura sin título"
+    "untitled": "Partitura sin título",
+    "collection": "Partituras",
+    "notes": "Notas"
   },
   "nav": {
     "label": "Vistas",
@@ -875,7 +883,9 @@
       "create": "No se pudo crear la obra",
       "save": "No se pudo guardar la obra",
       "delete": "No se pudo borrar la obra",
-      "assign": "No se pudo asignar el fragmento a la obra"
+      "assign": "No se pudo asignar el fragmento a la obra",
+      "assignScore": "No se pudo archivar la partitura en la obra",
+      "reorder": "No se pudo cambiar el orden de las partituras"
     },
     "deleted": "Obra borrada",
     "filedUnder": "Obra y pasaje de esta toma",
@@ -892,9 +902,9 @@
     "archivedGroup": "Archivadas",
     "activeGroup": "Repertorio",
     "delete": "Borrar obra",
-    "deleteMessage_zero": "Se borrará la obra «{title}».",
-    "deleteMessage_one": "Se borrará la obra «{title}». Su toma se queda en su sesión, sin obra.",
-    "deleteMessage_other": "Se borrará la obra «{title}». Sus {n} tomas se quedan en sus sesiones, sin obra.",
+    "deleteMessage_zero": "Se borrará la obra «{title}». Las partituras que tenga seguirán en Partituras.",
+    "deleteMessage_one": "Se borrará la obra «{title}». Su toma se queda en su sesión, sin obra. Las partituras que tenga seguirán en Partituras.",
+    "deleteMessage_other": "Se borrará la obra «{title}». Sus {n} tomas se quedan en sus sesiones, sin obra. Las partituras que tenga seguirán en Partituras.",
     "takes_zero": "sin tomas",
     "takes_one": "{n} toma",
     "takes_other": "{n} tomas",
@@ -913,7 +923,43 @@
     "playTake": "Reproducir la toma del {date}",
     "pauseTake": "Pausar la toma del {date}",
     "searchPlaceholder": "Buscar obras",
-    "searchLabel": "Buscar en el repertorio"
+    "searchLabel": "Buscar en el repertorio",
+    "scoresTitle": "Partituras",
+    "scoreCount_zero": "sin partituras",
+    "scoreCount_one": "{n} partitura",
+    "scoreCount_other": "{n} partituras",
+    "scoreAdd": "Añadir una partitura…",
+    "scoreAddLabel": "Añadir una partitura a esta obra",
+    "scoreRemove": "Sacar la partitura de esta obra",
+    "scoreOpen": "Abrir en el editor de partituras",
+    "noScoresToAdd": "No tienes más partituras que añadir. Escribe una en Partituras.",
+    "noScoresYet": "Esta obra no tiene partituras. Añade una que hayas escrito o usa «Repertorio» en el editor de partituras.",
+    "exportPdf": "Exportar partituras (PDF)",
+    "exportPdfHint": "Las partituras de esta obra, en este orden, precedidas de su título, compositor y notas",
+    "scoreUp": "Subir la partitura",
+    "scoreDown": "Bajar la partitura",
+    "scoreOrderHint": "El PDF imprime las partituras en este orden"
+  },
+  "collections": {
+    "label": "Colecciones",
+    "filterLabel": "Colección",
+    "all": "Todo el repertorio",
+    "new": "Nueva colección",
+    "defaultName": "Nueva colección",
+    "nameLabel": "Nombre de la colección",
+    "delete": "Eliminar colección",
+    "deleteMessage": "Se eliminará la colección «{name}». Sus obras siguen en el repertorio.",
+    "deleted": "Colección eliminada",
+    "none": "Aún no hay colecciones",
+    "hint": "Agrupa obras en colecciones (un método, un recital, un nivel) con el botón + de la lista.",
+    "pieceHint": "Una obra puede estar en varias colecciones.",
+    "emptyCollection": "Aún no hay obras en esta colección. Abre una obra y marca la colección.",
+    "errors": {
+      "create": "No se pudo crear la colección",
+      "rename": "No se pudo renombrar la colección",
+      "delete": "No se pudo eliminar la colección",
+      "assign": "No se pudieron cambiar las colecciones de la obra"
+    }
   },
   "gm": {
     "family": {
@@ -1226,6 +1272,18 @@
   },
   "score": {
     "new": "Nueva partitura",
+    "piece": {
+      "label": "Repertorio",
+      "none": "Fuera del repertorio",
+      "new": "+ Obra nueva desde esta partitura",
+      "open": "Abrir la obra en el repertorio"
+    },
+    "pick": "Exportar PDF…",
+    "pickHint": "Elige varias partituras y guárdalas juntas en un solo PDF",
+    "pickInfo": "Pulsa las partituras que quieras incluir. Se imprimen en el orden en que las elijas.",
+    "pickExport_one": "Exportar {n} partitura",
+    "pickExport_other": "Exportar {n} partituras",
+    "pickCancel": "Cancelar",
     "searchLabel": "Buscar partituras",
     "listLabel": "Partituras",
     "noScores": "Aún no hay partituras. Crea una para escribir notas en un pentagrama.",

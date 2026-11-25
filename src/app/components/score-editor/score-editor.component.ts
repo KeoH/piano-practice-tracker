@@ -24,6 +24,7 @@ import { SCORE_ZOOM_STEPS, ScoreStore } from '../../core/score.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { IconComponent } from '../icon/icon.component';
 import { RateSelectComponent } from '../rate-select/rate-select.component';
+import { ScorePieceSelectComponent } from '../score-piece-select/score-piece-select.component';
 import { ScoreStaffComponent } from '../score-staff/score-staff.component';
 
 /** Noto Music symbols for the palette. */
@@ -47,7 +48,7 @@ const GLYPH_LIFT: Record<NoteKind, number> = { whole: -9, half: -2, quarter: -2,
 @Component({
   selector: 'app-score-editor',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, RateSelectComponent, ScoreStaffComponent, TranslatePipe, PluralPipe],
+  imports: [IconComponent, RateSelectComponent, ScorePieceSelectComponent, ScoreStaffComponent, TranslatePipe, PluralPipe],
   host: { class: 'block min-h-full' },
   templateUrl: './score-editor.component.html',
 })

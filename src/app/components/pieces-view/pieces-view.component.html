@@ -34,7 +34,49 @@
           </button>
         </div>
       </div>
-      <p class="text-[13px] text-muted">{{ 'pieces.takes' | tp: takes().length }}</p>
+      <p class="text-[13px] text-muted">
+        {{ 'pieces.takes' | tp: takes().length }}
+        @if (scores().length) {
+          · {{ 'pieces.scoreCount' | tp: scores().length }}
+        }
+      </p>
+
+      <!-- Collections this piece belongs to -->
+      <div class="flex flex-wrap items-center gap-2" role="group" [attr.aria-label]="'collections.label' | t">
+        <span class="text-xs font-semibold text-faint">{{ 'collections.label' | t }}</span>
+        @for (c of store.collections(); track c.id) {
+          @let on = inCollection(c.id);
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors"
+            [class]="on ? 'border-accent/60 bg-accent/15 text-fg-strong' : 'border-line text-muted hover:border-line-hover hover:text-fg'"
+            [attr.aria-pressed]="on"
+            [title]="'collections.pieceHint' | t"
+            (click)="toggleCollection(c.id)"
+          >
+            @if (on) {
+              <app-icon name="check" [size]="13" />
+            }
+            {{ c.name }}
+          </button>
+        }
+        @if (creatingCollection()) {
+          <input
+            #newCollection
+            class="field h-8 w-44 py-0 text-[13px]"
+            autofocus
+            [attr.aria-label]="'collections.nameLabel' | t"
+            [placeholder]="'collections.nameLabel' | t"
+            (keydown.enter)="createCollection(newCollection)"
+            (keydown.escape)="$event.stopPropagation(); creatingCollection.set(false)"
+            (blur)="newCollection.value.trim() ? createCollection(newCollection) : creatingCollection.set(false)"
+          />
+        } @else {
+          <button type="button" class="inline-flex h-8 items-center gap-1 rounded-full border border-dashed border-line-strong px-3 text-[13px] text-muted hover:text-fg" (click)="creatingCollection.set(true)">
+            <app-icon name="plus" [size]="13" /> {{ 'collections.new' | t }}
+          </button>
+        }
+      </div>
       <div>
         <label class="label" for="piece-notes">{{ 'pieces.notes' | t }}</label>
         <textarea
@@ -48,6 +90,75 @@
         ></textarea>
       </div>
     </header>
+
+    <!-- Scores (sheet music) of the piece: they are not takes -->
+    <section class="flex flex-col gap-2" aria-labelledby="piece-scores-h">
+      <h2 id="piece-scores-h" class="flex items-baseline gap-2 px-1 text-[15px] font-semibold">
+        {{ 'pieces.scoresTitle' | t }}
+        <span class="text-[13px] font-normal text-muted">{{ 'pieces.scoreCount' | tp: scores().length }}</span>
+        <span class="flex-1"></span>
+        <button
+          type="button"
+          class="btn h-9 font-normal"
+          [disabled]="!printable().length || exportingPdf()"
+          [title]="'pieces.exportPdfHint' | t"
+          (click)="exportPdf()"
+        >
+          <app-icon name="download" [size]="15" /> {{ (exportingPdf() ? 'export.exporting' : 'pieces.exportPdf') | t }}
+        </button>
+      </h2>
+      @if (scores().length) {
+        <p class="px-1 text-xs text-faint">{{ 'pieces.scoreOrderHint' | t }}</p>
+        <ul class="flex flex-col gap-1.5">
+          @for (s of scores(); track s.id; let i = $index; let first = $first; let last = $last) {
+            <li class="flex items-center gap-3 rounded-xl border border-line bg-ink-800 py-2 pr-3 pl-2.5">
+              <span class="flex shrink-0 items-center gap-0.5">
+                <span class="tabular w-5 text-center text-xs text-faint" aria-hidden="true">{{ i + 1 }}</span>
+                <button type="button" class="btn btn-ghost btn-icon h-8 w-8" [disabled]="first" (click)="moveScore(s.id, -1)" [attr.aria-label]="'pieces.scoreUp' | t" [title]="'pieces.scoreUp' | t">
+                  <app-icon name="arrow-up" [size]="14" />
+                </button>
+                <button type="button" class="btn btn-ghost btn-icon h-8 w-8" [disabled]="last" (click)="moveScore(s.id, 1)" [attr.aria-label]="'pieces.scoreDown' | t" [title]="'pieces.scoreDown' | t">
+                  <app-icon name="arrow-down" [size]="14" />
+                </button>
+              </span>
+              <app-icon name="music" [size]="16" class="shrink-0 text-accent" />
+              <button type="button" class="flex min-w-0 flex-1 flex-col gap-0.5 text-left leading-tight" (click)="openScore(s.id)" [title]="'pieces.scoreOpen' | t">
+                <span class="truncate text-sm font-medium text-fg">{{ s.title || ('common.untitled' | t) }}</span>
+                <span class="truncate text-xs text-muted">
+                  {{ 'score.listMeta' | t: { bpm: s.bpm, bars: ('score.bars' | tp: s.bars), notes: ('score.notes' | tp: s.note_count) } }}
+                </span>
+              </button>
+              <button type="button" class="btn btn-ghost btn-icon h-9 w-9 shrink-0" (click)="openScore(s.id)" [attr.aria-label]="'pieces.scoreOpen' | t" [title]="'pieces.scoreOpen' | t">
+                <app-icon name="arrow-right" [size]="16" />
+              </button>
+              <button type="button" class="btn btn-ghost btn-icon h-9 w-9 shrink-0 hover:text-rec-soft" (click)="removeScore(s.id)" [attr.aria-label]="'pieces.scoreRemove' | t" [title]="'pieces.scoreRemove' | t">
+                <app-icon name="close" [size]="15" />
+              </button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="px-1 text-[13px] text-muted">{{ 'pieces.noScoresYet' | t }}</p>
+      }
+      <div class="flex items-center gap-2 px-1">
+        <label class="sr-only" for="piece-add-score">{{ 'pieces.scoreAddLabel' | t }}</label>
+        <select
+          #addScoreSelect
+          id="piece-add-score"
+          class="field h-9 w-auto max-w-[280px] py-0 text-[13px]"
+          [disabled]="!addableScores().length"
+          (change)="addScore(addScoreSelect)"
+        >
+          <option value="">{{ 'pieces.scoreAdd' | t }}</option>
+          @for (s of addableScores(); track s.id) {
+            <option [value]="s.id">{{ s.title || ('common.untitled' | t) }}</option>
+          }
+        </select>
+        @if (!addableScores().length) {
+          <span class="text-xs text-faint">{{ 'pieces.noScoresToAdd' | t }}</span>
+        }
+      </div>
+    </section>
 
     <!-- Comparison: both takes on the same time scale -->
     @if (compared().length) {

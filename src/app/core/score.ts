@@ -800,8 +800,11 @@ export function parseScoreKey(key: string | null | undefined): string | null {
   return key?.startsWith(SCORE_KEY_PREFIX) ? key.slice(SCORE_KEY_PREFIX.length) : null;
 }
 
-/** The entry of the list of scores for `s` (what the backend sends for each stored score). */
-export function summarizeScore(s: ScoreDto): ScoreSummaryDto {
+/**
+ * The entry of the list of scores for `s` (what the backend sends for each stored score). The piece
+ * is not part of the score, so whoever replaces an entry passes the one it had.
+ */
+export function summarizeScore(s: ScoreDto, pieceId: string | null = null): ScoreSummaryDto {
   return {
     id: s.id,
     title: s.title,
@@ -812,6 +815,7 @@ export function summarizeScore(s: ScoreDto): ScoreSummaryDto {
     note_count: noteCount(s),
     duration_ms: scoreDurationMs(s),
     fragment_id: s.fragment_id,
+    piece_id: pieceId,
     updated_at: s.updated_at,
   };
 }

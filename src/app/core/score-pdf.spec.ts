@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import type { ScoreDto, ScoreNoteDto } from './models';
 import { newScore } from './score';
-import { buildScorePdf, ellipsePath, paginate, pdfSafeText, printPpq, printWidth } from './score-pdf';
+import { buildScorePdf, buildScoresPdf, ellipsePath, flow, flowLines, paginate, pdfSafeText, printPpq, printWidth, wrapText } from './score-pdf';
 import { PRINT_METRICS, layoutOf } from './score-layout';
 
 let seq = 0;
@@ -20,7 +20,7 @@ function longScore(bars: number, title = 'A long piece'): ScoreDto {
   return { ...newScore('s', title, '2026-01-01'), bars, treble, bass };
 }
 
-const labels = { page: (a: number, b: number) => `Page ${a} of ${b}`, untitled: 'Untitled' };
+const labels = { page: (a: number, b: number) => `Page ${a} of ${b}`, untitled: 'Untitled', collection: 'Collection', notes: 'Notes' };
 const text = (bytes: Uint8Array) => new TextDecoder('latin1').decode(bytes);
 
 describe('score pdf: spacing', () => {
@@ -75,6 +75,96 @@ describe('score pdf: pages', () => {
   });
 });
 
+describe('score pdf: scores one after another', () => {
+  it('puts a short score below the previous one when it fits', () => {
+    const { scores, pages } = flow([{ systems: 2, systemPt: 80 }, { systems: 2, systemPt: 80 }]);
+    expect(pages).toBe(1);
+    const [a, b] = scores;
+    // The second title starts below the last system of the first, with room between them.
+    expect(b.header.page).toBe(0);
+    expect(b.header.top).toBeGreaterThan(a.placements[1].top + 80);
+    // Its first system sits below its own title.
+    expect(b.placements[0].top).toBeGreaterThan(b.header.top);
+  });
+
+  it('starts a score on the next page when its title and first system do not fit', () => {
+    const { scores, pages } = flow([{ systems: 5, systemPt: 100 }, { systems: 2, systemPt: 100 }]);
+    const lastOfFirst = scores[0].placements.at(-1)!;
+    expect(lastOfFirst.page).toBe(0);
+    expect(scores[1].header.page).toBe(1);
+    expect(scores[1].header.top).toBe(scores[0].header.top);
+    expect(pages).toBe(2);
+  });
+
+  it('lets a score run on to the next page after its title, without repeating it', () => {
+    const { scores } = flow([{ systems: 3, systemPt: 100 }, { systems: 8, systemPt: 100 }]);
+    const b = scores[1];
+    expect(b.header.page).toBe(0);
+    expect(b.placements[0].page).toBe(0);
+    expect(b.placements.at(-1)!.page).toBe(1);
+    expect(b.placements.find((p) => p.page === 1)!.top).toBe(scores[0].header.top);
+  });
+
+  it('gives a single score the same pages as paginate', () => {
+    const { scores } = flow([{ systems: 30, systemPt: 100 }]);
+    expect(scores[0].placements).toEqual(paginate(30, 100).placements);
+  });
+
+  it('fits several short scores on one page of the PDF', async () => {
+    const bytes = await buildScoresPdf([longScore(2, 'One'), longScore(2, 'Two')], labels);
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  });
+});
+
+describe('score pdf: the intro of a piece', () => {
+  const width = (s: string) => s.length * 10;
+
+  it('wraps words to the width and cuts a word that is wider than a line', () => {
+    expect(wrapText('one two three four', width, 90)).toEqual(['one two', 'three', 'four']);
+    expect(wrapText('abcdefghijklmnop', width, 50)).toEqual(['abcde', 'fghij', 'klmno', 'p']);
+    expect(wrapText('', width, 50)).toEqual(['']);
+  });
+
+  it('stacks lines on a page and goes on to the next one when they run out of room', () => {
+    const { placements, end } = flowLines(Array(100).fill(20));
+    expect(placements[0]).toEqual({ page: 0, top: 42.5 });
+    expect(placements.at(-1)!.page).toBeGreaterThan(0);
+    expect(end.page).toBe(placements.at(-1)!.page);
+    expect(flowLines([]).end).toEqual({ page: 0, top: 42.5 });
+  });
+
+  it('starts the scores where the intro ends, and below it when they fit', () => {
+    const { scores } = flow([{ systems: 2, systemPt: 100 }], { page: 0, top: 200 });
+    expect(scores[0].header.page).toBe(0);
+    expect(scores[0].header.top).toBeGreaterThan(200);
+    const full = flow([{ systems: 1, systemPt: 100 }], { page: 0, top: 760 });
+    expect(full.scores[0].header.page).toBe(1);
+  });
+
+  const intro = { title: 'Album for the young', composer: 'Schumann', notes: 'Play slowly.\n\nWatch the pedal.' };
+
+  it('puts the title of the piece in the document, and the scores after the intro on the same page when they fit', async () => {
+    const pdf = await PDFDocument.load(await buildScoresPdf([longScore(2, 'One')], labels, intro));
+    expect(pdf.getTitle()).toBe('Album for the young');
+    expect(pdf.getPageCount()).toBe(1);
+  });
+
+  it('makes room for long notes, which run over several pages, and keeps the footer numbering', async () => {
+    const notes = Array.from({ length: 160 }, (_, i) => `Line ${i} of the notes of the piece`).join('\n');
+    const plain = await PDFDocument.load(await buildScoresPdf([longScore(2, 'One')], labels));
+    const long = await PDFDocument.load(await buildScoresPdf([longScore(2, 'One')], labels, { ...intro, notes }));
+    expect(long.getPageCount()).toBeGreaterThan(plain.getPageCount() + 1);
+  });
+
+  it('survives an untitled piece, text the font cannot draw, and no composer or notes', async () => {
+    const odd = await PDFDocument.load(await buildScoresPdf([longScore(1)], labels, { title: '日本語', composer: 'ñ 作', notes: '音' }));
+    expect(odd.getTitle()).toBe('???');
+    const bare = await PDFDocument.load(await buildScoresPdf([longScore(1)], labels, { title: '  ', composer: '', notes: '\n \n' }));
+    expect(bare.getTitle()).toBe('Untitled');
+    expect(bare.getPageCount()).toBe(1);
+  });
+});
+
 describe('score pdf: helpers', () => {
   it('replaces what the standard font cannot draw', () => {
     const supported = new Set([...'ABC é'].map((c) => c.codePointAt(0)!));
@@ -103,6 +193,22 @@ describe('score pdf: document', () => {
   it('adds pages for a long score', async () => {
     const pdf = await PDFDocument.load(await buildScorePdf(longScore(60), labels));
     expect(pdf.getPageCount()).toBeGreaterThan(1);
+  });
+
+  it('puts several scores in one PDF, and their pages add up to what the flow needs', async () => {
+    const long = longScore(60, 'Long one');
+    const alone = (sc: ScoreDto) => buildScorePdf(sc, labels).then((b) => PDFDocument.load(b)).then((d) => d.getPageCount());
+    const a = await alone(long);
+    const pdf = await PDFDocument.load(await buildScoresPdf([long, longScore(2, 'Short'), longScore(2, 'Third')], labels));
+    // The short ones follow the long one: at most one page more than it, never one each.
+    expect(pdf.getPageCount()).toBeGreaterThanOrEqual(a);
+    expect(pdf.getPageCount()).toBeLessThanOrEqual(a + 1);
+    expect(pdf.getTitle()).toBe('Collection');
+  });
+
+  it('keeps the title of a single score in the document', async () => {
+    const pdf = await PDFDocument.load(await buildScoresPdf([longScore(1, 'Only')], labels));
+    expect(pdf.getTitle()).toBe('Only');
   });
 
   it('survives a title the standard font cannot draw, and an empty one', async () => {

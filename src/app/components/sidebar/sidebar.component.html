@@ -91,6 +91,41 @@
       (input)="pieces.filter.set($any($event.target).value)"
     />
   </div>
+  <!-- Collections: narrow the list to one; the + makes a new one -->
+  <div class="flex items-center gap-1.5">
+    <label for="collection-filter" class="sr-only">{{ 'collections.filterLabel' | t }}</label>
+    <select
+      id="collection-filter"
+      class="field h-9 min-w-0 flex-1 bg-ink-850 py-0 text-[13px]"
+      (change)="pieces.collectionFilter.set($any($event.target).value || null)"
+    >
+      <option value="" [selected]="!pieces.activeCollection()">{{ 'collections.all' | t }}</option>
+      @for (c of pieces.collections(); track c.id) {
+        <option [value]="c.id" [selected]="c.id === pieces.activeCollection()?.id">{{ c.name }} ({{ c.piece_ids.length }})</option>
+      }
+    </select>
+    <button type="button" class="btn btn-icon h-9 w-9 shrink-0" (click)="newCollection()" [disabled]="!api.available" [attr.aria-label]="'collections.new' | t" [title]="'collections.new' | t">
+      <app-icon name="plus" [size]="15" />
+    </button>
+  </div>
+  @if (pieces.activeCollection(); as c) {
+    <div class="flex items-center gap-1.5">
+      <label for="collection-name" class="sr-only">{{ 'collections.nameLabel' | t }}</label>
+      <input
+        #collectionName
+        id="collection-name"
+        class="field h-9 min-w-0 flex-1 bg-ink-850 py-0 text-[13px]"
+        [value]="c.name"
+        (blur)="renameCollection(collectionName)"
+        (keydown.enter)="collectionName.blur()"
+      />
+      <button type="button" class="btn btn-ghost btn-icon h-9 w-9 shrink-0 hover:text-rec-soft" (click)="deleteCollection()" [attr.aria-label]="'collections.delete' | t" [title]="'collections.delete' | t">
+        <app-icon name="trash" [size]="15" />
+      </button>
+    </div>
+  } @else if (!pieces.collections().length) {
+    <p class="px-1 text-xs leading-snug text-faint">{{ 'collections.hint' | t }}</p>
+  }
 </div>
 
 <nav class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-2.5 pb-3" [attr.aria-label]="'nav.pieces' | t">
@@ -116,6 +151,10 @@
                     <span aria-hidden="true">·</span>
                   }
                   <span>{{ 'pieces.takes' | tp: p.take_count }}</span>
+                  @if (p.score_count) {
+                    <span aria-hidden="true">·</span>
+                    <span>{{ 'pieces.scoreCount' | tp: p.score_count }}</span>
+                  }
                   @if (p.last_practiced) {
                     <span aria-hidden="true">·</span>
                     <span>{{ i18n.shortDate(p.last_practiced) }}</span>
@@ -130,7 +169,7 @@
   } @empty {
     @if (!pieces.listLoading()) {
       <p class="px-2.5 py-6 text-center text-[13px] text-faint">
-        {{ (pieces.filter() ? 'pieces.noMatches' : 'pieces.noPieces') | t }}
+        {{ (pieces.filter() ? 'pieces.noMatches' : pieces.activeCollection() ? 'collections.emptyCollection' : 'pieces.noPieces') | t }}
       </p>
     }
   }

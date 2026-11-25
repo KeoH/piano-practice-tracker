@@ -201,6 +201,8 @@ pub struct PieceSummaryDto {
     pub last_practiced: Option<String>,
     /// Passages already used in the piece's takes (sorted, without the empty one).
     pub passages: Vec<String>,
+    /// Scores of the staff editor filed under the piece.
+    pub score_count: u32,
 }
 
 /// A fragment filed under a piece, with the session it comes from.
@@ -216,6 +218,19 @@ pub struct PieceDetailDto {
     pub piece: PieceDto,
     /// Sorted by passage and then chronologically.
     pub takes: Vec<PieceTakeDto>,
+    /// Scores filed under the piece (the sheet music of it), by title. They are not takes.
+    pub scores: Vec<ScoreSummaryDto>,
+}
+
+/// A named group of pieces of the repertoire ("Grade 3", "Christmas"). A piece can be in several.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollectionDto {
+    pub id: String,
+    pub name: String,
+    /// The pieces in it (active and archived).
+    pub piece_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// A composition in the list of the composer.
@@ -323,6 +338,10 @@ pub struct ScoreSummaryDto {
     pub note_count: u32,
     pub duration_ms: u64,
     pub fragment_id: Option<String>,
+    /// The piece of the repertoire it is filed under. It lives outside `ScoreDto` on purpose: the
+    /// editor saves the whole score, and a stale copy must not undo what the repertoire set.
+    #[serde(default)]
+    pub piece_id: Option<String>,
     pub updated_at: String,
 }
 

@@ -201,6 +201,7 @@ pub fn summary(score: &ScoreDto) -> ScoreSummaryDto {
         note_count: note_count(score),
         duration_ms: duration_ms(score),
         fragment_id: score.fragment_id.clone(),
+        piece_id: None,
         updated_at: score.updated_at.clone(),
     }
 }

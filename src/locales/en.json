@@ -638,6 +638,7 @@
       "fragmentTitle": "Untitled fragment",
       "sessionTitle": "Practice session",
       "pieceTitle": "Untitled piece",
+      "collectionName": "Untitled collection",
       "compositionTitle": "Untitled composition",
       "trackName": "Track {n}",
       "melodyTitle": "Untitled melody",
@@ -722,7 +723,9 @@
       "newerSchema": "The database schema version ({version}) is newer than this version of the app supports ({supported})",
       "migrationFailed": "Could not migrate the database (v{version}): {e}",
       "poisoned": "The database connection was locked by a previous error",
-      "pieceMissing": "Piece '{id}' does not exist"
+      "pieceMissing": "Piece '{id}' does not exist",
+      "collectionMissing": "Collection '{id}' does not exist",
+      "scoreOrderStale": "The list of scores of the piece is out of date. Open it again and retry"
     },
     "undo": {
       "empty": "There is nothing to undo in this session",
@@ -791,18 +794,23 @@
     "errors": {
       "failed": "Could not export the audio",
       "midiFailed": "Could not export the MIDI file",
-      "pdfFailed": "Could not export the score as a PDF"
+      "pdfFailed": "Could not export the score as a PDF",
+      "pdfsFailed": "Could not export the scores as a PDF"
     },
     "midiPickTitle": "Export MIDI",
     "midiDone": "MIDI saved to {path}",
     "pdf": "Export PDF",
     "pdfHint": "Save the score as a PDF that looks like printed sheet music",
     "pdfPickTitle": "Export score as PDF",
-    "pdfDone": "Score saved to {path}"
+    "pdfDone": "Score saved to {path}",
+    "pdfsPickTitle": "Export scores as PDF",
+    "pdfsDone": "Scores saved to {path}"
   },
   "pdf": {
     "page": "Page {n} of {total}",
-    "untitled": "Untitled score"
+    "untitled": "Untitled score",
+    "collection": "Scores",
+    "notes": "Notes"
   },
   "nav": {
     "label": "Views",
@@ -875,7 +883,9 @@
       "create": "Could not create the piece",
       "save": "Could not save the piece",
       "delete": "Could not delete the piece",
-      "assign": "Could not file the fragment under the piece"
+      "assign": "Could not file the fragment under the piece",
+      "assignScore": "Could not file the score under the piece",
+      "reorder": "Could not change the order of the scores"
     },
     "deleted": "Piece deleted",
     "filedUnder": "Piece and passage of this take",
@@ -892,9 +902,9 @@
     "archivedGroup": "Archived",
     "activeGroup": "Repertoire",
     "delete": "Delete piece",
-    "deleteMessage_zero": "The piece “{title}” will be deleted.",
-    "deleteMessage_one": "The piece “{title}” will be deleted. Its take stays in its session, without a piece.",
-    "deleteMessage_other": "The piece “{title}” will be deleted. Its {n} takes stay in their sessions, without a piece.",
+    "deleteMessage_zero": "The piece “{title}” will be deleted. The scores in it stay in Scores.",
+    "deleteMessage_one": "The piece “{title}” will be deleted. Its take stays in its session, without a piece. The scores in it stay in Scores.",
+    "deleteMessage_other": "The piece “{title}” will be deleted. Its {n} takes stay in their sessions, without a piece. The scores in it stay in Scores.",
     "takes_zero": "no takes",
     "takes_one": "{n} take",
     "takes_other": "{n} takes",
@@ -913,7 +923,43 @@
     "playTake": "Play the take of {date}",
     "pauseTake": "Pause the take of {date}",
     "searchPlaceholder": "Search pieces",
-    "searchLabel": "Search the repertoire"
+    "searchLabel": "Search the repertoire",
+    "scoresTitle": "Scores",
+    "scoreCount_zero": "no scores",
+    "scoreCount_one": "{n} score",
+    "scoreCount_other": "{n} scores",
+    "scoreAdd": "Add a score…",
+    "scoreAddLabel": "Add a score to this piece",
+    "scoreRemove": "Take the score out of this piece",
+    "scoreOpen": "Open in the score editor",
+    "noScoresToAdd": "You have no other scores to add. Write one in Scores.",
+    "noScoresYet": "No scores in this piece. Add one you wrote, or use “Repertoire” in the score editor.",
+    "exportPdf": "Export scores (PDF)",
+    "exportPdfHint": "The scores of this piece, in this order, preceded by its title, composer and notes",
+    "scoreUp": "Move the score up",
+    "scoreDown": "Move the score down",
+    "scoreOrderHint": "The PDF prints the scores in this order"
+  },
+  "collections": {
+    "label": "Collections",
+    "filterLabel": "Collection",
+    "all": "The whole repertoire",
+    "new": "New collection",
+    "defaultName": "New collection",
+    "nameLabel": "Name of the collection",
+    "delete": "Delete collection",
+    "deleteMessage": "The collection “{name}” will be deleted. Its pieces stay in the repertoire.",
+    "deleted": "Collection deleted",
+    "none": "No collections yet",
+    "hint": "Group pieces into collections (a method book, a recital, a level) with the + button of the list.",
+    "pieceHint": "A piece can be in several collections.",
+    "emptyCollection": "No piece in this collection yet. Open a piece and tick the collection.",
+    "errors": {
+      "create": "Could not create the collection",
+      "rename": "Could not rename the collection",
+      "delete": "Could not delete the collection",
+      "assign": "Could not change the collections of the piece"
+    }
   },
   "gm": {
     "family": {
@@ -1226,6 +1272,18 @@
   },
   "score": {
     "new": "New score",
+    "piece": {
+      "label": "Repertoire",
+      "none": "Not in the repertoire",
+      "new": "+ New piece from this score",
+      "open": "Open the piece in the repertoire"
+    },
+    "pick": "Export PDF…",
+    "pickHint": "Choose several scores and save them together in one PDF",
+    "pickInfo": "Click the scores to include. They are printed in the order you pick them.",
+    "pickExport_one": "Export {n} score",
+    "pickExport_other": "Export {n} scores",
+    "pickCancel": "Cancel",
     "searchLabel": "Search scores",
     "listLabel": "Scores",
     "noScores": "No scores yet. Create one to write notes on a staff.",

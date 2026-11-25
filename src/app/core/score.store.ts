@@ -5,7 +5,9 @@ import type { Accidental, ScoreDto, ScoreSummaryDto } from './models';
 import type { NoteKind } from './music';
 import { ChallengeStore } from './challenge.store';
 import { CompositionStore } from './composition.store';
+import { ExportService, SCORES_PDF_KEY } from './export.service';
 import { NavStore } from './nav.store';
+import { PieceStore } from './piece.store';
 import { PlaybackStore } from './playback.store';
 import {
   type NoteMove,
@@ -72,6 +74,8 @@ export class ScoreStore {
   private readonly compositions = inject(CompositionStore);
   private readonly challenges = inject(ChallengeStore);
   private readonly nav = inject(NavStore);
+  private readonly pieces = inject(PieceStore);
+  private readonly exporter = inject(ExportService);
 
   readonly scores = signal<ScoreSummaryDto[]>([]);
   readonly listLoading = signal(false);
@@ -139,6 +143,17 @@ export class ScoreStore {
     return q ? list.filter((s) => s.title.toLowerCase().includes(q)) : list;
   });
 
+  /** The list is in "pick scores for a PDF" mode: a click on a row marks it instead of opening it. */
+  readonly picking = signal(false);
+  /** Ids of the scores picked for the PDF, in the order they were picked (that is the order of the PDF). */
+  private readonly pickedIds = signal<readonly string[]>([]);
+  /** The picked scores that still exist, in order, whether the search filter hides them or not. */
+  readonly picked = computed(() => {
+    const byId = new Map(this.scores().map((s) => [s.id, s]));
+    return this.pickedIds().flatMap((id) => byId.get(id) ?? []);
+  });
+  readonly exportingPicked = computed(() => this.exporter.isBusy(SCORES_PDF_KEY));
+
   constructor() {
     this.playback.registerScoreSource((id) => {
       const d = this.doc();
@@ -149,6 +164,8 @@ export class ScoreStore {
   // ---- List and document ----
 
   reset(): void {
+    this.picking.set(false);
+    this.pickedIds.set([]);
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = null;
     this.dirty = false;
@@ -182,6 +199,33 @@ export class ScoreStore {
     this.clearRepeat();
     this.clearHistory();
     if (id) await this.reload();
+  }
+
+  /** Turns the "pick scores for a PDF" mode on or off. Leaving it forgets the picks. */
+  setPicking(on: boolean): void {
+    this.picking.set(on);
+    if (!on) this.pickedIds.set([]);
+  }
+
+  /** Position (1-based) of a score among the picked ones, or 0. */
+  pickedPosition(id: string): number {
+    return this.pickedIds().indexOf(id) + 1;
+  }
+
+  /** Picks a score (it goes last) or drops it. Scores without notes have nothing to print and are ignored. */
+  togglePicked(id: string): void {
+    const s = this.scores().find((x) => x.id === id);
+    if (!s) return;
+    if (this.pickedIds().includes(id)) this.pickedIds.update((ids) => ids.filter((x) => x !== id));
+    else if (s.note_count > 0) this.pickedIds.update((ids) => [...ids, id]);
+  }
+
+  /** Writes the picked scores into one PDF. Pending edits are saved first, because the scores are read from the vault. */
+  async exportPicked(): Promise<void> {
+    const items = this.picked().map(({ id, title }) => ({ id, title }));
+    if (!items.length) return;
+    await this.flush();
+    await this.exporter.exportScores(items);
   }
 
   /** Reloads the open score from the vault and forgets the undo history. */
@@ -230,10 +274,26 @@ export class ScoreStore {
       await this.api.deleteScore(id);
       if (this.selectedId() === id) await this.select(null);
       await this.refreshList();
+      // The repertoire shows the scores of its pieces.
+      void this.pieces.refreshList();
+      if (this.pieces.selectedId()) void this.pieces.reloadDetail();
       this.toast.success(this.i18n.t('score.deleted'));
     } catch (err) {
       this.toast.error(err, this.i18n.t('score.errors.delete'));
     }
+  }
+
+  /** Files the score under a piece of the repertoire (`null` takes it out). */
+  async assignPiece(scoreId: string, pieceId: string | null): Promise<void> {
+    const updated = await this.pieces.assignScore(scoreId, pieceId);
+    if (updated) this.scores.update((l) => l.map((s) => (s.id === scoreId ? { ...s, piece_id: updated.piece_id } : s)));
+  }
+
+  /** "Add to repertoire": a new piece named after the score, with the score in it. */
+  async addToRepertoire(scoreId: string): Promise<void> {
+    const title = this.scores().find((s) => s.id === scoreId)?.title || this.doc()?.title || '';
+    const piece = await this.pieces.createFromScore(scoreId, title);
+    if (piece) this.scores.update((l) => l.map((s) => (s.id === scoreId ? { ...s, piece_id: piece.id } : s)));
   }
 
   /** Sentence for the delete confirmation when compositions use the score: they lose those clips. */
@@ -337,7 +397,11 @@ export class ScoreStore {
       // Edits made meanwhile win; they will be saved next. The stored copy only adds the fragment id.
       if (this.doc() === sent) this.doc.set(saved);
       else if (this.doc()?.id === saved.id) this.doc.update((d) => (d ? { ...d, fragment_id: saved.fragment_id } : d));
-      this.scores.update((list) => [summarizeScore(saved), ...list.filter((s) => s.id !== saved.id)]);
+      // The piece is set from the repertoire, not by the editor: the entry keeps the one it had.
+      this.scores.update((list) => [
+        summarizeScore(saved, list.find((s) => s.id === saved.id)?.piece_id ?? null),
+        ...list.filter((s) => s.id !== saved.id),
+      ]);
     } catch (err) {
       this.toast.error(err, this.i18n.t('score.errors.save'));
       if (this.selectedId() === sent.id) {

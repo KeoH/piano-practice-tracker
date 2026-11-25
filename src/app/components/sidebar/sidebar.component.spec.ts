@@ -102,6 +102,42 @@ describe('SidebarComponent', () => {
     expect(el.textContent).toContain(i18n.t('pieces.noMatches'));
   });
 
+  it('narrows the repertoire to a collection, and creates and renames one', async () => {
+    const { el, render, button } = await setup();
+    mock.set('getCollections', () =>
+      Promise.resolve([{ id: 'c1', name: 'Christmas', piece_ids: ['p2'], created_at: '', updated_at: '' }]),
+    );
+    mock.set('createCollection', (name: string) =>
+      Promise.resolve({ id: 'c2', name, piece_ids: [], created_at: '', updated_at: '' }),
+    );
+    mock.set('renameCollection', (id: string, name: string) =>
+      Promise.resolve({ id, name, piece_ids: [], created_at: '', updated_at: '' }),
+    );
+    await TestBed.inject(PieceStore).refreshList();
+    button(i18n.t('nav.pieces')).click();
+    render();
+    const filter = el.querySelector('#collection-filter') as HTMLSelectElement;
+    expect([...filter.options].map((o) => o.textContent!.trim())).toEqual([i18n.t('collections.all'), 'Christmas (1)']);
+
+    filter.value = 'c1';
+    filter.dispatchEvent(new Event('change'));
+    render();
+    // Only its piece (the archived one), and the rename field of the collection.
+    expect([...el.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([i18n.t('pieces.archivedGroup')]);
+    expect(el.textContent).not.toContain('Nocturne');
+    expect((el.querySelector('#collection-name') as HTMLInputElement).value).toBe('Christmas');
+
+    (el.querySelector(`button[aria-label="${i18n.t('collections.new')}"]`) as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(TestBed.inject(PieceStore).collectionFilter()).toBe('c2'));
+    expect(mock.argsOf('createCollection')).toEqual([i18n.t('collections.defaultName')]);
+    render();
+    expect(el.textContent).toContain(i18n.t('collections.emptyCollection'));
+    const name = el.querySelector('#collection-name') as HTMLInputElement;
+    name.value = 'Recital';
+    name.dispatchEvent(new Event('blur'));
+    await vi.waitFor(() => expect(mock.argsOf('renameCollection')).toEqual(['c2', 'Recital']));
+  });
+
   it('shows the compositions in the compose view', async () => {
     const { el, render, button } = await setup();
     button(i18n.t('nav.compose')).click();

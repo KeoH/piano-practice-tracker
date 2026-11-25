@@ -161,6 +161,8 @@ export interface PieceSummaryDto {
   last_practiced: string | null;
   /** Passages already used in the piece's takes (sorted, without the empty one). */
   passages: string[];
+  /** Scores of the staff editor filed under the piece. */
+  score_count: number;
 }
 
 export interface PieceTakeDto {
@@ -173,6 +175,18 @@ export interface PieceDetailDto {
   piece: PieceDto;
   /** Sorted by passage and then chronologically. */
   takes: PieceTakeDto[];
+  /** Scores filed under the piece (its sheet music), by title. They are not takes. */
+  scores: ScoreSummaryDto[];
+}
+
+/** A named group of pieces of the repertoire. A piece can be in several collections. */
+export interface CollectionDto {
+  id: string;
+  name: string;
+  /** The pieces in it (active and archived), by title. */
+  piece_ids: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 /** A composition in the list of the composer. */
@@ -331,6 +345,8 @@ export interface ScoreSummaryDto {
   note_count: number;
   duration_ms: number;
   fragment_id: string | null;
+  /** Piece of the repertoire it is filed under. Not part of `ScoreDto`: the editor never writes it. */
+  piece_id: string | null;
   updated_at: string;
 }
 

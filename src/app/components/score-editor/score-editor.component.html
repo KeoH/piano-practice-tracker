@@ -16,6 +16,7 @@
         <span class="text-[12.5px] text-muted">
           {{ 'score.summary' | t: { bars: ('score.bars' | tp: doc.bars), notes: ('score.notes' | tp: notes()), duration: formatMs(duration()) } }}
         </span>
+        <app-score-piece-select class="mt-1" [scoreId]="doc.id" />
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" class="btn" [disabled]="!notes() || !api.available" (click)="store.useAsChallenge()">

@@ -80,11 +80,11 @@ export function piece(over: Partial<PieceDto> = {}): PieceDto {
 }
 
 export function pieceSummary(over: Partial<PieceDto> = {}, extra: Partial<PieceSummaryDto> = {}): PieceSummaryDto {
-  return { piece: piece(over), take_count: 0, last_practiced: null, passages: [], ...extra };
+  return { piece: piece(over), take_count: 0, last_practiced: null, passages: [], score_count: 0, ...extra };
 }
 
 export function pieceDetail(over: Partial<PieceDetailDto> = {}): PieceDetailDto {
-  return { piece: piece(), takes: [], ...over };
+  return { piece: piece(), takes: [], scores: [], ...over };
 }
 
 export function vaultInfo(over: Partial<VaultInfo> = {}): VaultInfo {
