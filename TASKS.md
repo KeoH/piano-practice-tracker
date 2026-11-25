@@ -297,3 +297,12 @@ MVP scope:
   - Known limits to look at here: the glyph offsets of the clefs, rests and accidentals were calibrated in Chrome, not in WebKitGTK; on touch screens a swipe on the staff scrolls it (placing a note is a tap) but a note is dragged with `touch-action: none` on its group, which SVG elements may not honour in every webview.
 
 Open questions: none (all four were answered: one fragment, own tempo that adapts in the composer, system session, MVP scope as listed).
+
+## Phase 20: Scores in the Repertoire and Collections
+- [x] **20.1. Schema v8 (`db.rs`):** `scores.piece_id` (`ON DELETE SET NULL`), `collections` and `collection_pieces` (many-to-many, cascades on both sides). Tests: the v7 → v8 migration, scores filed under a piece without becoming takes (counts, `last_practiced`, library grouping, saving from the editor keeps the link), collections (replace, rename, delete, deleting a piece).
+- [x] **20.2. Commands:** `assign_score_piece`, `get_collections`, `create_collection`, `rename_collection`, `delete_collection`, `set_piece_collections`; `PieceSummaryDto.score_count`, `PieceDetailDto.scores`, `ScoreSummaryDto.piece_id`.
+- [x] **20.3. Score editor:** `score-piece-select` in the header (no piece / a piece / "new piece from this score", which creates it named after the score in one step).
+- [x] **20.4. Repertoire view:** a *Scores* section in the piece (open in the editor, take out, add an existing one) and the collection chips of the piece with an inline "new collection".
+- [x] **20.5. Sidebar:** a collection filter next to the search, `+` for a new collection (chosen so its name can be typed at once), rename and delete of the chosen one; scores counted on each piece.
+- [x] **20.6. Order and PDF of a piece (schema v9):** `scores.piece_position`, `reorder_piece_scores`, up / down buttons on each score of the piece, and "Export scores (PDF)" in the piece: one PDF with the piece's title, composer and notes first and then its scores in order (no takes, no fragments).
+- [ ] **20.7. Manual check with `npm run tauri dev`:** write a score, "New piece from this score" in its header and see it in Repertoire; add a second score to the same piece; make two collections, put a piece in both, filter by each, rename and delete one (the pieces stay); delete a piece (its scores stay in Scores); move scores up and down and export the PDF (intro first, order kept, a long note spills onto a second page); open a v7 vault (it migrates to v9).

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ExportService, piecePdfKey } from '../../core/export.service';
 import { ConfirmService } from '../../core/confirm.service';
 import { clamp, formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
@@ -7,6 +8,7 @@ import type { MidiNotesDto, PieceTakeDto } from '../../core/models';
 import { NavStore } from '../../core/nav.store';
 import { PieceStore } from '../../core/piece.store';
 import { PlaybackStore } from '../../core/playback.store';
+import { ScoreStore } from '../../core/score.store';
 import { SessionStore } from '../../core/session.store';
 import { TauriApiService } from '../../core/tauri-api.service';
 import { UiPrefsStore } from '../../core/ui-prefs.store';
@@ -44,6 +46,8 @@ export class PiecesViewComponent {
   private readonly sessions = inject(SessionStore);
   private readonly nav = inject(NavStore);
   private readonly confirm = inject(ConfirmService);
+  private readonly scoreStore = inject(ScoreStore);
+  private readonly exporter = inject(ExportService);
 
   protected readonly formatMs = formatMs;
 
@@ -54,6 +58,20 @@ export class PiecesViewComponent {
 
   protected readonly piece = computed(() => this.store.detail()?.piece ?? null);
   protected readonly takes = computed(() => this.store.detail()?.takes ?? []);
+  protected readonly scores = computed(() => this.store.detail()?.scores ?? []);
+  /** Scores that can still be added to this piece (the ones already in it are not offered). */
+  protected readonly addableScores = computed(() => {
+    const id = this.store.selectedId();
+    return this.scoreStore.scores().filter((s) => s.piece_id !== id);
+  });
+  /** Scores that have notes to print: the ones without are left out of the PDF. */
+  protected readonly printable = computed(() => this.scores().filter((s) => s.note_count > 0));
+  protected readonly exportingPdf = computed(() => {
+    const id = this.store.selectedId();
+    return !!id && this.exporter.isBusy(piecePdfKey(id));
+  });
+  /** `true` while the field to name a new collection is open. */
+  protected readonly creatingCollection = signal(false);
   protected readonly groups = computed<PassageGroup[]>(() => {
     const groups: PassageGroup[] = [];
     for (const t of this.takes()) {
@@ -73,6 +91,10 @@ export class PiecesViewComponent {
   protected readonly compareDuration = computed(() => Math.max(0, ...this.comparedTakes().map((t) => t.fragment.duration_ms)));
 
   constructor() {
+    // The view is created each time it is shown: a score may have been renamed, filed or deleted
+    // in the editor since the piece was last loaded.
+    void this.scoreStore.refreshList();
+    void this.store.reloadDetail();
     // Loads the notes of the takes that are not loaded yet
     effect(() => {
       const files = this.takes().map((t) => t.fragment.file_path);
@@ -132,7 +154,57 @@ export class PiecesViewComponent {
       message: this.i18n.plural('pieces.deleteMessage', this.takes().length, { title: p.title }),
       confirmLabel: this.i18n.t('pieces.delete'),
     });
-    if (ok) await this.store.remove(p.id);
+    if (!ok) return;
+    if (await this.store.remove(p.id)) void this.scoreStore.refreshList();
+  }
+
+  // ---- Collections ----
+  protected inCollection(collectionId: string): boolean {
+    return this.store.selectedCollectionIds().includes(collectionId);
+  }
+
+  protected toggleCollection(collectionId: string): void {
+    const p = this.piece();
+    if (p) void this.store.toggleInCollection(p.id, collectionId);
+  }
+
+  protected async createCollection(el: HTMLInputElement): Promise<void> {
+    const name = el.value.trim();
+    const p = this.piece();
+    if (!name || !p) return;
+    if (await this.store.createCollection(name, p.id)) {
+      el.value = '';
+      this.creatingCollection.set(false);
+    }
+  }
+
+  // ---- Scores ----
+  protected async addScore(select: HTMLSelectElement): Promise<void> {
+    const p = this.piece();
+    const id = select.value;
+    select.value = '';
+    if (p && id) await this.scoreStore.assignPiece(id, p.id);
+  }
+
+  protected removeScore(scoreId: string): Promise<void> {
+    return this.scoreStore.assignPiece(scoreId, null);
+  }
+
+  protected moveScore(scoreId: string, delta: -1 | 1): void {
+    void this.store.moveScore(scoreId, delta);
+  }
+
+  /** Saves what is pending in the editor and writes the scores of the piece, in order, into one PDF. */
+  protected async exportPdf(): Promise<void> {
+    const p = this.piece();
+    if (!p || !this.printable().length) return;
+    await this.scoreStore.flush();
+    await this.exporter.exportPiece(p, this.printable().map((s) => s.id));
+  }
+
+  protected openScore(scoreId: string): void {
+    this.nav.view.set('scores');
+    void this.scoreStore.select(scoreId);
   }
 
   // ---- Takes ----

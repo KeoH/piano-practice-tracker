@@ -22,14 +22,14 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::models::{
     AttemptDetails, AttemptDto, AttemptSummaryDto, CompositionClipDto, CompositionDto, CompositionSummaryDto,
-    CompositionTrackDto, FragmentDto, LibraryFragmentDto, MelodyDto, MelodySource, MelodySummaryDto, PieceDetailDto,
-    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, ScoreDto, ScoreNoteDto, ScoreSummaryDto, SessionDetailDto,
+    CollectionDto, CompositionTrackDto, FragmentDto, LibraryFragmentDto, MelodyDto, MelodySource, MelodySummaryDto, PieceDetailDto,
+    PieceDto, PieceSummaryDto, PieceTakeDto, PracticeDayDto, ScoreDto, ScoreNoteDto, ScoreSlurDto, ScoreSummaryDto, SessionDetailDto,
     SessionDto, SessionMediaDto, SessionSummaryDto, TimelineCommentDto,
 };
 use crate::paths::relative_to;
 use crate::score;
 
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 9;
 /// Trims of a raw take that can be undone; older snapshots are deleted.
 pub const RAW_HISTORY_LIMIT: usize = 10;
 /// Tracks of a composition: one MIDI channel each, skipping channel 10 (GM percussion).
@@ -278,6 +278,32 @@ const MIGRATION_V7: &str = r#"
 ALTER TABLE melodies ADD COLUMN score_json TEXT;
 "#;
 
+/// v8: scores in the repertoire (`scores.piece_id`) and collections of pieces. A collection only
+/// groups: deleting it removes its rows here and nothing else; deleting a piece leaves every
+/// collection and unlinks its scores.
+const MIGRATION_V8: &str = r#"
+ALTER TABLE scores ADD COLUMN piece_id TEXT REFERENCES pieces(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_scores_piece ON scores(piece_id);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS collection_pieces (
+    collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    piece_id TEXT NOT NULL REFERENCES pieces(id) ON DELETE CASCADE,
+    PRIMARY KEY (collection_id, piece_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collection_pieces_piece ON collection_pieces(piece_id);
+"#;
+
+/// v9: the order of the scores inside a piece (the pieces of a score book are played in sequence).
+const MIGRATION_V9: &str = r#"
+ALTER TABLE scores ADD COLUMN piece_position INTEGER NOT NULL DEFAULT 0;
+"#;
+
 /// Vault sub-paths that identify each file type when converting old paths.
 const RAW_MARKER: &str = "/midi/raw/";
 const FRAGMENT_MARKER: &str = "/midi/fragments/";
@@ -488,6 +514,52 @@ fn fetch_fragment(conn: &Connection, fragment_id: &str) -> Result<FragmentDto, S
     Ok(frag)
 }
 
+/// The scores filed under a piece, in the order set for it (ties by title: scores filed before there was
+/// an order all have position 0).
+fn piece_scores(conn: &Connection, piece_id: &str) -> Result<Vec<ScoreSummaryDto>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SCORE_COLS} FROM scores WHERE piece_id = ?1 ORDER BY piece_position ASC, title COLLATE NOCASE ASC, id ASC"
+        ))
+        .map_err(db_err)?;
+    let rows = stmt.query_map(params![piece_id], map_score).map_err(db_err)?;
+    Ok(rows
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(db_err)?
+        .iter()
+        .map(|doc| ScoreSummaryDto { piece_id: Some(piece_id.to_string()), ..score::summary(doc) })
+        .collect())
+}
+
+fn fetch_collections(conn: &Connection) -> Result<Vec<CollectionDto>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, created_at, updated_at FROM collections ORDER BY name COLLATE NOCASE ASC, created_at ASC")
+        .map_err(db_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(CollectionDto { id: r.get(0)?, name: r.get(1)?, piece_ids: Vec::new(), created_at: r.get(2)?, updated_at: r.get(3)? })
+        })
+        .map_err(db_err)?;
+    let mut collections = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT cp.collection_id, cp.piece_id FROM collection_pieces cp JOIN pieces p ON p.id = cp.piece_id \
+             ORDER BY p.title COLLATE NOCASE ASC",
+        )
+        .map_err(db_err)?;
+    let links = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(db_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(db_err)?;
+    for (collection_id, piece_id) in links {
+        if let Some(c) = collections.iter_mut().find(|c| c.id == collection_id) {
+            c.piece_ids.push(piece_id);
+        }
+    }
+    Ok(collections)
+}
+
 fn fetch_piece(conn: &Connection, piece_id: &str) -> Result<PieceDto, String> {
     conn.query_row(&format!("SELECT {PIECE_COLS} FROM pieces WHERE id = ?1"), params![piece_id], map_piece)
         .optional()
@@ -650,8 +722,15 @@ struct ScoreBody {
     bass: Vec<ScoreNoteDto>,
     #[serde(default)]
     pickup_ticks: u32,
+    /// Before the repeat sign could go on any bar, a score either ended with one (`true`) or had none.
+    /// Still read (as the last bar) and still written (when the sign is on the last bar), so a vault
+    /// opened by an older version keeps its repeat.
     #[serde(default)]
     repeat: bool,
+    #[serde(default)]
+    repeat_bar: Option<u32>,
+    #[serde(default)]
+    slurs: Vec<ScoreSlurDto>,
     /// The score ends with the bar that completes its pickup, which `bars` counts. Scores stored before
     /// that was so lack it (`false`): they are read with that bar added.
     #[serde(default)]
@@ -662,20 +741,22 @@ fn map_score(r: &Row) -> rusqlite::Result<ScoreDto> {
     let json: String = r.get(6)?;
     let body: ScoreBody = serde_json::from_str(&json)
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(e)))?;
+    let bars = {
+        let bars = to_u32(r.get(5)?);
+        if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
+    };
     Ok(ScoreDto {
         id: r.get(0)?,
         title: r.get(1)?,
         bpm: to_u32(r.get(2)?),
         beats: to_u32(r.get(3)?),
         beat_unit: to_u32(r.get(4)?),
-        bars: {
-            let bars = to_u32(r.get(5)?);
-            if body.pickup_ticks > 0 && !body.closing_bar { (bars + 1).min(score::MAX_BARS) } else { bars }
-        },
+        bars,
         pickup_ticks: body.pickup_ticks,
-        repeat: body.repeat,
+        repeat_bar: body.repeat_bar.or_else(|| body.repeat.then(|| bars.saturating_sub(1))),
         treble: body.treble,
         bass: body.bass,
+        slurs: body.slurs,
         fragment_id: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
@@ -1046,6 +1127,20 @@ impl Database {
             tx.execute_batch(MIGRATION_V7)
                 .map_err(|e| t!("backend.db.migrationFailed", version = 7, e = e))?;
             tx.execute_batch("PRAGMA user_version = 7;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
+        if version < 8 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V8)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 8, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 8;").map_err(db_err)?;
+            tx.commit().map_err(db_err)?;
+        }
+        if version < 9 {
+            let tx = conn.transaction().map_err(db_err)?;
+            tx.execute_batch(MIGRATION_V9)
+                .map_err(|e| t!("backend.db.migrationFailed", version = 9, e = e))?;
+            tx.execute_batch("PRAGMA user_version = 9;").map_err(db_err)?;
             tx.commit().map_err(db_err)?;
         }
         Ok(())
@@ -1529,7 +1624,8 @@ impl Database {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {PIECE_COLS_P}, COUNT(f.id), MAX(s.session_date) FROM pieces p \
+                "SELECT {PIECE_COLS_P}, COUNT(f.id), MAX(s.session_date), \
+                 (SELECT COUNT(*) FROM scores sc WHERE sc.piece_id = p.id) FROM pieces p \
                  LEFT JOIN midi_fragments f ON f.piece_id = p.id \
                  LEFT JOIN sessions s ON s.id = f.session_id \
                  GROUP BY p.id \
@@ -1543,6 +1639,7 @@ impl Database {
                     take_count: to_u32(r.get(7)?),
                     last_practiced: r.get(8)?,
                     passages: Vec::new(),
+                    score_count: to_u32(r.get(9)?),
                 })
             })
             .map_err(db_err)?;
@@ -1592,7 +1689,83 @@ impl Database {
                 Ok(t)
             })
             .collect::<Result<Vec<_>, String>>()?;
-        Ok(PieceDetailDto { piece, takes })
+        let scores = piece_scores(&conn, piece_id)?;
+        Ok(PieceDetailDto { piece, takes, scores })
+    }
+
+    // ----------------------------- Collections -----------------------------
+
+    /// By name, each with the pieces in it.
+    pub fn list_collections(&self) -> Result<Vec<CollectionDto>, String> {
+        let conn = self.lock()?;
+        fetch_collections(&conn)
+    }
+
+    pub fn create_collection(&self, name: &str) -> Result<CollectionDto, String> {
+        let conn = self.lock()?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_rfc3339();
+        conn.execute(
+            "INSERT INTO collections (id, name, created_at, updated_at) VALUES (?1, ?2, ?3, ?3)",
+            params![id, name, now],
+        )
+        .map_err(db_err)?;
+        fetch_collections(&conn)?
+            .into_iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| t!("backend.db.collectionMissing", id = id))
+    }
+
+    pub fn rename_collection(&self, collection_id: &str, name: &str) -> Result<CollectionDto, String> {
+        let conn = self.lock()?;
+        let changed = conn
+            .execute(
+                "UPDATE collections SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                params![name, now_rfc3339(), collection_id],
+            )
+            .map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.db.collectionMissing", id = collection_id));
+        }
+        fetch_collections(&conn)?
+            .into_iter()
+            .find(|c| c.id == collection_id)
+            .ok_or_else(|| t!("backend.db.collectionMissing", id = collection_id))
+    }
+
+    /// Deletes the collection only: its pieces stay in the repertoire.
+    pub fn delete_collection(&self, collection_id: &str) -> Result<(), String> {
+        let conn = self.lock()?;
+        let changed = conn.execute("DELETE FROM collections WHERE id = ?1", params![collection_id]).map_err(db_err)?;
+        if changed == 0 {
+            return Err(t!("backend.db.collectionMissing", id = collection_id));
+        }
+        Ok(())
+    }
+
+    /// Puts the piece in exactly these collections (the others lose it) and returns them all.
+    pub fn set_piece_collections(&self, piece_id: &str, collection_ids: &[String]) -> Result<Vec<CollectionDto>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        fetch_piece(&tx, piece_id)?;
+        tx.execute("DELETE FROM collection_pieces WHERE piece_id = ?1", params![piece_id]).map_err(db_err)?;
+        let now = now_rfc3339();
+        for id in collection_ids {
+            let changed = tx
+                .execute("UPDATE collections SET updated_at = ?1 WHERE id = ?2", params![now, id])
+                .map_err(db_err)?;
+            if changed == 0 {
+                return Err(t!("backend.db.collectionMissing", id = id));
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO collection_pieces (collection_id, piece_id) VALUES (?1, ?2)",
+                params![id, piece_id],
+            )
+            .map_err(db_err)?;
+        }
+        let all = fetch_collections(&tx)?;
+        tx.commit().map_err(db_err)?;
+        Ok(all)
     }
 
     // ----------------------------- Compositions -----------------------------
@@ -1729,9 +1902,10 @@ impl Database {
         let mut stmt = conn
             .prepare(
                 "SELECT f.id, f.title, f.file_path, f.duration_ms, f.session_id, s.title, s.session_date, \
-                 f.piece_id, p.title, f.passage, f.created_at, f.bpm, sc.id, s.kind FROM midi_fragments f \
-                 JOIN sessions s ON s.id = f.session_id LEFT JOIN pieces p ON p.id = f.piece_id \
+                 COALESCE(f.piece_id, sc.piece_id), p.title, f.passage, f.created_at, f.bpm, sc.id, s.kind \
+                 FROM midi_fragments f JOIN sessions s ON s.id = f.session_id \
                  LEFT JOIN scores sc ON sc.fragment_id = f.id \
+                 LEFT JOIN pieces p ON p.id = COALESCE(f.piece_id, sc.piece_id) \
                  ORDER BY s.session_date DESC, f.created_at DESC",
             )
             .map_err(db_err)?;
@@ -1799,11 +1973,61 @@ impl Database {
     pub fn list_scores(&self) -> Result<Vec<ScoreSummaryDto>, String> {
         let conn = self.lock()?;
         let mut stmt = conn
-            .prepare(&format!("SELECT {SCORE_COLS} FROM scores ORDER BY updated_at DESC"))
+            .prepare(&format!("SELECT {SCORE_COLS}, piece_id FROM scores ORDER BY updated_at DESC"))
             .map_err(db_err)?;
-        let rows = stmt.query_map([], map_score).map_err(db_err)?;
-        let scores = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)?;
-        Ok(scores.iter().map(score::summary).collect())
+        let rows = stmt
+            .query_map([], |r| Ok(ScoreSummaryDto { piece_id: r.get(10)?, ..score::summary(&map_score(r)?) }))
+            .map_err(db_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(db_err)
+    }
+
+    /// Files the score under a piece of the repertoire (`None` takes it out). It does not touch the
+    /// score's own `updated_at`, so the list does not reorder, and it is not part of `save_score`.
+    pub fn set_score_piece(&self, score_id: &str, piece_id: Option<&str>) -> Result<ScoreSummaryDto, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        let doc = fetch_score(&tx, score_id)?;
+        if let Some(pid) = piece_id {
+            fetch_piece(&tx, pid)?;
+            tx.execute("UPDATE pieces SET updated_at = ?1 WHERE id = ?2", params![now_rfc3339(), pid]).map_err(db_err)?;
+        }
+        // A score that joins a piece goes last in it; filing it again where it already is changes nothing.
+        let current: Option<String> = tx
+            .query_row("SELECT piece_id FROM scores WHERE id = ?1", params![score_id], |r| r.get(0))
+            .map_err(db_err)?;
+        if current.as_deref() != piece_id {
+            let position: i64 = match piece_id {
+                Some(pid) => tx
+                    .query_row("SELECT COALESCE(MAX(piece_position), -1) + 1 FROM scores WHERE piece_id = ?1", params![pid], |r| r.get(0))
+                    .map_err(db_err)?,
+                None => 0,
+            };
+            tx.execute("UPDATE scores SET piece_id = ?1, piece_position = ?2 WHERE id = ?3", params![piece_id, position, score_id])
+                .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)?;
+        Ok(ScoreSummaryDto { piece_id: piece_id.map(str::to_string), ..score::summary(&doc) })
+    }
+
+    /// Sets the order of the scores of a piece. `score_ids` must be exactly the scores that are in it
+    /// (a stale list is refused rather than half applied); returns them in the new order.
+    pub fn reorder_piece_scores(&self, piece_id: &str, score_ids: &[String]) -> Result<Vec<ScoreSummaryDto>, String> {
+        let mut conn = self.lock()?;
+        let tx = conn.transaction().map_err(db_err)?;
+        fetch_piece(&tx, piece_id)?;
+        let mut current: Vec<String> = piece_scores(&tx, piece_id)?.into_iter().map(|s| s.id).collect();
+        let mut wanted = score_ids.to_vec();
+        current.sort();
+        wanted.sort();
+        if current != wanted {
+            return Err(t!("backend.db.scoreOrderStale"));
+        }
+        for (i, id) in score_ids.iter().enumerate() {
+            tx.execute("UPDATE scores SET piece_position = ?1 WHERE id = ?2", params![to_i64(i as u64), id]).map_err(db_err)?;
+        }
+        let scores = piece_scores(&tx, piece_id)?;
+        tx.commit().map_err(db_err)?;
+        Ok(scores)
     }
 
     /// New empty score. It has no fragment until it is saved with notes.
@@ -1882,8 +2106,16 @@ impl Database {
             fragment_id = Some(f.fragment_id.clone());
             adapt_clips(&tx, &f.fragment_id, old.bpm, doc.bpm, f.duration_ms)?;
         }
-        let data = serde_json::to_string(&ScoreBody { treble: doc.treble.clone(), bass: doc.bass.clone(), pickup_ticks: doc.pickup_ticks, repeat: doc.repeat, closing_bar: true })
-            .map_err(|e| e.to_string())?;
+        let data = serde_json::to_string(&ScoreBody {
+            treble: doc.treble.clone(),
+            bass: doc.bass.clone(),
+            pickup_ticks: doc.pickup_ticks,
+            repeat: doc.repeat_bar.is_some_and(|b| b + 1 == doc.bars),
+            repeat_bar: doc.repeat_bar,
+            slurs: doc.slurs.clone(),
+            closing_bar: true,
+        })
+        .map_err(|e| e.to_string())?;
         tx.execute(
             "UPDATE scores SET title = ?1, bpm = ?2, beats = ?3, beat_unit = ?4, bars = ?5, data_json = ?6, \
              fragment_id = ?7, updated_at = ?8 WHERE id = ?9",
@@ -1934,7 +2166,7 @@ impl Database {
             .optional()
             .map_err(db_err)?
             .flatten();
-        json.map(|j| serde_json::from_str(&j).map_err(|e| e.to_string())).transpose()
+        json.map(|j| score::from_stored_json(&j)).transpose()
     }
 
     /// Deletes the score and its fragment (its clips go with it) and returns the absolute path of the
@@ -2997,7 +3229,7 @@ mod tests {
             )
             .unwrap();
         let read = db.get_score(&doc.id).unwrap();
-        assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat), (0, false, false));
+        assert_eq!((read.pickup_ticks, read.treble[0].tie, read.repeat_bar, read.slurs.len()), (0, false, None, 0));
         assert!(score::issues(&read).is_empty());
     }
 
@@ -3036,9 +3268,51 @@ mod tests {
         assert_eq!(saved.pickup_ticks, 480);
         assert!(saved.treble[1].tie);
         assert_eq!(db.get_score(&doc.id).unwrap().pickup_ticks, 480);
-        doc.repeat = true;
-        assert!(db.save_score(&doc, None).unwrap().repeat);
-        assert!(db.get_score(&doc.id).unwrap().repeat);
+        doc.repeat_bar = Some(1);
+        assert_eq!(db.save_score(&doc, None).unwrap().repeat_bar, Some(1));
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(1));
+    }
+
+    #[test]
+    fn a_score_stored_with_the_old_repeat_flag_has_its_sign_on_the_last_bar() {
+        let db = db();
+        let doc = db.create_score("Old repeat").unwrap(); // 4 bars
+        let put = |json: &str| {
+            db.lock()
+                .unwrap()
+                .execute("UPDATE scores SET data_json = ?1 WHERE id = ?2", params![json, doc.id])
+                .unwrap();
+        };
+        put(r#"{"treble":[],"bass":[],"repeat":true,"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(3));
+        // A sign placed on a bar wins over the flag.
+        put(r#"{"treble":[],"bass":[],"repeat":true,"repeat_bar":1,"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, Some(1));
+        put(r#"{"treble":[],"bass":[],"closing_bar":true}"#);
+        assert_eq!(db.get_score(&doc.id).unwrap().repeat_bar, None);
+        // Saved on the last bar it is still written as the flag, so an older version keeps it.
+        let mut last = db.get_score(&doc.id).unwrap();
+        last.repeat_bar = Some(3);
+        db.save_score(&last, None).unwrap();
+        let json = stored(&db, &format!("SELECT data_json FROM scores WHERE id = '{}'", doc.id));
+        assert!(json.contains(r#""repeat":true"#), "{json}");
+        last.repeat_bar = Some(1);
+        db.save_score(&last, None).unwrap();
+        let json = stored(&db, &format!("SELECT data_json FROM scores WHERE id = '{}'", doc.id));
+        assert!(json.contains(r#""repeat":false"#) && json.contains(r#""repeat_bar":1"#), "{json}");
+    }
+
+    #[test]
+    fn slurs_are_stored_with_the_notation() {
+        let db = db();
+        let mut doc = db.create_score("Phrase").unwrap();
+        doc.treble = vec![note("a", 0), note("b", 480)];
+        doc.slurs = vec![ScoreSlurDto { id: "s1".into(), from: "a".into(), to: "b".into() }];
+        let saved = db.save_score(&doc, None).unwrap();
+        assert_eq!(saved.slurs, doc.slurs);
+        assert_eq!(db.get_score(&doc.id).unwrap().slurs, doc.slurs);
+        // A frozen copy keeps them too.
+        assert_eq!(db.create_score("Plain").unwrap().slurs, vec![]);
     }
 
     #[test]
@@ -3225,12 +3499,16 @@ mod tests {
             db.insert_melody(&melody("m1")).unwrap();
             db.lock()
                 .unwrap()
-                .execute_batch("ALTER TABLE melodies DROP COLUMN score_json; PRAGMA user_version = 6;")
+                .execute_batch(
+                    "DROP TABLE collection_pieces; DROP TABLE collections; DROP INDEX idx_scores_piece; \
+                     ALTER TABLE scores DROP COLUMN piece_position; ALTER TABLE scores DROP COLUMN piece_id; \
+                     ALTER TABLE melodies DROP COLUMN score_json; PRAGMA user_version = 6;",
+                )
                 .unwrap();
         }
         let db = Database::open(&path, dir.path()).unwrap();
         let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, SCHEMA_VERSION);
         assert_eq!(db.get_melody("m1").unwrap().title, melody("m1").title);
         assert_eq!(db.get_melody_score("m1").unwrap(), None);
         // Reopening is idempotent.
@@ -3245,7 +3523,7 @@ mod tests {
         assert_eq!(db.get_melody_score("m1").unwrap(), None);
         let mut doc = db.create_score("Etude").unwrap();
         doc.treble = vec![note("a", 0)];
-        doc.repeat = true;
+        doc.repeat_bar = Some(3);
         let saved = db.save_score(&doc, Some(&score_fragment("f1", 4_000))).unwrap();
         assert_eq!(db.score_of_fragment("f1").unwrap().unwrap().id, saved.id);
         assert!(db.score_of_fragment("nope").unwrap().is_none());
@@ -3255,11 +3533,194 @@ mod tests {
         edited.title = "Changed".into();
         db.save_score(&edited, None).unwrap();
         let copy = db.get_melody_score("m1").unwrap().unwrap();
-        assert_eq!((copy.title.as_str(), copy.repeat, copy.treble.len()), ("Etude", true, 1));
+        assert_eq!((copy.title.as_str(), copy.repeat_bar, copy.treble.len()), ("Etude", Some(3), 1));
         assert!(db.set_melody_score("nope", &saved).is_err());
         // It goes with the melody.
         db.delete_melody("m1").unwrap();
         assert_eq!(db.get_melody_score("m1").unwrap(), None);
+    }
+
+    /// A saved score with one note, so it has a fragment.
+    fn saved_score(db: &Database, title: &str, fragment_id: &str) -> ScoreDto {
+        let mut doc = db.create_score(title).unwrap();
+        doc.treble = vec![note("a", 0)];
+        db.save_score(&doc, Some(&score_fragment(fragment_id, 4_000))).unwrap()
+    }
+
+    #[test]
+    fn migrates_a_v7_vault_to_v8_keeping_its_scores_and_pieces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        let (score_id, piece_id) = {
+            let db = Database::open(&path, dir.path()).unwrap();
+            let doc = saved_score(&db, "Etude", "f1");
+            let piece = db.create_piece("Nocturne", "").unwrap();
+            db.lock()
+                .unwrap()
+                .execute_batch(
+                    "DROP TABLE collection_pieces; DROP TABLE collections; DROP INDEX idx_scores_piece; \
+                     ALTER TABLE scores DROP COLUMN piece_position; ALTER TABLE scores DROP COLUMN piece_id; PRAGMA user_version = 7;",
+                )
+                .unwrap();
+            (doc.id, piece.id)
+        };
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        let scores = db.list_scores().unwrap();
+        assert_eq!((scores.len(), scores[0].id.as_str(), scores[0].piece_id.clone()), (1, score_id.as_str(), None));
+        assert!(db.list_collections().unwrap().is_empty());
+        db.set_score_piece(&score_id, Some(&piece_id)).unwrap();
+        // Reopening is idempotent.
+        drop(db);
+        let db = Database::open(&path, dir.path()).unwrap();
+        assert_eq!(db.list_scores().unwrap()[0].piece_id.as_deref(), Some(piece_id.as_str()));
+    }
+
+    #[test]
+    fn a_score_is_filed_under_a_piece_without_becoming_a_take() {
+        let db = db();
+        let doc = saved_score(&db, "Etude", "f1");
+        let piece = db.create_piece("Nocturne", "Chopin").unwrap();
+        assert!(db.set_score_piece(&doc.id, Some("nope")).is_err());
+        assert!(db.set_score_piece("nope", Some(&piece.id)).is_err());
+
+        let before = db.get_score(&doc.id).unwrap().updated_at;
+        let filed = db.set_score_piece(&doc.id, Some(&piece.id)).unwrap();
+        assert_eq!(filed.piece_id.as_deref(), Some(piece.id.as_str()));
+        // The score's own timestamp is untouched, so the list does not reorder.
+        assert_eq!(db.get_score(&doc.id).unwrap().updated_at, before);
+
+        let list = db.list_pieces().unwrap();
+        assert_eq!((list[0].score_count, list[0].take_count, list[0].last_practiced.clone()), (1, 0, None));
+        let detail = db.get_piece_detail(&piece.id).unwrap();
+        assert!(detail.takes.is_empty());
+        assert_eq!(detail.scores.len(), 1);
+        assert_eq!((detail.scores[0].id.as_str(), detail.scores[0].piece_id.as_deref()), (doc.id.as_str(), Some(piece.id.as_str())));
+        assert_eq!(db.list_scores().unwrap()[0].piece_id.as_deref(), Some(piece.id.as_str()));
+
+        // Editing the score in the editor does not undo the link.
+        let mut edited = db.get_score(&doc.id).unwrap();
+        edited.title = "Etude no. 3".into();
+        db.save_score(&edited, None).unwrap();
+        assert_eq!(db.list_scores().unwrap()[0].piece_id.as_deref(), Some(piece.id.as_str()));
+
+        // Several scores do not multiply the takes, and the composer's library groups them by piece.
+        saved_score(&db, "Waltz", "f2");
+        let waltz = db.list_scores().unwrap().into_iter().find(|s| s.title == "Waltz").unwrap();
+        db.set_score_piece(&waltz.id, Some(&piece.id)).unwrap();
+        db.insert_fragment("take", &db.create_session("S", 80).unwrap().id, "Take", "", "/t.mid", 80, 1000).unwrap();
+        db.set_fragment_piece("take", Some(&piece.id), "").unwrap();
+        let list = db.list_pieces().unwrap();
+        assert_eq!((list[0].score_count, list[0].take_count), (2, 1));
+        let library = db.list_library_fragments().unwrap();
+        assert!(library.iter().filter(|f| f.score_id.is_some()).all(|f| f.piece_title.as_deref() == Some("Nocturne")));
+
+        // Taking it out, and deleting the piece, unlink without deleting the score.
+        assert_eq!(db.set_score_piece(&doc.id, None).unwrap().piece_id, None);
+        assert_eq!(db.get_piece_detail(&piece.id).unwrap().scores.len(), 1);
+        db.delete_piece(&piece.id).unwrap();
+        assert_eq!(db.list_scores().unwrap().len(), 2);
+        assert!(db.list_scores().unwrap().iter().all(|s| s.piece_id.is_none()));
+    }
+
+    #[test]
+    fn collections_group_pieces_many_to_many() {
+        let db = db();
+        let nocturne = db.create_piece("Nocturne", "").unwrap();
+        let etude = db.create_piece("Etude", "").unwrap();
+        let grade = db.create_collection("Grade 3").unwrap();
+        let xmas = db.create_collection("christmas").unwrap();
+        assert!(db.set_piece_collections("nope", &[grade.id.clone()]).is_err());
+        assert!(db.set_piece_collections(&nocturne.id, &["nope".to_string()]).is_err());
+
+        db.set_piece_collections(&nocturne.id, &[grade.id.clone(), xmas.id.clone()]).unwrap();
+        let all = db.set_piece_collections(&etude.id, &[grade.id.clone(), grade.id.clone()]).unwrap();
+        // By name regardless of case; pieces by title inside each one.
+        let names: Vec<_> = all.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["christmas", "Grade 3"]);
+        assert_eq!(all[0].piece_ids, [nocturne.id.clone()]);
+        assert_eq!(all[1].piece_ids, [etude.id.clone(), nocturne.id.clone()]);
+
+        // Setting replaces: the piece leaves the collections that are not in the list.
+        let all = db.set_piece_collections(&nocturne.id, &[xmas.id.clone()]).unwrap();
+        assert_eq!(all[1].piece_ids, [etude.id.clone()]);
+        assert_eq!(all[0].piece_ids, [nocturne.id.clone()]);
+
+        let renamed = db.rename_collection(&grade.id, "Grade 4").unwrap();
+        assert_eq!((renamed.name.as_str(), renamed.piece_ids.len()), ("Grade 4", 1));
+        assert!(db.rename_collection("nope", "x").is_err());
+
+        // Deleting a piece takes it out of every collection; deleting a collection keeps its pieces.
+        db.delete_piece(&etude.id).unwrap();
+        assert!(db.list_collections().unwrap().iter().all(|c| !c.piece_ids.contains(&etude.id)));
+        db.delete_collection(&xmas.id).unwrap();
+        assert!(db.delete_collection(&xmas.id).is_err());
+        assert_eq!(db.list_pieces().unwrap().len(), 1);
+        assert_eq!(db.list_collections().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrates_a_v8_vault_to_v9_keeping_its_scores_in_their_pieces() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(crate::paths::DB_FILE_NAME);
+        let piece_id = {
+            let db = Database::open(&path, dir.path()).unwrap();
+            let piece = db.create_piece("Book", "").unwrap();
+            let doc = saved_score(&db, "Etude", "f1");
+            db.set_score_piece(&doc.id, Some(&piece.id)).unwrap();
+            db.lock()
+                .unwrap()
+                .execute_batch("ALTER TABLE scores DROP COLUMN piece_position; PRAGMA user_version = 8;")
+                .unwrap();
+            piece.id
+        };
+        let db = Database::open(&path, dir.path()).unwrap();
+        let v: i64 = db.lock().unwrap().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!(db.get_piece_detail(&piece_id).unwrap().scores.len(), 1);
+    }
+
+    #[test]
+    fn the_scores_of_a_piece_can_be_put_in_order() {
+        let db = db();
+        let piece = db.create_piece("Book", "").unwrap();
+        let other = db.create_piece("Other", "").unwrap();
+        let ids: Vec<String> = ["Waltz", "Etude", "Prelude"]
+            .iter()
+            .enumerate()
+            .map(|(i, title)| {
+                let doc = saved_score(&db, title, &format!("f{i}"));
+                db.set_score_piece(&doc.id, Some(&piece.id)).unwrap();
+                doc.id
+            })
+            .collect();
+        let titles = |db: &Database| -> Vec<String> {
+            db.get_piece_detail(&piece.id).unwrap().scores.into_iter().map(|s| s.title).collect()
+        };
+        // Filed in this order, they stay in it (not alphabetical).
+        assert_eq!(titles(&db), ["Waltz", "Etude", "Prelude"]);
+
+        let moved = db.reorder_piece_scores(&piece.id, &[ids[2].clone(), ids[0].clone(), ids[1].clone()]).unwrap();
+        assert_eq!(moved.iter().map(|s| s.title.as_str()).collect::<Vec<_>>(), ["Prelude", "Waltz", "Etude"]);
+        assert_eq!(titles(&db), ["Prelude", "Waltz", "Etude"]);
+
+        // A new score goes last, and so does one that comes back after being taken out.
+        let fourth = saved_score(&db, "Nocturne", "f9");
+        db.set_score_piece(&fourth.id, Some(&piece.id)).unwrap();
+        db.set_score_piece(&ids[2], None).unwrap();
+        db.set_score_piece(&ids[2], Some(&piece.id)).unwrap();
+        assert_eq!(titles(&db), ["Waltz", "Etude", "Nocturne", "Prelude"]);
+        // Filing it where it already is does not move it.
+        db.set_score_piece(&ids[0], Some(&piece.id)).unwrap();
+        assert_eq!(titles(&db)[0], "Waltz");
+
+        // A stale or foreign list is refused and changes nothing.
+        assert!(db.reorder_piece_scores(&piece.id, &ids).is_err());
+        assert!(db.reorder_piece_scores(&piece.id, &[ids[0].clone(), ids[0].clone(), ids[1].clone(), fourth.id.clone()]).is_err());
+        assert!(db.reorder_piece_scores(&other.id, &[ids[0].clone()]).is_err());
+        assert!(db.reorder_piece_scores("nope", &[]).is_err());
+        assert_eq!(titles(&db), ["Waltz", "Etude", "Nocturne", "Prelude"]);
     }
 
     #[test]

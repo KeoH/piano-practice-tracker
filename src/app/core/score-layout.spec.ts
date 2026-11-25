@@ -4,10 +4,13 @@ import {
   HEAD_W_NEXT,
   MAX_STRETCH,
   NOTE_X,
+  PRINT_METRICS,
+  SCREEN_METRICS,
   RULER_H,
   STAFF_GAP,
   STEP_PX,
   SYSTEM_H,
+  barLineAt,
   hitAt,
   inRuler,
   layoutOf,
@@ -15,6 +18,7 @@ import {
   restShape,
   rulerTick,
   stemUp,
+  systemHeight,
   systemAt,
   xOfTick,
   yOfStep,
@@ -227,5 +231,62 @@ describe('score layout: glyph helpers', () => {
     expect(stemUp(3)).toBe(true);
     expect(stemUp(4)).toBe(false);
     expect(stemUp(9)).toBe(false);
+  });
+});
+
+describe('score layout: bar lines', () => {
+  const l = layoutOf(meter, 80); // four 4/4 bars of 640 px, one system
+  const y = (l.systems[0].staves.treble.top + l.systems[0].staves.bass.bottom) / 2;
+
+  it('snaps a point to the end of the closest bar', () => {
+    const { x0 } = l.systems[0]; // a 4/4 bar is 320 px at 80 px per quarter note
+    expect(barLineAt(l, meter, x0 + 300, y)).toMatchObject({ bar: 0, tick: 1920, x: x0 + 320 });
+    expect(barLineAt(l, meter, x0 + 400, y)).toMatchObject({ bar: 0 }); // 80 px past the line, 240 from the next
+    expect(barLineAt(l, meter, x0 + 500, y)).toMatchObject({ bar: 1, tick: 3840 });
+    expect(barLineAt(l, meter, x0 + 1280, y)).toMatchObject({ bar: 3, tick: 7680 });
+    expect(barLineAt(l, meter, x0 + 5000, y)).toBeNull(); // far past the end
+  });
+
+  it('is only in the bars of the system under the point', () => {
+    const wrapped = layoutOf({ ...meter, bars: 6 }, 80, 900);
+    expect(wrapped.systems.length).toBeGreaterThan(1);
+    const second = wrapped.systems[1];
+    const hit = barLineAt(wrapped, { ...meter, bars: 6 }, second.x0 + 10, second.top + 100)!;
+    expect(hit.system).toBe(1);
+    expect(hit.bar).toBeGreaterThanOrEqual(second.firstBar);
+    expect(barLineAt(wrapped, meter, -50, second.top + 100)).toBeNull(); // over the clefs
+    expect(barLineAt(wrapped, meter, 100, -5)).toBeNull();
+  });
+
+  it('counts the pickup bar as a short bar', () => {
+    const pickup = { ...meter, bars: 3, pickup_ticks: 480 };
+    const lp = layoutOf(pickup, 80);
+    const hit = barLineAt(lp, pickup, lp.systems[0].x0 + 50, 100)!;
+    expect(hit).toMatchObject({ bar: 0, tick: 480 });
+  });
+});
+
+describe('score layout: print metrics', () => {
+  it('keeps the screen layout as it was without metrics', () => {
+    const a = layoutOf(meter, 80, 600);
+    const b = layoutOf(meter, 80, 600, SCREEN_METRICS);
+    expect(b).toEqual(a);
+    expect(a.systemH).toBe(SYSTEM_H);
+    expect(a.height).toBe(a.systems.length * SYSTEM_H);
+  });
+
+  it('has no ruler and closer staves for print, so a system is shorter', () => {
+    const l = layoutOf(meter, 80, 600, PRINT_METRICS);
+    expect(l.systemH).toBe(systemHeight(PRINT_METRICS));
+    expect(l.systemH).toBeLessThan(SYSTEM_H);
+    expect(l.systems[0].staves.treble.top).toBe(PRINT_METRICS.padV);
+    expect(l.systems[1].top).toBe(l.systemH);
+  });
+
+  it('breaks the bars for a fixed page width', () => {
+    const wide = { ...meter, bars: 12 };
+    const l = layoutOf(wide, 60, 1000, PRINT_METRICS);
+    expect(l.systems.length).toBeGreaterThan(1);
+    for (const sys of l.systems.slice(0, -1)) expect(sys.right + END_PAD).toBeLessThanOrEqual(1000 + 1e-6);
   });
 });

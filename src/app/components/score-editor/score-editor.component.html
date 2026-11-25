@@ -16,10 +16,14 @@
         <span class="text-[12.5px] text-muted">
           {{ 'score.summary' | t: { bars: ('score.bars' | tp: doc.bars), notes: ('score.notes' | tp: notes()), duration: formatMs(duration()) } }}
         </span>
+        <app-score-piece-select class="mt-1" [scoreId]="doc.id" />
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <button type="button" class="btn" [disabled]="!notes() || !api.available" (click)="store.useAsChallenge()">
           <app-icon name="target" [size]="15" /> {{ 'fragments.useAsChallenge' | t }}
+        </button>
+        <button type="button" class="btn" [disabled]="!notes() || !api.available || exportingPdf()" [title]="'export.pdfHint' | t" (click)="exporter.exportScore(doc)">
+          <app-icon name="download" [size]="15" /> {{ (exportingPdf() ? 'export.exporting' : 'export.pdf') | t }}
         </button>
         <span class="h-6 w-px bg-line-strong" aria-hidden="true"></span>
         <button type="button" class="btn btn-ghost btn-icon" [disabled]="!store.canUndo()" (click)="store.undo()" [attr.aria-label]="'score.undo' | t" [title]="'score.undo' | t">
@@ -37,12 +41,12 @@
     <div class="flex flex-col gap-3.5 lg:flex-row lg:items-start">
       <!-- Tools: they stay in view at the side while the score scrolls -->
       <aside
-        class="sticky top-3 z-20 flex flex-row flex-wrap items-center gap-x-3 gap-y-2 rounded-[14px] border border-line bg-ink-800 p-3 lg:max-h-[calc(100vh-1.5rem)] lg:w-[208px] lg:shrink-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-hidden lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden"
+        class="sticky top-3 z-20 flex flex-row flex-wrap items-center gap-x-4 gap-y-3 rounded-[14px] border border-line bg-ink-800 p-4 lg:max-h-[calc(100vh-1.5rem)] lg:w-[236px] lg:gap-y-4 lg:shrink-0 lg:flex-col lg:items-stretch lg:overflow-y-auto lg:overflow-x-hidden lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden"
         [attr.aria-label]="'score.tools' | t"
       >
         <!-- Transport -->
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-center justify-between gap-1">
+        <div class="flex flex-col gap-2.5">
+          <div class="flex items-center justify-between gap-2">
             <button type="button" class="btn btn-ghost btn-icon" (click)="store.seekToTick(0)" [attr.aria-label]="'score.toStart' | t" [title]="'score.toStart' | t">
               <app-icon name="skip-back" [size]="17" />
             </button>
@@ -68,9 +72,9 @@
         <span class="hidden h-px bg-line-strong lg:block" aria-hidden="true"></span>
 
         <!-- Note values to drag onto the staff -->
-        <section class="flex flex-col gap-1.5" [attr.aria-label]="'score.palette' | t">
+        <section class="flex flex-col gap-2.5" [attr.aria-label]="'score.palette' | t">
           <h2 class="hidden text-xs font-semibold text-faint lg:block">{{ 'score.palette' | t }}</h2>
-          <div class="grid grid-cols-6 gap-1.5 lg:grid-cols-3" role="group" [attr.aria-label]="'score.palette' | t">
+          <div class="grid grid-cols-6 gap-2 lg:grid-cols-3" role="group" [attr.aria-label]="'score.palette' | t">
             @for (k of palette; track k) {
               <button
                 type="button"
@@ -82,12 +86,12 @@
                 (pointerdown)="startDrag($event, k)"
                 (click)="store.chooseKind(k)"
               >
-                <span class="music pb-1" aria-hidden="true">{{ glyphs[k] }}</span>
+                <span class="music" [style.transform]="'translateY(' + glyphLift[k] + 'px)'" aria-hidden="true">{{ glyphs[k] }}</span>
               </button>
             }
             <button
               type="button"
-              class="btn h-11 w-11 justify-center text-lg lg:w-full"
+              class="btn h-11 w-11 justify-center px-0 text-lg lg:w-full"
               [class]="store.dotted() ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
               [disabled]="!canDot(store.kind())"
               [attr.aria-pressed]="store.dotted()"
@@ -95,16 +99,16 @@
               [title]="'score.dotted' | t"
               (click)="store.toggleDotted()"
             >
-              <span aria-hidden="true">•</span>
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" aria-hidden="true"><circle cx="4" cy="4" r="3" /></svg>
             </button>
           </div>
         </section>
 
         <!-- Tie, sharp and flat -->
-        <div class="grid grid-cols-3 gap-1.5">
+        <div class="grid grid-cols-3 gap-2" role="group" [attr.aria-label]="'score.marks' | t">
           <button
             type="button"
-            class="btn h-11 w-11 justify-center lg:w-full"
+            class="btn h-11 w-11 justify-center px-0 lg:w-full"
             [disabled]="!store.selectedNote()"
             [class]="store.selectedNote()?.note?.tie ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
             [attr.aria-pressed]="!!store.selectedNote()?.note?.tie"
@@ -112,39 +116,79 @@
             [title]="'score.tieHint' | t"
             (click)="store.toggleTieSelected()"
           >
-            <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 3 Q10 14 18 3" /></svg>
+            <svg width="20" height="10" viewBox="0 0 20 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 2 Q10 12 18 2" /></svg>
           </button>
           <button
             type="button"
-            class="btn h-11 w-11 justify-center lg:w-full"
+            class="btn h-11 w-11 justify-center px-0 lg:w-full"
+            [disabled]="!store.selectedNote()"
+            [class]="store.selectedStartsSlur() ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
+            [attr.aria-pressed]="store.selectedStartsSlur()"
+            [attr.aria-label]="'score.slur' | t"
+            [title]="'score.slurHint' | t"
+            (click)="store.toggleSlurSelected()"
+          >
+            <svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="M2 8 C5 -1 17 -1 20 8" />
+              <circle cx="2" cy="11.5" r="1.6" fill="currentColor" stroke="none" />
+              <circle cx="20" cy="11.5" r="1.6" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="btn h-11 w-11 justify-center px-0 lg:w-full"
             [class]="store.accidental() === 'sharp' ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
             [attr.aria-pressed]="store.accidental() === 'sharp'"
             [attr.aria-label]="'score.sharp' | t"
             [title]="'score.sharp' | t"
             (click)="store.toggleAccidental('sharp')"
           >
-            <span class="music text-[26px] leading-none" aria-hidden="true">♯</span>
+            <span class="music text-[26px] leading-none -translate-y-[8px]" aria-hidden="true">♯</span>
           </button>
           <button
             type="button"
-            class="btn h-11 w-11 justify-center lg:w-full"
+            class="btn h-11 w-11 justify-center px-0 lg:w-full"
             [class]="store.accidental() === 'flat' ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
             [attr.aria-pressed]="store.accidental() === 'flat'"
             [attr.aria-label]="'score.flat' | t"
             [title]="'score.flat' | t"
             (click)="store.toggleAccidental('flat')"
           >
-            <span class="music text-[26px] leading-none" aria-hidden="true">♭</span>
+            <span class="music text-[26px] leading-none -translate-y-[8px]" aria-hidden="true">♭</span>
+          </button>
+          <button
+            type="button"
+            class="btn h-11 w-11 touch-none justify-center px-0 lg:w-full"
+            [class]="store.repeatTool() || store.repeatSelected() ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
+            [attr.aria-pressed]="store.repeatTool()"
+            [attr.aria-label]="'score.repeat' | t"
+            [title]="'score.repeatHint' | t"
+            (pointerdown)="startRepeatDrag($event)"
+            (click)="store.toggleRepeatTool()"
+          >
+            <svg width="22" height="18" viewBox="0 0 22 18" fill="currentColor" aria-hidden="true">
+              <circle cx="5.5" cy="6" r="1.7" />
+              <circle cx="5.5" cy="12" r="1.7" />
+              <rect x="10" y="1" width="1.6" height="16" />
+              <rect x="14" y="1" width="3.6" height="16" />
+            </svg>
           </button>
         </div>
 
         <!-- The selected note, or what to do -->
-        <div class="flex min-w-0 flex-1 flex-col gap-2 text-[12.5px] text-muted lg:flex-none">
+        <div class="flex min-w-0 flex-1 flex-col gap-2.5 text-[12.5px] leading-relaxed text-muted lg:flex-none">
           @if (store.selectedNote()) {
             <span class="text-fg">{{ selectedLabel() }}</span>
             <button type="button" class="btn h-8 hover:text-rec-soft" (click)="store.removeSelected()">
               <app-icon name="trash" [size]="14" /> {{ 'score.removeNote' | t }}
             </button>
+          } @else if (store.repeatSelected()) {
+            <span class="text-fg">{{ repeatLabel() }}</span>
+            <button type="button" class="btn h-8 hover:text-rec-soft" (click)="store.removeRepeat()">
+              <app-icon name="trash" [size]="14" /> {{ 'score.removeRepeat' | t }}
+            </button>
+          } @else if (store.repeatTool()) {
+            <span class="leading-snug text-fg">{{ 'score.repeatChosen' | t }}</span>
           } @else {
             <span class="leading-snug">{{ 'score.paletteHint' | t }}</span>
           }
@@ -153,7 +197,7 @@
         <span class="hidden h-px bg-line-strong lg:block" aria-hidden="true"></span>
 
         <!-- Score settings -->
-        <section class="flex flex-row flex-wrap items-center gap-x-4 gap-y-2 text-[12.5px] lg:flex-col lg:items-stretch" [attr.aria-label]="'score.settings' | t">
+        <section class="flex flex-row flex-wrap items-center gap-x-5 gap-y-3 text-[12.5px] lg:flex-col lg:items-stretch lg:gap-y-3.5" [attr.aria-label]="'score.settings' | t">
           <h2 class="hidden text-xs font-semibold text-faint lg:block">{{ 'score.settings' | t }}</h2>
 
           <div class="flex items-center justify-between gap-2">
@@ -203,18 +247,6 @@
               }
             </select>
           </div>
-
-          <button
-            type="button"
-            class="btn h-[34px] justify-start gap-2 px-2.5 text-[12.5px]"
-            [class]="doc.repeat ? 'border-accent/45 bg-accent/15 text-accent-hover' : ''"
-            [attr.aria-pressed]="doc.repeat"
-            [attr.aria-label]="'score.repeat' | t"
-            [title]="'score.repeatHint' | t"
-            (click)="store.toggleRepeat()"
-          >
-            <app-icon name="repeat" [size]="16" /> {{ 'score.repeat' | t }}
-          </button>
 
           <app-rate-select class="w-full justify-between" />
 

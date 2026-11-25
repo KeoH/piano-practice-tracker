@@ -1,11 +1,25 @@
 import { TestBed } from '@angular/core/testing';
 import { mockApi } from '../testing/mock-api';
 import { I18nService } from './i18n/i18n.service';
-import type { ScoreDto } from './models';
+import type { ScoreDto, ScoreSummaryDto } from './models';
 import { PlaybackStore } from './playback.store';
 import { newScore, scoreKey } from './score';
 import { ScoreStore } from './score.store';
 import { ToastService } from './toast.service';
+
+const entry = (id: string, title: string, note_count = 3): ScoreSummaryDto => ({
+  id,
+  title,
+  bpm: 90,
+  beats: 4,
+  beat_unit: 4,
+  bars: 4,
+  note_count,
+  duration_ms: 1000,
+  fragment_id: null,
+  piece_id: null,
+  updated_at: 'now',
+});
 
 const empty = (): ScoreDto => newScore('s1', 'Étude', '2026-01-01T00:00:00Z');
 
@@ -14,14 +28,18 @@ describe('ScoreStore', () => {
   let mock: ReturnType<typeof mockApi>;
   let saved: ScoreDto[];
   let failNextSave = false;
+  let list: ScoreSummaryDto[] = [];
 
   beforeEach(async () => {
     vi.useFakeTimers();
     saved = [];
     failNextSave = false;
+    list = [];
     mock = mockApi({
-      getScores: () => Promise.resolve([]),
-      getScore: () => Promise.resolve(empty()),
+      getScores: () => Promise.resolve(list),
+      getScore: (id: string) => Promise.resolve({ ...empty(), id, title: `Score ${id}` }),
+      pickSavePath: (_t: string, name: string) => Promise.resolve(`/out/${name}`),
+      exportScorePdf: (dest: string) => Promise.resolve(dest),
       createScore: () => Promise.resolve(empty()),
       saveScore: (doc: ScoreDto) => {
         if (failNextSave) {
@@ -399,20 +417,58 @@ describe('ScoreStore', () => {
     expect(store.doc()!.beats).toBe(4); // the half note would end past the only 2/4 bar
   });
 
-  it('closes the score with a repeat sign and takes it away, undoably', () => {
-    expect(store.doc()!.repeat).toBe(false);
-    store.toggleRepeat();
-    expect(store.doc()!.repeat).toBe(true);
+  it('puts the repeat sign at the end of a bar and takes it away, undoably', () => {
+    expect(store.doc()!.repeat_bar).toBeNull();
+    store.setRepeatBar(1);
+    expect(store.doc()!.repeat_bar).toBe(1);
+    store.setRepeatBar(3);
+    expect(store.doc()!.repeat_bar).toBe(3);
+    store.setRepeatBar(null);
+    expect(store.doc()!.repeat_bar).toBeNull();
     store.undo();
-    expect(store.doc()!.repeat).toBe(false);
-    store.redo();
-    expect(store.doc()!.repeat).toBe(true);
+    expect(store.doc()!.repeat_bar).toBe(3);
+    store.undo();
+    expect(store.doc()!.repeat_bar).toBe(1);
+    store.setRepeatBar(9); // there is no such bar
+    expect(store.doc()!.repeat_bar).toBe(1);
+  });
+
+  it('chooses the repeat sign as a tool, puts it, selects it and takes it away', () => {
+    store.placeNote('treble', 0, 0);
+    expect(store.selectedNoteId()).not.toBeNull();
+    store.toggleRepeatTool();
+    expect(store.repeatTool()).toBe(true);
+    expect(store.selectedNoteId()).toBeNull(); // the note is let go
+    store.setRepeatBar(1);
+    expect(store.repeatTool()).toBe(false);
+    expect(store.repeatSelected()).toBe(true);
+    store.selectNote(treble()[0].id);
+    expect(store.repeatSelected()).toBe(false); // one thing is selected at a time
+    store.selectRepeat();
+    expect(store.selectedNoteId()).toBeNull();
+    store.removeSelected(); // takes the sign, not a note
+    expect(store.doc()!.repeat_bar).toBeNull();
+    expect(store.repeatSelected()).toBe(false);
+    expect(treble()).toHaveLength(1);
+    store.selectRepeat(); // there is no sign to select
+    expect(store.repeatSelected()).toBe(false);
+  });
+
+  it('lets go of the sign with Esc and when the undo takes it away', () => {
+    store.setRepeatBar(2);
+    expect(store.repeatSelected()).toBe(true);
+    store.undo();
+    expect(store.repeatSelected()).toBe(false);
+    store.toggleRepeatTool();
+    store.repeatDrag.set(true);
+    store.clearRepeat();
+    expect([store.repeatTool(), store.repeatDrag(), store.repeatSelected()]).toEqual([false, false, false]);
   });
 
   it('saves the repeat sign and shows the second pass over the first', async () => {
-    store.toggleRepeat();
+    store.setRepeatBar(3);
     await vi.advanceTimersByTimeAsync(500);
-    expect(saved[0].repeat).toBe(true);
+    expect(saved[0].repeat_bar).toBe(3);
     store.setBpm(120);
     const playback = TestBed.inject(PlaybackStore);
     // The score is 4 bars of 4/4 = 8 s at 120 BPM; 9 s into the player is 1 s into the repeat.
@@ -436,6 +492,34 @@ describe('ScoreStore', () => {
     expect(saved[0].treble).toHaveLength(2);
     expect(store.doc()!.fragment_id).toBe('frag1');
     expect(store.scores()[0]).toMatchObject({ id: 's1', note_count: 2, fragment_id: 'frag1' });
+  });
+
+  it('keeps the piece of the list entry when an edit is saved', async () => {
+    store.scores.set([{ ...entry('s1', 'Score s1'), piece_id: 'p1' }]);
+    store.placeNote('treble', 0, 0);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(saved).toHaveLength(1);
+    expect(store.scores()[0]).toMatchObject({ id: 's1', piece_id: 'p1' });
+  });
+
+  it('files a score under a piece, and makes a piece from it', async () => {
+    mock.set('assignScorePiece', (scoreId: string, pieceId: string | null) =>
+      Promise.resolve({ ...entry(scoreId, 'x'), piece_id: pieceId }),
+    );
+    mock.set('createPiece', (title: string) => Promise.resolve({ id: 'pNew', title } as never));
+    store.scores.set([entry('s1', 'Etude'), entry('s2', 'Waltz')]);
+
+    await store.assignPiece('s2', 'p1');
+    expect(mock.argsOf('assignScorePiece')).toEqual(['s2', 'p1']);
+    expect(store.scores().map((s) => s.piece_id)).toEqual([null, 'p1']);
+
+    await store.addToRepertoire('s1');
+    expect(mock.argsOf('createPiece')).toEqual(['Etude', '']);
+    expect(mock.argsOf('assignScorePiece')).toEqual(['s1', 'pNew']);
+    expect(store.scores().map((s) => s.piece_id)).toEqual(['pNew', 'p1']);
+
+    await store.assignPiece('s2', null);
+    expect(store.scores().map((s) => s.piece_id)).toEqual(['pNew', null]);
   });
 
   it('keeps edits made while a save is in flight', async () => {
@@ -498,9 +582,146 @@ describe('ScoreStore', () => {
     expect(mock.argsOf('seekMidiPlayback')).toEqual([1000]);
   });
 
+  it('seeks a place after the repeat sign to where it is played in the second pass', async () => {
+    store.setBpm(120);
+    store.setRepeatBar(1); // sign at 4 beats × 2 bars = 8 beats = 3840 ticks
+    const playback = TestBed.inject(PlaybackStore);
+    playback.progress.set({ file_path: scoreKey('s1'), current_ms: 0, duration_ms: 12000, is_playing: true });
+    playback.activeFile.set(scoreKey('s1'));
+    await store.seekToTick(960); // before the sign: where it is
+    expect(mock.argsOf('seekMidiPlayback')).toEqual([1000]);
+    await store.seekToTick(3840 + 960); // bar 3: only in the second pass, after the 4 s of the first and 4 s of the second one
+    expect(mock.argsOf('seekMidiPlayback')).toEqual([9000]);
+  });
+
+  it('slurs the selected note to the next one, or to a note shift-clicked, and takes the slur away', () => {
+    for (let i = 0; i < 4; i++) store.placeNote('treble', i * 480, i);
+    const [a, b, c, d] = treble().map((n) => n.id);
+    store.selectNote(a);
+    store.toggleSlurSelected();
+    expect(store.doc()!.slurs.map((s) => [s.from, s.to])).toEqual([[a, b]]);
+    expect(store.selectedStartsSlur()).toBe(true);
+    store.slurSelectedTo(d);
+    expect(store.doc()!.slurs.map((s) => [s.from, s.to])).toEqual([[a, b], [a, d]]);
+    store.toggleSlurSelected(); // takes away the shortest one that starts at a
+    expect(store.doc()!.slurs.map((s) => [s.from, s.to])).toEqual([[a, d]]);
+    store.slurSelectedTo(d); // the same pair again
+    expect(store.doc()!.slurs).toEqual([]);
+    expect(store.selectedStartsSlur()).toBe(false);
+    store.undo();
+    expect(store.doc()!.slurs).toHaveLength(1);
+    store.selectNote(c);
+    store.slurSelectedTo(c); // not to itself
+    expect(store.doc()!.slurs).toHaveLength(1);
+  });
+
+  it('says so when there is no note to slur to, and drops a slur whose note is removed', () => {
+    store.placeNote('treble', 0, 0);
+    store.placeNote('treble', 480, 1);
+    const [a, b] = treble().map((n) => n.id);
+    store.selectNote(b);
+    store.toggleSlurSelected();
+    expect(store.doc()!.slurs).toEqual([]);
+    expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('no next note');
+    store.selectNote(a);
+    store.toggleSlurSelected();
+    expect(store.doc()!.slurs).toHaveLength(1);
+    store.selectNote(b);
+    store.removeSelected();
+    expect(store.doc()!.slurs).toEqual([]);
+  });
+
+  it('says a slur needs two notes of the same hand when it is asked across hands', () => {
+    store.placeNote('treble', 0, 0);
+    store.placeNote('bass', 480, 0);
+    store.selectNote(treble()[0].id);
+    store.slurSelectedTo(bass()[0].id);
+    expect(store.doc()!.slurs).toEqual([]);
+    expect(TestBed.inject(ToastService).toasts().at(-1)?.message).toContain('same hand');
+  });
+
+  it('saves the slurs with the score', async () => {
+    store.placeNote('treble', 0, 0);
+    store.placeNote('treble', 480, 1);
+    store.selectNote(treble()[0].id);
+    store.toggleSlurSelected();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(saved.at(-1)!.slurs).toHaveLength(1);
+  });
+
   it('plays even an empty score (the play button is what stays disabled)', async () => {
     await store.togglePlay();
     expect(mock.count('playScore')).toBe(1);
+  });
+
+  describe('picking scores for one PDF', () => {
+    beforeEach(async () => {
+      list = [entry('a', 'Alpha'), entry('b', 'Beta'), entry('c', 'Gamma'), entry('e', 'Empty', 0)];
+      await store.refreshList();
+      store.setPicking(true);
+    });
+
+    it('numbers the scores in the order they were picked', () => {
+      store.togglePicked('c');
+      store.togglePicked('a');
+      expect(store.picked().map((s) => s.id)).toEqual(['c', 'a']);
+      expect(store.pickedPosition('c')).toBe(1);
+      expect(store.pickedPosition('a')).toBe(2);
+      expect(store.pickedPosition('b')).toBe(0);
+      store.togglePicked('c');
+      expect(store.picked().map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('ignores a score without notes, and forgets the picks when the mode is left', () => {
+      store.togglePicked('e');
+      expect(store.picked()).toEqual([]);
+      store.togglePicked('a');
+      store.setPicking(false);
+      expect(store.picked()).toEqual([]);
+      store.setPicking(true);
+      expect(store.picked()).toEqual([]);
+    });
+
+    it('drops a picked score that is deleted', async () => {
+      store.togglePicked('a');
+      store.togglePicked('b');
+      list = list.filter((s) => s.id !== 'a');
+      await store.refreshList();
+      expect(store.picked().map((s) => s.id)).toEqual(['b']);
+    });
+
+    it('keeps the picks the search filter hides', () => {
+      store.togglePicked('a');
+      store.filter.set('beta');
+      expect(store.filteredScores().map((s) => s.id)).toEqual(['b']);
+      expect(store.picked().map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('saves the open score first, then writes the picked ones as one PDF in order', async () => {
+      store.placeNote('treble', 0, 0); // an edit still waiting for its save
+      store.togglePicked('b');
+      store.togglePicked('a');
+      expect(saved).toHaveLength(0);
+      const done = store.exportPicked();
+      await vi.advanceTimersByTimeAsync(0);
+      await done;
+      expect(saved).toHaveLength(1);
+      expect(mock.argsOf('pickSavePath')?.[1]).toBe('Scores.pdf');
+      expect(mock.calls.filter((c) => c.cmd === 'getScore').slice(-2).map((c) => c.args[0])).toEqual(['b', 'a']);
+      expect(mock.count('exportScorePdf')).toBe(1);
+    });
+
+    it('does nothing when no score is picked', async () => {
+      await store.exportPicked();
+      expect(mock.count('pickSavePath')).toBe(0);
+    });
+
+    it('is cleared when the vault changes', () => {
+      store.togglePicked('a');
+      store.reset();
+      expect(store.picking()).toBe(false);
+      expect(store.picked()).toEqual([]);
+    });
   });
 
   it('forgets everything when the vault changes', () => {

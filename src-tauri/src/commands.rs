@@ -510,6 +510,61 @@ pub async fn assign_fragment_piece(
     state.vault()?.db.set_fragment_piece(&fragment_id, piece_id.as_deref(), &passage)
 }
 
+/// Files a score of the staff editor under a piece (`piece_id = None` takes it out). It is a link of
+/// its own: `save_score` never writes it.
+#[tauri::command]
+pub async fn assign_score_piece(
+    state: State<'_, AppState>,
+    score_id: String,
+    piece_id: Option<String>,
+) -> Result<ScoreSummaryDto, String> {
+    let piece_id = piece_id.filter(|p| !p.is_empty());
+    state.vault()?.db.set_score_piece(&score_id, piece_id.as_deref())
+}
+
+/// Sets the order of the scores of a piece (`score_ids` is all of them, first to last).
+#[tauri::command]
+pub async fn reorder_piece_scores(
+    state: State<'_, AppState>,
+    piece_id: String,
+    score_ids: Vec<String>,
+) -> Result<Vec<ScoreSummaryDto>, String> {
+    state.vault()?.db.reorder_piece_scores(&piece_id, &score_ids)
+}
+
+#[tauri::command]
+pub async fn get_collections(state: State<'_, AppState>) -> Result<Vec<CollectionDto>, String> {
+    state.vault()?.db.list_collections()
+}
+
+#[tauri::command]
+pub async fn create_collection(state: State<'_, AppState>, name: String) -> Result<CollectionDto, String> {
+    let name = if name.trim().is_empty() { t!("backend.defaults.collectionName") } else { name.trim().to_string() };
+    state.vault()?.db.create_collection(&name)
+}
+
+#[tauri::command]
+pub async fn rename_collection(state: State<'_, AppState>, collection_id: String, name: String) -> Result<CollectionDto, String> {
+    let name = if name.trim().is_empty() { t!("backend.defaults.collectionName") } else { name.trim().to_string() };
+    state.vault()?.db.rename_collection(&collection_id, &name)
+}
+
+/// Deletes the collection; its pieces stay in the repertoire.
+#[tauri::command]
+pub async fn delete_collection(state: State<'_, AppState>, collection_id: String) -> Result<(), String> {
+    state.vault()?.db.delete_collection(&collection_id)
+}
+
+/// Puts the piece in exactly these collections; resolves with every collection as stored.
+#[tauri::command]
+pub async fn set_piece_collections(
+    state: State<'_, AppState>,
+    piece_id: String,
+    collection_ids: Vec<String>,
+) -> Result<Vec<CollectionDto>, String> {
+    state.vault()?.db.set_piece_collections(&piece_id, &collection_ids)
+}
+
 // ---------------------------------------------------------------------------
 // Compositions
 // ---------------------------------------------------------------------------
@@ -612,6 +667,26 @@ pub async fn export_composition_midi(state: State<'_, AppState>, composition_id:
     tauri::async_runtime::spawn_blocking(move || {
         let (tracks, duration_us) = composition::build_named_tracks(&doc)?;
         midi_slicer::write_smf_multitrack(&dest, &tracks, bpm, duration_us)?;
+        Ok(dest.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| t!("backend.internal", e = e))?
+}
+
+/// Writes a score's PDF to `dest_path` (a `.pdf` extension is added if it has none). The frontend draws the PDF,
+/// since the layout of a score lives there, and sends the bytes in base64. Returns the path written.
+#[tauri::command]
+pub async fn export_score_pdf(dest_path: String, data_base64: String) -> Result<String, String> {
+    let dest = with_extension(dest_path, "pdf");
+    tauri::async_runtime::spawn_blocking(move || {
+        let payload = data_base64.split_once(',').map(|(_, b)| b).unwrap_or(&data_base64);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(payload.trim())
+            .map_err(|_| t!("backend.export.pdfInvalid"))?;
+        if !bytes.starts_with(b"%PDF-") {
+            return Err(t!("backend.export.pdfInvalid"));
+        }
+        midi_slicer::atomic_write(&dest, &bytes)?;
         Ok(dest.to_string_lossy().into_owned())
     })
     .await
@@ -1906,6 +1981,30 @@ mod tests {
     }
 
     #[test]
+    fn score_pdf_is_written_with_its_extension_and_only_if_it_is_a_pdf() {
+        let fx = Fixture::new();
+        let pdf = base64::engine::general_purpose::STANDARD.encode(b"%PDF-1.7\n%fake body\n%%EOF");
+
+        let written = block_on(export_score_pdf(fx.path("sheet"), pdf.clone())).unwrap();
+        assert!(written.ends_with("sheet.pdf"));
+        assert_eq!(std::fs::read(&written).unwrap(), b"%PDF-1.7\n%fake body\n%%EOF");
+
+        // An existing extension is kept, a data URL prefix is tolerated, and a second write replaces the file.
+        let again = block_on(export_score_pdf(fx.path("other.PDF"), format!("data:application/pdf;base64,{pdf}"))).unwrap();
+        assert!(again.ends_with("other.PDF"));
+        assert!(block_on(export_score_pdf(written.clone(), pdf)).is_ok());
+
+        // Anything that is not a PDF is refused and nothing is written.
+        let png = base64::engine::general_purpose::STANDARD.encode([0x89, b'P', b'N', b'G']);
+        assert_eq!(block_on(export_score_pdf(fx.path("bad"), png)).unwrap_err(), t!("backend.export.pdfInvalid"));
+        assert!(!Path::new(&fx.path("bad.pdf")).exists());
+        assert!(block_on(export_score_pdf(fx.path("bad2"), "***".into())).is_err());
+        // No temporary file is left behind.
+        let leftovers = std::fs::read_dir(&fx.root).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().contains(".tmp")).count();
+        assert_eq!(leftovers, 0);
+    }
+
+    #[test]
     fn compositions_play_and_export() {
         let fx = Fixture::new();
         let session = fx.session_with_take();
@@ -1951,6 +2050,36 @@ mod tests {
 
     fn score_note(id: &str, tick: u32, key: u8) -> ScoreNoteDto {
         ScoreNoteDto { id: id.into(), tick, duration_ticks: 480, key, accidental: None, tie: false }
+    }
+
+    #[test]
+    fn scores_join_the_repertoire_and_pieces_are_grouped_in_collections() {
+        let fx = Fixture::new();
+        let score = block_on(create_score(fx.state(), "Etude".into())).unwrap();
+        let piece = block_on(create_piece(fx.state(), "Etude".into(), String::new())).unwrap();
+
+        // An empty id takes the score out, like for fragments.
+        let filed = block_on(assign_score_piece(fx.state(), score.id.clone(), Some(piece.id.clone()))).unwrap();
+        assert_eq!(filed.piece_id.as_deref(), Some(piece.id.as_str()));
+        assert_eq!(block_on(get_piece_detail(fx.state(), piece.id.clone())).unwrap().scores.len(), 1);
+        assert_eq!(block_on(get_pieces(fx.state())).unwrap()[0].score_count, 1);
+        assert_eq!(block_on(assign_score_piece(fx.state(), score.id.clone(), Some(String::new()))).unwrap().piece_id, None);
+        assert!(block_on(assign_score_piece(fx.state(), score.id.clone(), Some("nope".into()))).is_err());
+
+        // A blank name gets the default one; a piece can be in several collections.
+        let unnamed = block_on(create_collection(fx.state(), "  ".into())).unwrap();
+        assert_eq!(unnamed.name, t!("backend.defaults.collectionName"));
+        let grade = block_on(create_collection(fx.state(), " Grade 3 ".into())).unwrap();
+        assert_eq!(grade.name, "Grade 3");
+        let all = block_on(set_piece_collections(fx.state(), piece.id.clone(), vec![unnamed.id.clone(), grade.id.clone()])).unwrap();
+        assert!(all.iter().all(|c| c.piece_ids == [piece.id.clone()]));
+        let renamed = block_on(rename_collection(fx.state(), grade.id.clone(), "".into())).unwrap();
+        assert_eq!(renamed.name, t!("backend.defaults.collectionName"));
+
+        // Deleting a collection keeps its pieces.
+        block_on(delete_collection(fx.state(), grade.id)).unwrap();
+        assert_eq!(block_on(get_collections(fx.state())).unwrap().len(), 1);
+        assert_eq!(block_on(get_pieces(fx.state())).unwrap().len(), 1);
     }
 
     #[test]

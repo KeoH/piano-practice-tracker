@@ -32,6 +32,24 @@ export const MAX_STRETCH = 1.6;
 /** Height of a system (the staves and what is around them). */
 export const SYSTEM_H = RULER_H + PAD_V + 4 * LINE_SPACING + STAFF_GAP + 4 * LINE_SPACING + PAD_V;
 
+/** The vertical room of a system: the ruler, the padding for ledger lines and the gap between the staves. */
+export interface LayoutMetrics {
+  rulerH: number;
+  padV: number;
+  staffGap: number;
+}
+
+/** What the editor uses. */
+export const SCREEN_METRICS: LayoutMetrics = { rulerH: RULER_H, padV: PAD_V, staffGap: STAFF_GAP };
+
+/** What the PDF uses: no ruler (the bar numbers are drawn small), and the staves closer, like a printed piano score. */
+export const PRINT_METRICS: LayoutMetrics = { rulerH: 0, padV: 34, staffGap: 54 };
+
+/** Height of a system with these metrics. */
+export function systemHeight(m: LayoutMetrics): number {
+  return m.rulerH + m.padV + 4 * LINE_SPACING + m.staffGap + 4 * LINE_SPACING + m.padV;
+}
+
 export interface StaffBox {
   /** Top and bottom lines. */
   top: number;
@@ -64,6 +82,8 @@ export interface ScoreLayout {
   ppt: number;
   width: number;
   height: number;
+  /** Height of one system. */
+  systemH: number;
   systems: SystemBox[];
 }
 
@@ -71,8 +91,9 @@ export interface ScoreLayout {
  * Lays the bars out in systems of at most `viewWidth` pixels (a system always has at least one bar, so a
  * very wide bar makes the SVG wider than the view). Without a width everything is one system.
  */
-export function layoutOf(s: TimeShape, ppq: number, viewWidth = Number.POSITIVE_INFINITY): ScoreLayout {
+export function layoutOf(s: TimeShape, ppq: number, viewWidth = Number.POSITIVE_INFINITY, metrics: LayoutMetrics = SCREEN_METRICS): ScoreLayout {
   const base = ppq / 480;
+  const systemH = systemHeight(metrics);
   const spans = barSpans(s);
   const systems: SystemBox[] = [];
   let widest = 0;
@@ -90,10 +111,10 @@ export function layoutOf(s: TimeShape, ppq: number, viewWidth = Number.POSITIVE_
     const isLast = j >= spans.length;
     let ppt = base;
     if (!isLast && Number.isFinite(viewWidth)) ppt = Math.min(base * MAX_STRETCH, Math.max(base, (viewWidth - x0 - END_PAD) / ticks));
-    const top = index * SYSTEM_H;
-    const trebleTop = top + RULER_H + PAD_V;
+    const top = index * systemH;
+    const trebleTop = top + metrics.rulerH + metrics.padV;
     const trebleBottom = trebleTop + 4 * LINE_SPACING;
-    const bassTop = trebleBottom + STAFF_GAP;
+    const bassTop = trebleBottom + metrics.staffGap;
     systems.push({
       index,
       firstBar: i,
@@ -114,7 +135,8 @@ export function layoutOf(s: TimeShape, ppq: number, viewWidth = Number.POSITIVE_
     ppq,
     ppt: base,
     width: Number.isFinite(viewWidth) ? Math.max(viewWidth, widest) : widest,
-    height: systems.length * SYSTEM_H,
+    height: systems.length * systemH,
+    systemH,
     systems,
   };
 }
@@ -151,7 +173,7 @@ export interface Hit {
 /** The system a y is in, or `null` outside the SVG. */
 function systemAtY(l: ScoreLayout, y: number): SystemBox | null {
   if (y < 0 || y >= l.height) return null;
-  return l.systems[Math.min(l.systems.length - 1, Math.floor(y / SYSTEM_H))] ?? null;
+  return l.systems[Math.min(l.systems.length - 1, Math.floor(y / l.systemH))] ?? null;
 }
 
 /** The staff, step and tick at a point of the SVG; `null` over a ruler, the clefs or past the last bar of a line. */
@@ -165,6 +187,31 @@ export function hitAt(l: ScoreLayout, x: number, y: number): Hit | null {
     tick: sys.startTick + (x - sys.x0 - NOTE_X) / sys.ppt,
     system: sys.index,
   };
+}
+
+/** A bar line: the end of bar `bar`, and where it is drawn. */
+export interface BarLineHit {
+  bar: number;
+  tick: number;
+  x: number;
+  system: number;
+}
+
+/**
+ * The end of the bar closest to a point of the SVG (a repeat sign snaps to bar lines), among the bars of the
+ * system the point is in. `null` outside the systems or past the clefs on the left.
+ */
+export function barLineAt(l: ScoreLayout, s: TimeShape, x: number, y: number): BarLineHit | null {
+  const sys = systemAtY(l, y);
+  if (!sys || x < sys.x0 - 12 || x > sys.right + 24) return null;
+  const tick = sys.startTick + (x - sys.x0) / sys.ppt;
+  let best: BarLineHit | null = null;
+  for (const span of barSpans(s).slice(sys.firstBar, sys.lastBar + 1)) {
+    if (!best || Math.abs(span.end - tick) < Math.abs(best.tick - tick)) {
+      best = { bar: span.index, tick: span.end, x: sys.x0 + (span.end - sys.startTick) * sys.ppt, system: sys.index };
+    }
+  }
+  return best;
 }
 
 /** Whether a point is on the ruler of a system (the seek strip). */

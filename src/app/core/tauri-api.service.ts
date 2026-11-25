@@ -27,6 +27,7 @@ import {
   type MidiActivityDto,
   type MidiNotesDto,
   type MidiPortInfo,
+  type CollectionDto,
   type PieceDetailDto,
   type PieceDto,
   type PieceSummaryDto,
@@ -268,6 +269,39 @@ export class TauriApiService {
     return this.call('set_composition_mix', { compositionId, mix });
   }
 
+  /** Files a score of the staff editor under a piece (`null` takes it out). */
+  assignScorePiece(scoreId: string, pieceId: string | null): Promise<ScoreSummaryDto> {
+    return this.call('assign_score_piece', { scoreId, pieceId });
+  }
+
+  /** Sets the order of the scores of a piece (all of them, first to last); resolves with them in that order. */
+  reorderPieceScores(pieceId: string, scoreIds: string[]): Promise<ScoreSummaryDto[]> {
+    return this.call('reorder_piece_scores', { pieceId, scoreIds });
+  }
+
+  // ---- Collections of pieces ----
+  getCollections(): Promise<CollectionDto[]> {
+    return this.call('get_collections');
+  }
+
+  createCollection(name: string): Promise<CollectionDto> {
+    return this.call('create_collection', { name });
+  }
+
+  renameCollection(collectionId: string, name: string): Promise<CollectionDto> {
+    return this.call('rename_collection', { collectionId, name });
+  }
+
+  /** Deletes the collection only: its pieces stay in the repertoire. */
+  deleteCollection(collectionId: string): Promise<void> {
+    return this.call('delete_collection', { collectionId });
+  }
+
+  /** Puts the piece in exactly these collections; resolves with every collection as stored. */
+  setPieceCollections(pieceId: string, collectionIds: string[]): Promise<CollectionDto[]> {
+    return this.call('set_piece_collections', { pieceId, collectionIds });
+  }
+
   // ---- Scores (the staff editor) ----
   getScores(): Promise<ScoreSummaryDto[]> {
     return this.call('get_scores');
@@ -478,6 +512,11 @@ export class TauriApiService {
   /** Writes a composition as a multitrack MIDI file; resolves with the path written. */
   exportCompositionMidi(compositionId: string, destPath: string): Promise<string> {
     return this.call('export_composition_midi', { compositionId, destPath });
+  }
+
+  /** Writes the bytes of a score's PDF (in base64) to `destPath`; resolves with the path written. */
+  exportScorePdf(destPath: string, dataBase64: string): Promise<string> {
+    return this.call('export_score_pdf', { destPath, dataBase64 });
   }
 
   /** Native "save as" dialog for a WAV file; returns null if cancelled. */

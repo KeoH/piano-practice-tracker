@@ -201,6 +201,8 @@ pub struct PieceSummaryDto {
     pub last_practiced: Option<String>,
     /// Passages already used in the piece's takes (sorted, without the empty one).
     pub passages: Vec<String>,
+    /// Scores of the staff editor filed under the piece.
+    pub score_count: u32,
 }
 
 /// A fragment filed under a piece, with the session it comes from.
@@ -216,6 +218,19 @@ pub struct PieceDetailDto {
     pub piece: PieceDto,
     /// Sorted by passage and then chronologically.
     pub takes: Vec<PieceTakeDto>,
+    /// Scores filed under the piece (the sheet music of it), by title. They are not takes.
+    pub scores: Vec<ScoreSummaryDto>,
+}
+
+/// A named group of pieces of the repertoire ("Grade 3", "Christmas"). A piece can be in several.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CollectionDto {
+    pub id: String,
+    pub name: String,
+    /// The pieces in it (active and archived).
+    pub piece_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// A composition in the list of the composer.
@@ -274,6 +289,14 @@ pub struct ScoreNoteDto {
     pub tie: bool,
 }
 
+/// A slur over the notes of one staff, from the note `from` to the note `to` (which starts later).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoreSlurDto {
+    pub id: String,
+    pub from: String,
+    pub to: String,
+}
+
 /// A piece written on a grand staff: treble clef (right hand) and bass clef (left hand).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScoreDto {
@@ -288,11 +311,15 @@ pub struct ScoreDto {
     /// Length of a shorter first bar (a pickup or anacrusis) in ticks; 0 = the first bar is whole.
     #[serde(default)]
     pub pickup_ticks: u32,
-    /// A repeat sign closes the score: it is played twice, going back to the start.
+    /// Index of the bar that ends with a repeat sign (0 is the first bar, the pickup bar if there is one):
+    /// after it the score goes back to the start and plays through again. `None` = no repeat.
     #[serde(default)]
-    pub repeat: bool,
+    pub repeat_bar: Option<u32>,
     pub treble: Vec<ScoreNoteDto>,
     pub bass: Vec<ScoreNoteDto>,
+    /// Slurs (phrasing curves). Notation only: they do not change what is played.
+    #[serde(default)]
+    pub slurs: Vec<ScoreSlurDto>,
     /// The library fragment generated from the score (`None` until it is first saved).
     pub fragment_id: Option<String>,
     pub created_at: String,
@@ -311,6 +338,10 @@ pub struct ScoreSummaryDto {
     pub note_count: u32,
     pub duration_ms: u64,
     pub fragment_id: Option<String>,
+    /// The piece of the repertoire it is filed under. It lives outside `ScoreDto` on purpose: the
+    /// editor saves the whole score, and a stale copy must not undo what the repertoire set.
+    #[serde(default)]
+    pub piece_id: Option<String>,
     pub updated_at: String,
 }
 

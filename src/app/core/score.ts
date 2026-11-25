@@ -1,4 +1,4 @@
-import type { Accidental, ScoreDto, ScoreNoteDto, ScoreSummaryDto } from './models';
+import type { Accidental, ScoreDto, ScoreNoteDto, ScoreSlurDto, ScoreSummaryDto } from './models';
 import type { NoteKind } from './music';
 
 /*
@@ -13,6 +13,10 @@ import type { NoteKind } from './music';
  * - The first bar can be shorter (a **pickup**, or anacrusis): it lasts `pickup_ticks` and is the end of
  *   a bar, so the beats still fall where they would in a whole one (`missingTicks`). The score then ends
  *   with a **closing bar** of what the pickup lacks, so the two together make one whole bar.
+ * - A bar can end with a **repeat sign** (`repeat_bar`, a bar index): the score goes back to the start and is
+ *   played through again, so the bars up to the sign sound twice.
+ * - A **slur** (`slurs`) is a curve from one note to a later one of the same staff. It is notation only: it
+ *   never changes what is played.
  * - A note is its sounding MIDI `key`; `accidental` only spells a black key (C♯ or D♭). The staff draws
  *   it, and a natural sign when a plain note follows an altered one on its line or space in the bar.
  * - Every function returns a new score, or `null` when the change is not allowed.
@@ -188,19 +192,32 @@ export function msToTicks(ms: number, bpm: number): number {
   return Math.round((ms * TICKS_PER_QUARTER * bpm) / 60_000);
 }
 
-/** Length of what is played: the score once, or twice when it ends with a repeat sign. */
-export function playTicks(s: TimeShape & { repeat?: boolean }): number {
-  return scoreTicks(s) * (s.repeat ? 2 : 1);
+/** Tick where the repeat sign is (the end of its bar), or `null` if the score has none. */
+export function repeatTick(s: TimeShape & { repeat_bar?: number | null }): number | null {
+  const bar = s.repeat_bar;
+  if (bar === null || bar === undefined || !Number.isInteger(bar) || bar < 0 || bar >= s.bars) return null;
+  return barSpan(s, bar).end;
+}
+
+/** Length of what is played: the score once, plus the part up to the repeat sign when there is one. */
+export function playTicks(s: TimeShape & { repeat_bar?: number | null }): number {
+  return scoreTicks(s) + (repeatTick(s) ?? 0);
 }
 
 export function scoreDurationMs(s: ScoreDto): number {
   return Math.round(ticksToMs(playTicks(s), s.bpm));
 }
 
-/** Where the playhead is on the page when the player is at `ticks`: the second pass of a repeat starts over. */
+/** Where the playhead is on the page when the player is at `ticks`: after the repeat sign the score starts over. */
 export function pageTick(s: ScoreDto, ticks: number): number {
-  const total = scoreTicks(s);
-  return s.repeat && total > 0 && ticks >= total ? ticks % total : ticks;
+  const at = repeatTick(s);
+  return at !== null && ticks >= at ? ticks - at : ticks;
+}
+
+/** The inverse of `pageTick` for a place on the page: the bars after the repeat sign are only played in the second pass. */
+export function performedTick(s: ScoreDto, tick: number): number {
+  const at = repeatTick(s);
+  return at !== null && tick >= at ? tick + at : tick;
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -345,9 +362,10 @@ export function newScore(id: string, title: string, now: string): ScoreDto {
     beat_unit: 4,
     bars: DEFAULT_BARS,
     pickup_ticks: 0,
-    repeat: false,
+    repeat_bar: null,
     treble: [],
     bass: [],
+    slurs: [],
     fragment_id: null,
     created_at: now,
     updated_at: now,
@@ -406,10 +424,12 @@ export function place(s: ScoreDto, staff: StaffName, note: ScoreNoteDto): ScoreD
 export function removeNote(s: ScoreDto, id: string): ScoreDto | null {
   const ref = findNote(s, id);
   if (!ref) return null;
-  return withStaff(
-    s,
-    ref.staff,
-    staffNotes(s, ref.staff).filter((n) => n.id !== id),
+  return pruneSlurs(
+    withStaff(
+      s,
+      ref.staff,
+      staffNotes(s, ref.staff).filter((n) => n.id !== id),
+    ),
   );
 }
 
@@ -430,8 +450,8 @@ export function moveNote(s: ScoreDto, id: string, change: NoteMove): ScoreDto | 
   if (!validKey(key) || !canPlace(s, target, tick, ref.note.duration_ticks, id, key)) return null;
   const accidental = normalizeAccidental(key, change.pitch ? change.pitch.accidental : ref.note.accidental);
   const moved: ScoreNoteDto = { ...ref.note, tick, key, accidental };
-  const without = removeNote(s, id) as ScoreDto;
-  return withStaff(without, target, [...staffNotes(without, target), moved]);
+  const without = withStaff(s, ref.staff, staffNotes(s, ref.staff).filter((n) => n.id !== id));
+  return pruneSlurs(withStaff(without, target, [...staffNotes(without, target), moved]));
 }
 
 /** The notes of the chord `n` belongs to (itself if it is alone). */
@@ -498,6 +518,93 @@ export function toggleTie(s: ScoreDto, id: string, newId: string): ScoreDto | nu
   return withStaff(s, ref.staff, [...marked, next]);
 }
 
+// ----------------------------------------------------------------------------------------------
+// Slurs
+// ----------------------------------------------------------------------------------------------
+
+/** Whether a slur joins two notes of the same staff, the first one before the second. */
+function slurHolds(s: ScoreDto, slur: ScoreSlurDto): boolean {
+  const a = findNote(s, slur.from);
+  const b = findNote(s, slur.to);
+  return !!a && !!b && a.staff === b.staff && a.note.tick < b.note.tick;
+}
+
+/** The score without the slurs that no longer hold (a note went, changed hand or moved before the other). */
+function pruneSlurs(s: ScoreDto): ScoreDto {
+  const slurs = s.slurs.filter((sl) => slurHolds(s, sl));
+  return slurs.length === s.slurs.length ? s : { ...s, slurs };
+}
+
+/** Every slur of a staff as a pair of notes, in order of start. */
+export function slurLinks(s: ScoreDto, staff: StaffName): { slur: ScoreSlurDto; from: ScoreNoteDto; to: ScoreNoteDto }[] {
+  const notes = staffNotes(s, staff);
+  const out: { slur: ScoreSlurDto; from: ScoreNoteDto; to: ScoreNoteDto }[] = [];
+  for (const slur of s.slurs) {
+    const from = notes.find((n) => n.id === slur.from);
+    const to = notes.find((n) => n.id === slur.to);
+    if (from && to && from.tick < to.tick) out.push({ slur, from, to });
+  }
+  return out.sort((a, b) => a.from.tick - b.from.tick || b.to.tick - a.to.tick);
+}
+
+/**
+ * Slurs the note `a` to the note `b` (in either order), or takes that slur away if it is there. `null`
+ * if they are not two different notes of the same staff that start at different ticks.
+ */
+export function toggleSlur(s: ScoreDto, a: string, b: string, newId: string): ScoreDto | null {
+  const ra = findNote(s, a);
+  const rb = findNote(s, b);
+  if (!ra || !rb || ra.staff !== rb.staff || ra.note.tick === rb.note.tick) return null;
+  const [from, to] = ra.note.tick < rb.note.tick ? [ra.note, rb.note] : [rb.note, ra.note];
+  const same = s.slurs.filter((sl) => sl.from === from.id && sl.to === to.id);
+  if (same.length) return { ...s, slurs: s.slurs.filter((sl) => !same.includes(sl)) };
+  return { ...s, slurs: [...s.slurs, { id: newId, from: from.id, to: to.id }] };
+}
+
+/**
+ * The note a slur from `id` goes to by default: one of the next onset on the same staff, the one
+ * closest in pitch. `null` if nothing follows.
+ */
+export function nextSlurTarget(s: ScoreDto, id: string): ScoreNoteDto | null {
+  const ref = findNote(s, id);
+  if (!ref) return null;
+  const later = staffNotes(s, ref.staff).filter((n) => n.tick > ref.note.tick);
+  if (!later.length) return null;
+  const tick = Math.min(...later.map((n) => n.tick));
+  return later.filter((n) => n.tick === tick).sort((a, b) => Math.abs(a.key - ref.note.key) - Math.abs(b.key - ref.note.key))[0];
+}
+
+/**
+ * The slur key: removes the shortest slur that starts at the note, or, if there is none, slurs the note to
+ * the next one (see `nextSlurTarget`). `null` if there is nothing to do.
+ */
+export function toggleSlurFrom(s: ScoreDto, id: string, newId: string): ScoreDto | null {
+  const ref = findNote(s, id);
+  if (!ref) return null;
+  const starts = slurLinks(s, ref.staff).filter((l) => l.from.id === id);
+  if (starts.length) {
+    const shortest = starts[starts.length - 1].slur; // sorted longest first among equal starts
+    return { ...s, slurs: s.slurs.filter((sl) => sl !== shortest) };
+  }
+  const to = nextSlurTarget(s, id);
+  return to ? toggleSlur(s, id, to.id, newId) : null;
+}
+
+// ----------------------------------------------------------------------------------------------
+// Structure
+// ----------------------------------------------------------------------------------------------
+
+/** Puts the repeat sign at the end of bar `bar` (0 is the first one), or takes it away with `null`. */
+export function setRepeatBar(s: ScoreDto, bar: number | null): ScoreDto | null {
+  if (bar !== null && (!Number.isInteger(bar) || bar < 0 || bar >= s.bars)) return null;
+  return bar === s.repeat_bar ? s : { ...s, repeat_bar: bar };
+}
+
+/** Keeps the repeat sign on a bar of the score after the bars changed. */
+function clampRepeat(s: ScoreDto): ScoreDto {
+  return s.repeat_bar !== null && s.repeat_bar >= s.bars ? { ...s, repeat_bar: s.bars - 1 } : s;
+}
+
 /** Whether every note is inside the score and inside one bar (checked when the bars change shape). */
 function fitsStructure(s: ScoreDto): boolean {
   const total = scoreTicks(s);
@@ -506,28 +613,24 @@ function fitsStructure(s: ScoreDto): boolean {
   );
 }
 
-/** Closes the score with a repeat sign (it is played twice) or takes it away. */
-export function toggleRepeat(s: ScoreDto): ScoreDto {
-  return { ...s, repeat: !s.repeat };
-}
-
 /** Changes the number of bars; it cannot cut a note off, nor take the closing bar from a pickup. */
 export function resizeBars(s: ScoreDto, bars: number): ScoreDto | null {
   const n = Math.round(bars);
   if (n < minBars(s) || n > MAX_BARS) return null;
-  const next = { ...s, bars: n };
+  const next = clampRepeat({ ...s, bars: n });
   return fitsStructure(next) ? next : null;
 }
 
 /** Changes the time signature, keeping the number of bars; `null` if a note would cross a bar line. A pickup that no longer fits in a bar is dropped. */
 export function setTimeSignature(s: ScoreDto, beats: number, beatUnit: number): ScoreDto | null {
   if (!isTimeSignature(beats, beatUnit)) return null;
-  const next = { ...s, beats, beat_unit: beatUnit };
+  let next = { ...s, beats, beat_unit: beatUnit };
   if (next.pickup_ticks >= barTicks(next)) {
     // The pickup no longer fits in a bar: it goes, and so does the closing bar that completed it.
     next.pickup_ticks = 0;
     next.bars = Math.max(1, next.bars - 1);
   }
+  next = clampRepeat(next);
   return fitsStructure(next) ? next : null;
 }
 
@@ -550,7 +653,9 @@ export function setPickup(s: ScoreDto, ticks: number): ScoreDto | null {
   const had = (s.pickup_ticks ?? 0) > 0;
   const bars = ticks > 0 && !had ? s.bars + 1 : ticks === 0 && had ? Math.max(1, s.bars - 1) : s.bars;
   if (bars > MAX_BARS) return null;
-  const next = { ...s, pickup_ticks: ticks, bars };
+  // A sign on the last bar stays at the end of the score when the closing bar comes or goes.
+  const repeat_bar = s.repeat_bar === s.bars - 1 ? bars - 1 : s.repeat_bar;
+  const next = clampRepeat({ ...s, pickup_ticks: ticks, bars, repeat_bar });
   return fitsStructure(next) ? next : null;
 }
 
@@ -618,7 +723,9 @@ export type ScoreIssueCode =
   | 'tick'
   | 'crossesBar'
   | 'overlap'
-  | 'tie';
+  | 'tie'
+  | 'repeat'
+  | 'slur';
 
 export interface ScoreIssue {
   code: ScoreIssueCode;
@@ -668,6 +775,12 @@ export function validateScore(s: ScoreDto): ScoreIssue[] {
       prevEnd = Math.max(prevEnd, noteEnd(n));
     }
   }
+  if (s.repeat_bar !== null && (!Number.isInteger(s.repeat_bar) || s.repeat_bar < 0 || s.repeat_bar >= s.bars)) issues.push({ code: 'repeat' });
+  const slurIds = new Set<string>();
+  for (const slur of s.slurs) {
+    if (!slurHolds(s, slur) || slurIds.has(slur.id)) issues.push({ code: 'slur' });
+    slurIds.add(slur.id);
+  }
   return issues;
 }
 
@@ -687,8 +800,11 @@ export function parseScoreKey(key: string | null | undefined): string | null {
   return key?.startsWith(SCORE_KEY_PREFIX) ? key.slice(SCORE_KEY_PREFIX.length) : null;
 }
 
-/** The entry of the list of scores for `s` (what the backend sends for each stored score). */
-export function summarizeScore(s: ScoreDto): ScoreSummaryDto {
+/**
+ * The entry of the list of scores for `s` (what the backend sends for each stored score). The piece
+ * is not part of the score, so whoever replaces an entry passes the one it had.
+ */
+export function summarizeScore(s: ScoreDto, pieceId: string | null = null): ScoreSummaryDto {
   return {
     id: s.id,
     title: s.title,
@@ -699,6 +815,7 @@ export function summarizeScore(s: ScoreDto): ScoreSummaryDto {
     note_count: noteCount(s),
     duration_ms: scoreDurationMs(s),
     fragment_id: s.fragment_id,
+    piece_id: pieceId,
     updated_at: s.updated_at,
   };
 }

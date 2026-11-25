@@ -113,4 +113,144 @@ describe('PieceStore', () => {
     expect(store.detail()).toBeNull();
     expect(store.selectedId()).toBeNull();
   });
+
+  describe('collections', () => {
+    const coll = (id: string, name: string, piece_ids: string[]) => ({ id, name, piece_ids, created_at: '', updated_at: '' });
+
+    beforeEach(async () => {
+      mock.set('getCollections', () => Promise.resolve([coll('c1', 'Christmas', ['p1']), coll('c2', 'Grade 3', ['p1', 'p2'])]));
+      await store.refreshList();
+    });
+
+    it('narrows the list to a collection and falls back to everything when it is gone', () => {
+      store.collectionFilter.set('c1');
+      expect(store.filteredPieces().map((p) => p.piece.id)).toEqual(['p1']);
+      store.filter.set('satie');
+      expect(store.filteredPieces()).toEqual([]);
+      store.filter.set('');
+      store.collectionFilter.set('deleted');
+      expect(store.activeCollection()).toBeNull();
+      expect(store.filteredPieces().length).toBe(2);
+    });
+
+    it('knows the collections of the selected piece', async () => {
+      await store.select('p2');
+      expect(store.selectedCollectionIds()).toEqual(['c2']);
+    });
+
+    it('puts a piece in a collection and takes it out, sending the whole list each time', async () => {
+      mock.set('setPieceCollections', (pieceId: string, ids: string[]) =>
+        Promise.resolve([coll('c1', 'Christmas', ids.includes('c1') ? [pieceId] : []), coll('c2', 'Grade 3', ids.includes('c2') ? [pieceId] : [])]),
+      );
+      await store.toggleInCollection('p2', 'c1');
+      expect(mock.argsOf('setPieceCollections')).toEqual(['p2', ['c2', 'c1']]);
+      await store.toggleInCollection('p2', 'c1');
+      expect(mock.argsOf('setPieceCollections')).toEqual(['p2', ['c2']]);
+      expect(store.collections()[0].piece_ids).toEqual([]);
+    });
+
+    it('creates a collection, optionally with the piece in it, and keeps them by name', async () => {
+      mock.set('createCollection', (name: string) => Promise.resolve(coll('c3', name, [])));
+      await store.createCollection('  Advent ');
+      expect(mock.argsOf('createCollection')).toEqual(['Advent']);
+      expect(store.collections().map((c) => c.name)).toEqual(['Advent', 'Christmas', 'Grade 3']);
+
+      mock.set('setPieceCollections', () => Promise.resolve([coll('c3', 'Recital', ['p2'])]));
+      await store.createCollection('Recital', 'p2');
+      expect(mock.argsOf('setPieceCollections')).toEqual(['p2', ['c2', 'c3']]);
+      expect(store.collections()).toEqual([coll('c3', 'Recital', ['p2'])]);
+
+      mock.set('createCollection', () => Promise.reject('boom'));
+      expect(await store.createCollection('x')).toBeNull();
+    });
+
+    it('renames and deletes, dropping the filter of a deleted collection', async () => {
+      mock.set('renameCollection', (id: string, name: string) => Promise.resolve(coll(id, name, ['p1'])));
+      await store.renameCollection('c1', ' Xmas ');
+      expect(store.collections().map((c) => c.name)).toEqual(['Grade 3', 'Xmas']);
+      store.collectionFilter.set('c1');
+      expect(await store.removeCollection('c1')).toBe(true);
+      expect(store.collectionFilter()).toBeNull();
+      expect(store.collections().map((c) => c.id)).toEqual(['c2']);
+    });
+
+    it('reloads when a change is rejected', async () => {
+      mock.set('setPieceCollections', () => Promise.reject('nope'));
+      const before = mock.count('getCollections');
+      await store.toggleInCollection('p1', 'c2');
+      await Promise.resolve();
+      expect(mock.count('getCollections')).toBeGreaterThan(before);
+      expect(TestBed.inject(ToastService).toasts().length).toBe(1);
+    });
+  });
+
+  describe('scores', () => {
+    it('files a score and refreshes the list and the open piece', async () => {
+      mock.set('assignScorePiece', (scoreId: string, pieceId: string | null) =>
+        Promise.resolve({ id: scoreId, piece_id: pieceId } as never),
+      );
+      await store.select('p1');
+      const lists = mock.count('getPieces');
+      const details = mock.count('getPieceDetail');
+      const updated = await store.assignScore('s1', 'p1');
+      expect(mock.argsOf('assignScorePiece')).toEqual(['s1', 'p1']);
+      expect(updated?.piece_id).toBe('p1');
+      expect(mock.count('getPieces')).toBe(lists + 1);
+      await Promise.resolve();
+      expect(mock.count('getPieceDetail')).toBe(details + 1);
+    });
+
+    describe('order', () => {
+      const entry = (id: string) => ({ id, title: id, piece_id: 'p1' }) as never;
+
+      beforeEach(async () => {
+        mock.set('getPieceDetail', (id: string) =>
+          Promise.resolve(pieceDetail({ piece: piece({ id }), scores: [entry('a'), entry('b'), entry('c')] })),
+        );
+        await store.select('p1');
+      });
+
+      const ids = () => store.detail()!.scores.map((s) => s.id);
+
+      it('moves a score one place, at once, and keeps what the backend stores', async () => {
+        mock.set('reorderPieceScores', (_id: string, order: string[]) => Promise.resolve(order.map(entry)));
+        const pending = store.moveScore('c', -1);
+        expect(ids()).toEqual(['a', 'c', 'b']);
+        await pending;
+        expect(mock.argsOf('reorderPieceScores')).toEqual(['p1', ['a', 'c', 'b']]);
+        await store.moveScore('a', 1);
+        expect(ids()).toEqual(['c', 'a', 'b']);
+      });
+
+      it('does nothing at the ends of the list', async () => {
+        await store.moveScore('a', -1);
+        await store.moveScore('c', 1);
+        await store.moveScore('zzz', 1);
+        expect(mock.count('reorderPieceScores')).toBe(0);
+        expect(ids()).toEqual(['a', 'b', 'c']);
+      });
+
+      it('reloads the stored order when it is refused', async () => {
+        mock.set('reorderPieceScores', () => Promise.reject('stale'));
+        const loads = mock.count('getPieceDetail');
+        await store.moveScore('b', -1);
+        await Promise.resolve();
+        expect(mock.count('getPieceDetail')).toBe(loads + 1);
+        expect(TestBed.inject(ToastService).toasts().at(-1)?.kind).toBe('error');
+      });
+    });
+
+    it('makes a piece from a score in one step', async () => {
+      mock.set('assignScorePiece', (scoreId: string, pieceId: string | null) =>
+        Promise.resolve({ id: scoreId, piece_id: pieceId } as never),
+      );
+      const created = await store.createFromScore('s1', 'My etude');
+      expect(created?.id).toBe('p3');
+      expect(mock.argsOf('createPiece')).toEqual(['My etude', '']);
+      expect(mock.argsOf('assignScorePiece')).toEqual(['s1', 'p3']);
+
+      mock.set('assignScorePiece', () => Promise.reject('no'));
+      expect(await store.createFromScore('s1', 'x')).toBeNull();
+    });
+  });
 });

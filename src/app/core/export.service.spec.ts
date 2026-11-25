@@ -1,7 +1,8 @@
 import { TestBed } from '@angular/core/testing';
 import { mockApi } from '../testing/mock-api';
-import { ExportService, exportFileName, wavFileName } from './export.service';
+import { ExportService, SCORES_PDF_KEY, piecePdfKey, bytesToBase64, exportFileName, scorePdfKey, wavFileName } from './export.service';
 import { I18nService } from './i18n/i18n.service';
+import { newScore } from './score';
 import { ToastService } from './toast.service';
 
 describe('wavFileName', () => {
@@ -31,6 +32,8 @@ describe('ExportService', () => {
       exportAudio: (_file: string, dest: string) => Promise.resolve(dest),
       exportCompositionAudio: (_id: string, dest: string) => Promise.resolve(dest),
       exportCompositionMidi: (_id: string, dest: string) => Promise.resolve(dest),
+      exportScorePdf: (dest: string) => Promise.resolve(dest),
+      getScore: (id: string) => Promise.resolve({ ...newScore(id, `Score ${id}`, '2026-01-01') }),
       ...overrides,
     });
     TestBed.configureTestingModule({ providers: [mock.provider] });
@@ -82,5 +85,108 @@ describe('ExportService', () => {
     await exports.exportComposition('c1', 'X', 'mid');
     expect(toast.toasts().map((t) => t.kind)).toEqual(['error', 'error']);
     expect(toast.toasts().at(-1)?.message).toContain('empty composition');
+  });
+
+  describe('scores as PDF', () => {
+    const score = { ...newScore('sc1', 'Gymnopédie / No. 1', '2026-01-01'), treble: [{ id: 'a', tick: 0, duration_ticks: 480, key: 72, accidental: null, tie: false }] };
+
+    it('asks for a .pdf, draws the score and sends the PDF to the backend', async () => {
+      const { mock, exports, toast } = setup();
+      await exports.exportScore(score);
+      expect(mock.argsOf('pickSavePath')?.[1]).toBe('Gymnopédie No. 1.pdf');
+      expect(mock.argsOf('pickSavePath')?.[2]).toEqual({ name: 'PDF', extensions: ['pdf'] });
+      const [dest, data] = mock.argsOf('exportScorePdf') as [string, string];
+      expect(dest).toBe('/out/Gymnopédie No. 1.pdf');
+      expect(atob(data).startsWith('%PDF-')).toBe(true);
+      expect(toast.toasts().at(-1)?.kind).toBe('success');
+      expect(toast.toasts().at(-1)?.message).toContain('/out/Gymnopédie No. 1.pdf');
+      expect(exports.isBusy(scorePdfKey('sc1'))).toBe(false);
+    });
+
+    it('draws nothing and writes nothing when the dialog is cancelled', async () => {
+      const { mock, exports } = setup({ pickSavePath: () => Promise.resolve(null) });
+      await exports.exportScore(score);
+      expect(mock.count('exportScorePdf')).toBe(0);
+    });
+
+    it('is busy while it works and ignores a second click', async () => {
+      let finish!: (path: string) => void;
+      const { mock, exports } = setup({ exportScorePdf: () => new Promise((r) => (finish = r)) });
+      const first = exports.exportScore(score);
+      await vi.waitFor(() => expect(exports.isBusy(scorePdfKey('sc1'))).toBe(true));
+      await exports.exportScore(score);
+      expect(mock.count('pickSavePath')).toBe(1);
+      finish('/out/x.pdf');
+      await first;
+      expect(exports.isBusy(scorePdfKey('sc1'))).toBe(false);
+    });
+
+    it('writes several scores as one PDF named after the collection', async () => {
+      const { mock, exports, toast } = setup();
+      await exports.exportScores([{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }]);
+      expect(mock.argsOf('pickSavePath')?.[1]).toBe('Scores.pdf');
+      expect(mock.count('getScore')).toBe(2);
+      expect(mock.count('exportScorePdf')).toBe(1);
+      const [dest, data] = mock.argsOf('exportScorePdf') as [string, string];
+      expect(dest).toBe('/out/Scores.pdf');
+      expect(atob(data).startsWith('%PDF-')).toBe(true);
+      expect(toast.toasts().at(-1)?.message).toContain('/out/Scores.pdf');
+      expect(exports.isBusy(SCORES_PDF_KEY)).toBe(false);
+    });
+
+    it('names the file after the score when only one is chosen', async () => {
+      const one = setup();
+      await one.exports.exportScores([{ id: 'x', title: 'Étude 1' }]);
+      expect(one.mock.argsOf('pickSavePath')?.[1]).toBe('Étude 1.pdf');
+    });
+
+    it('does not read the scores when the dialog is cancelled, and reports a score that cannot be read', async () => {
+      const cancelled = setup({ pickSavePath: () => Promise.resolve(null) });
+      await cancelled.exports.exportScores([{ id: 'x', title: 'X' }]);
+      expect(cancelled.mock.count('getScore')).toBe(0);
+    });
+
+    it('reports a score that cannot be read', async () => {
+      const { mock, exports, toast } = setup({ getScore: () => Promise.reject('gone') });
+      await exports.exportScores([{ id: 'x', title: 'X' }, { id: 'y', title: 'Y' }]);
+      expect(mock.count('exportScorePdf')).toBe(0);
+      expect(toast.toasts().at(-1)?.kind).toBe('error');
+      expect(exports.isBusy(SCORES_PDF_KEY)).toBe(false);
+    });
+
+    it('writes the scores of a piece in order, named after the piece', async () => {
+      const { mock, exports, toast } = setup();
+      const piece = { id: 'p1', title: 'Album: 1', composer: 'Schumann', notes: 'Slowly', archived: false, created_at: '', updated_at: '' };
+      await exports.exportPiece(piece, ['b', 'a', 'c']);
+      expect(mock.argsOf('pickSavePath')?.[1]).toBe('Album 1.pdf');
+      expect(mock.calls.filter((c) => c.cmd === 'getScore').map((c) => c.args[0])).toEqual(['b', 'a', 'c']);
+      const [dest, data] = mock.argsOf('exportScorePdf') as [string, string];
+      expect(dest).toBe('/out/Album 1.pdf');
+      expect(atob(data).startsWith('%PDF-')).toBe(true);
+      expect(toast.toasts().at(-1)?.message).toContain('/out/Album 1.pdf');
+      expect(exports.isBusy(piecePdfKey('p1'))).toBe(false);
+    });
+
+    it('asks for nothing when the piece has no scores to print', async () => {
+      const { mock, exports } = setup();
+      await exports.exportPiece({ id: 'p1', title: 'Empty', composer: '', notes: '', archived: false, created_at: '', updated_at: '' }, []);
+      expect(mock.count('pickSavePath')).toBe(0);
+    });
+
+    it('reports a failure to write', async () => {
+      const { exports, toast } = setup({ exportScorePdf: () => Promise.reject('disk full') });
+      await exports.exportScore(score);
+      expect(toast.toasts().at(-1)?.kind).toBe('error');
+      expect(toast.toasts().at(-1)?.message).toContain('disk full');
+      expect(exports.isBusy(scorePdfKey('sc1'))).toBe(false);
+    });
+  });
+});
+
+describe('bytesToBase64', () => {
+  it('encodes small and large inputs alike', () => {
+    expect(bytesToBase64(new Uint8Array([72, 105]))).toBe('SGk=');
+    const big = new Uint8Array(100_000).fill(65);
+    expect(atob(bytesToBase64(big))).toBe('A'.repeat(100_000));
   });
 });

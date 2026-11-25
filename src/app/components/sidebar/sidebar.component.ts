@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { ChallengeStore } from '../../core/challenge.store';
+import { ConfirmService } from '../../core/confirm.service';
 import { formatMs } from '../../core/format';
 import { I18nService } from '../../core/i18n/i18n.service';
 import { PluralPipe, TranslatePipe } from '../../core/i18n/translate.pipe';
@@ -40,6 +41,7 @@ export class SidebarComponent {
   protected readonly vault = inject(VaultStore);
   protected readonly api = inject(TauriApiService);
   private readonly toast = inject(ToastService);
+  private readonly confirm = inject(ConfirmService);
   protected readonly i18n = inject(I18nService);
   protected readonly nav = inject(NavStore);
   protected readonly pieces = inject(PieceStore);
@@ -113,6 +115,34 @@ export class SidebarComponent {
   protected async newPiece(): Promise<void> {
     const piece = await this.pieces.create(this.i18n.t('pieces.defaultTitle'));
     if (piece) await this.pieces.select(piece.id);
+  }
+
+  /** A new collection, chosen as the filter so its name can be set right away. */
+  protected async newCollection(): Promise<void> {
+    const created = await this.pieces.createCollection(this.i18n.t('collections.defaultName'));
+    if (created) {
+      this.pieces.collectionFilter.set(created.id);
+      setTimeout(() => document.getElementById('collection-name')?.focus());
+    }
+  }
+
+  protected renameCollection(input: HTMLInputElement): void {
+    const c = this.pieces.activeCollection();
+    if (!c) return;
+    const name = input.value.trim();
+    if (!name) input.value = c.name;
+    else if (name !== c.name) void this.pieces.renameCollection(c.id, name);
+  }
+
+  protected async deleteCollection(): Promise<void> {
+    const c = this.pieces.activeCollection();
+    if (!c) return;
+    const ok = await this.confirm.ask({
+      title: this.i18n.t('collections.delete'),
+      message: this.i18n.t('collections.deleteMessage', { name: c.name }),
+      confirmLabel: this.i18n.t('collections.delete'),
+    });
+    if (ok) await this.pieces.removeCollection(c.id);
   }
 
   protected newSession(): void {

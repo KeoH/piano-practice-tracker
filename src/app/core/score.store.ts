@@ -5,7 +5,9 @@ import type { Accidental, ScoreDto, ScoreSummaryDto } from './models';
 import type { NoteKind } from './music';
 import { ChallengeStore } from './challenge.store';
 import { CompositionStore } from './composition.store';
+import { ExportService, SCORES_PDF_KEY } from './export.service';
 import { NavStore } from './nav.store';
+import { PieceStore } from './piece.store';
 import { PlaybackStore } from './playback.store';
 import {
   type NoteMove,
@@ -19,6 +21,7 @@ import {
   notatedValue,
   msToTicks,
   pageTick,
+  performedTick,
   pitchAt,
   place,
   removeNote,
@@ -28,11 +31,13 @@ import {
   setBpm,
   setNoteDuration,
   setPickup,
+  setRepeatBar,
   setTimeSignature,
   shiftStep,
   summarizeScore,
   toggleAccidental,
-  toggleRepeat,
+  toggleSlur,
+  toggleSlurFrom,
   toggleTie,
   validateScore,
 } from './score';
@@ -69,6 +74,8 @@ export class ScoreStore {
   private readonly compositions = inject(CompositionStore);
   private readonly challenges = inject(ChallengeStore);
   private readonly nav = inject(NavStore);
+  private readonly pieces = inject(PieceStore);
+  private readonly exporter = inject(ExportService);
 
   readonly scores = signal<ScoreSummaryDto[]>([]);
   readonly listLoading = signal(false);
@@ -90,6 +97,14 @@ export class ScoreStore {
   readonly zoom = signal<number>(DEFAULT_ZOOM);
   /** Value being dragged from the palette (the staff listens for the drop). */
   readonly paletteDrag = signal<PaletteDrag | null>(null);
+  /**
+   * The repeat sign works like a note value: it is dragged from the palette (or chosen, then a click on the
+   * staff puts it) onto the bar line it goes on. `repeatDrag` is true while it is being dragged, from the
+   * palette or from where it is, and `repeatTool` while it is chosen. `repeatSelected` is the sign on the staff.
+   */
+  readonly repeatDrag = signal(false);
+  readonly repeatTool = signal(false);
+  readonly repeatSelected = signal(false);
   /** Spelling of the black keys that are placed next (and of the selected note when it changes). */
   readonly accidental = signal<Accidental | null>(null);
 
@@ -115,6 +130,11 @@ export class ScoreStore {
     return d ? pageTick(d, msToTicks(this.position(), d.bpm)) : 0;
   });
   readonly selectedNote = computed(() => findNote(this.doc(), this.selectedNoteId()));
+  /** Whether a slur starts at the selected note (the slur key then takes it away). */
+  readonly selectedStartsSlur = computed(() => {
+    const id = this.selectedNoteId();
+    return !!id && !!this.doc()?.slurs.some((sl) => sl.from === id);
+  });
   /** Length of the note that is placed next. */
   readonly toolTicks = computed(() => durationTicks(this.kind(), this.dotted() && canDot(this.kind())));
   readonly filteredScores = computed(() => {
@@ -122,6 +142,17 @@ export class ScoreStore {
     const list = this.scores();
     return q ? list.filter((s) => s.title.toLowerCase().includes(q)) : list;
   });
+
+  /** The list is in "pick scores for a PDF" mode: a click on a row marks it instead of opening it. */
+  readonly picking = signal(false);
+  /** Ids of the scores picked for the PDF, in the order they were picked (that is the order of the PDF). */
+  private readonly pickedIds = signal<readonly string[]>([]);
+  /** The picked scores that still exist, in order, whether the search filter hides them or not. */
+  readonly picked = computed(() => {
+    const byId = new Map(this.scores().map((s) => [s.id, s]));
+    return this.pickedIds().flatMap((id) => byId.get(id) ?? []);
+  });
+  readonly exportingPicked = computed(() => this.exporter.isBusy(SCORES_PDF_KEY));
 
   constructor() {
     this.playback.registerScoreSource((id) => {
@@ -133,6 +164,8 @@ export class ScoreStore {
   // ---- List and document ----
 
   reset(): void {
+    this.picking.set(false);
+    this.pickedIds.set([]);
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = null;
     this.dirty = false;
@@ -141,6 +174,7 @@ export class ScoreStore {
     this.selectedId.set(null);
     this.doc.set(null);
     this.selectedNoteId.set(null);
+    this.clearRepeat();
     this.clearHistory();
   }
 
@@ -162,8 +196,36 @@ export class ScoreStore {
     this.selectedId.set(id);
     this.doc.set(null);
     this.selectedNoteId.set(null);
+    this.clearRepeat();
     this.clearHistory();
     if (id) await this.reload();
+  }
+
+  /** Turns the "pick scores for a PDF" mode on or off. Leaving it forgets the picks. */
+  setPicking(on: boolean): void {
+    this.picking.set(on);
+    if (!on) this.pickedIds.set([]);
+  }
+
+  /** Position (1-based) of a score among the picked ones, or 0. */
+  pickedPosition(id: string): number {
+    return this.pickedIds().indexOf(id) + 1;
+  }
+
+  /** Picks a score (it goes last) or drops it. Scores without notes have nothing to print and are ignored. */
+  togglePicked(id: string): void {
+    const s = this.scores().find((x) => x.id === id);
+    if (!s) return;
+    if (this.pickedIds().includes(id)) this.pickedIds.update((ids) => ids.filter((x) => x !== id));
+    else if (s.note_count > 0) this.pickedIds.update((ids) => [...ids, id]);
+  }
+
+  /** Writes the picked scores into one PDF. Pending edits are saved first, because the scores are read from the vault. */
+  async exportPicked(): Promise<void> {
+    const items = this.picked().map(({ id, title }) => ({ id, title }));
+    if (!items.length) return;
+    await this.flush();
+    await this.exporter.exportScores(items);
   }
 
   /** Reloads the open score from the vault and forgets the undo history. */
@@ -212,10 +274,26 @@ export class ScoreStore {
       await this.api.deleteScore(id);
       if (this.selectedId() === id) await this.select(null);
       await this.refreshList();
+      // The repertoire shows the scores of its pieces.
+      void this.pieces.refreshList();
+      if (this.pieces.selectedId()) void this.pieces.reloadDetail();
       this.toast.success(this.i18n.t('score.deleted'));
     } catch (err) {
       this.toast.error(err, this.i18n.t('score.errors.delete'));
     }
+  }
+
+  /** Files the score under a piece of the repertoire (`null` takes it out). */
+  async assignPiece(scoreId: string, pieceId: string | null): Promise<void> {
+    const updated = await this.pieces.assignScore(scoreId, pieceId);
+    if (updated) this.scores.update((l) => l.map((s) => (s.id === scoreId ? { ...s, piece_id: updated.piece_id } : s)));
+  }
+
+  /** "Add to repertoire": a new piece named after the score, with the score in it. */
+  async addToRepertoire(scoreId: string): Promise<void> {
+    const title = this.scores().find((s) => s.id === scoreId)?.title || this.doc()?.title || '';
+    const piece = await this.pieces.createFromScore(scoreId, title);
+    if (piece) this.scores.update((l) => l.map((s) => (s.id === scoreId ? { ...s, piece_id: piece.id } : s)));
   }
 
   /** Sentence for the delete confirmation when compositions use the score: they lose those clips. */
@@ -281,6 +359,7 @@ export class ScoreStore {
 
   private restore(d: ScoreDto): void {
     if (!findNote(d, this.selectedNoteId())) this.selectedNoteId.set(null);
+    if (d.repeat_bar === null) this.repeatSelected.set(false);
     this.commit(d);
   }
 
@@ -318,7 +397,11 @@ export class ScoreStore {
       // Edits made meanwhile win; they will be saved next. The stored copy only adds the fragment id.
       if (this.doc() === sent) this.doc.set(saved);
       else if (this.doc()?.id === saved.id) this.doc.update((d) => (d ? { ...d, fragment_id: saved.fragment_id } : d));
-      this.scores.update((list) => [summarizeScore(saved), ...list.filter((s) => s.id !== saved.id)]);
+      // The piece is set from the repertoire, not by the editor: the entry keeps the one it had.
+      this.scores.update((list) => [
+        summarizeScore(saved, list.find((s) => s.id === saved.id)?.piece_id ?? null),
+        ...list.filter((s) => s.id !== saved.id),
+      ]);
     } catch (err) {
       this.toast.error(err, this.i18n.t('score.errors.save'));
       if (this.selectedId() === sent.id) {
@@ -400,6 +483,7 @@ export class ScoreStore {
 
   /** Selects a note (or none) the way a click does: the palette shows its value and edits it. */
   selectNote(id: string | null): void {
+    if (id !== null) this.repeatSelected.set(false);
     this.selectedNoteId.set(id);
     this.editing.set(id !== null);
     this.syncTool();
@@ -462,6 +546,10 @@ export class ScoreStore {
   }
 
   removeSelected(): void {
+    if (this.repeatSelected()) {
+      this.removeRepeat();
+      return;
+    }
     const id = this.selectedNoteId();
     if (id && this.update((d) => removeNote(d, id))) this.selectedNoteId.set(null);
   }
@@ -487,9 +575,58 @@ export class ScoreStore {
     if (!this.update((d) => toggleTie(d, id, newId()))) this.toast.warning(this.i18n.t('score.noRoomTie'));
   }
 
-  /** Closes the score with a repeat sign, so it is played twice from the start, or takes it away. */
-  toggleRepeat(): void {
-    this.update((d) => toggleRepeat(d));
+  /**
+   * Puts the repeat sign at the end of a bar (0 is the first one), so after it the score goes back to the
+   * start, or takes it away with `null`. A sign put on the staff is selected, like a note that was just placed.
+   */
+  setRepeatBar(bar: number | null): void {
+    this.update((d) => setRepeatBar(d, bar));
+    this.repeatTool.set(false);
+    this.repeatSelected.set(bar !== null && this.doc()?.repeat_bar === bar);
+    if (this.repeatSelected()) this.selectedNoteId.set(null);
+  }
+
+  /** Chooses the repeat sign as the thing the next click on the staff puts (or lets it go). */
+  toggleRepeatTool(): void {
+    this.repeatTool.update((v) => !v);
+    if (this.repeatTool()) {
+      this.selectedNoteId.set(null);
+      this.repeatSelected.set(false);
+    }
+  }
+
+  /** Selects the sign that is on the staff. */
+  selectRepeat(): void {
+    if (this.doc()?.repeat_bar == null) return;
+    this.selectedNoteId.set(null);
+    this.repeatTool.set(false);
+    this.repeatSelected.set(true);
+  }
+
+  /** Takes the repeat sign away. */
+  removeRepeat(): void {
+    this.setRepeatBar(null);
+  }
+
+  /** Lets go of the repeat sign: the tool, the drag and the selection (Esc). */
+  clearRepeat(): void {
+    this.repeatTool.set(false);
+    this.repeatDrag.set(false);
+    this.repeatSelected.set(false);
+  }
+
+  /** The slur key: slurs the selected note to the next one, or takes away the slur that starts at it. */
+  toggleSlurSelected(): void {
+    const id = this.selectedNoteId();
+    if (!id) return;
+    if (!this.update((d) => toggleSlurFrom(d, id, newId()))) this.toast.warning(this.i18n.t('score.cantSlur'));
+  }
+
+  /** Shift+click: slurs the selected note to `id` (a note of the same hand), or takes that slur away. */
+  slurSelectedTo(id: string): void {
+    const from = this.selectedNoteId();
+    if (!from || from === id) return;
+    if (!this.update((d) => toggleSlur(d, from, id, newId()))) this.toast.warning(this.i18n.t('score.cantSlurHand'));
   }
 
   /** Makes the first bar shorter (an anacrusis) or whole again (0 ticks). */
@@ -537,7 +674,7 @@ export class ScoreStore {
     const key = this.key();
     const d = this.doc();
     if (!key || !d) return;
-    const ms = Math.round((Math.max(0, Math.min(tick, scoreTicks(d))) * 60_000) / (480 * d.bpm));
+    const ms = Math.round((performedTick(d, Math.max(0, Math.min(tick, scoreTicks(d)))) * 60_000) / (480 * d.bpm));
     await this.playback.seek(key, ms);
   }
 

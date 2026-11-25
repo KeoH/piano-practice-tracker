@@ -161,6 +161,8 @@ export interface PieceSummaryDto {
   last_practiced: string | null;
   /** Passages already used in the piece's takes (sorted, without the empty one). */
   passages: string[];
+  /** Scores of the staff editor filed under the piece. */
+  score_count: number;
 }
 
 export interface PieceTakeDto {
@@ -173,6 +175,18 @@ export interface PieceDetailDto {
   piece: PieceDto;
   /** Sorted by passage and then chronologically. */
   takes: PieceTakeDto[];
+  /** Scores filed under the piece (its sheet music), by title. They are not takes. */
+  scores: ScoreSummaryDto[];
+}
+
+/** A named group of pieces of the repertoire. A piece can be in several collections. */
+export interface CollectionDto {
+  id: string;
+  name: string;
+  /** The pieces in it (active and archived), by title. */
+  piece_ids: string[];
+  created_at: string;
+  updated_at: string;
 }
 
 /** A composition in the list of the composer. */
@@ -261,6 +275,13 @@ export interface ScoreNoteDto {
   tie: boolean;
 }
 
+/** A slur over the notes of one staff, from the note `from` to the note `to` (which starts later). */
+export interface ScoreSlurDto {
+  id: string;
+  from: string;
+  to: string;
+}
+
 /** A piece written on a grand staff: treble clef (right hand) and bass clef (left hand). */
 export interface ScoreDto {
   id: string;
@@ -273,10 +294,15 @@ export interface ScoreDto {
   bars: number;
   /** Length of a shorter first bar (a pickup or anacrusis), in ticks; 0 = the first bar is whole. */
   pickup_ticks: number;
-  /** A repeat sign closes the score: it is played twice, going back to the start. */
-  repeat: boolean;
+  /**
+   * Index of the bar that ends with a repeat sign (0 is the first bar, the pickup bar if there is one): after
+   * it the score goes back to the start and plays through again. `null` = no repeat.
+   */
+  repeat_bar: number | null;
   treble: ScoreNoteDto[];
   bass: ScoreNoteDto[];
+  /** Slurs (phrasing curves). Notation only: they do not change what is played. */
+  slurs: ScoreSlurDto[];
   /** The library fragment generated from the score (`null` until it is first saved). */
   fragment_id: string | null;
   created_at: string;
@@ -319,6 +345,8 @@ export interface ScoreSummaryDto {
   note_count: number;
   duration_ms: number;
   fragment_id: string | null;
+  /** Piece of the repertoire it is filed under. Not part of `ScoreDto`: the editor never writes it. */
+  piece_id: string | null;
   updated_at: string;
 }
 
