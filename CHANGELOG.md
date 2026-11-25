@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/KeoH/piano-practice-tracker/compare/v0.8.1...v0.9.0) (2026-11-25)
+
+
+### Features
+
+* Export repertoire ([11725b3](https://github.com/KeoH/piano-practice-tracker/commit/11725b3d7e8cc45052c2529bc06183051e6d7ada))
+* export scores as PDF with beamed notes and corrected clef positions ([589b6df](https://github.com/KeoH/piano-practice-tracker/commit/589b6dfef0b372b2893e18d4ee57576e39fdfde8))
+
 ## [0.8.1](https://github.com/KeoH/piano-practice-tracker/compare/v0.8.0...v0.8.1) (2026-11-20)
 
 
